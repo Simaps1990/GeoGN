@@ -208,7 +208,6 @@ export default function CurrentMissionPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-base font-semibold text-gray-900">{m.title}</div>
-                    <div className="mt-1 text-xs text-gray-500">statut: {m.status}</div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <button

@@ -147,6 +147,16 @@ export default function MapLibreMap() {
     };
   }, [selectedMissionId]);
 
+  // Keep otherColorsRef in sync when memberColors change so we always use
+  // the mission-assigned color (e.g. admin in green) instead of an older fallback.
+  useEffect(() => {
+    for (const [userId, color] of Object.entries(memberColors)) {
+      if (color) {
+        otherColorsRef.current[userId] = color;
+      }
+    }
+  }, [memberColors]);
+
   // Load previously saved traces for this mission (self + others) once per mission.
   useEffect(() => {
     if (!selectedMissionId) {
@@ -889,16 +899,14 @@ export default function MapLibreMap() {
       if (user?.id && msg.userId === user.id) return;
 
       const palette = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'];
-      if (!otherColorsRef.current[msg.userId]) {
-        // Prefer the mission member color assigned by the admin when available.
-        const memberColor = memberColors[msg.userId];
-        if (memberColor) {
-          otherColorsRef.current[msg.userId] = memberColor;
-        } else {
-          const used = new Set(Object.values(otherColorsRef.current));
-          const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
-          otherColorsRef.current[msg.userId] = next;
-        }
+      // Always prefer the mission member color assigned by the admin when available.
+      const memberColor = memberColors[msg.userId];
+      if (memberColor) {
+        otherColorsRef.current[msg.userId] = memberColor;
+      } else if (!otherColorsRef.current[msg.userId]) {
+        const used = new Set(Object.values(otherColorsRef.current));
+        const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
+        otherColorsRef.current[msg.userId] = next;
       }
       const now = typeof msg.t === 'number' ? msg.t : Date.now();
       const traces = otherTracesRef.current[msg.userId] ?? [];
@@ -1272,6 +1280,38 @@ export default function MapLibreMap() {
   return (
     <div className="relative w-full h-screen">
       <div ref={mapRef} className="w-full h-full" />
+
+      {selectedPoi && (
+        <div className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/25 backdrop-blur-sm">
+          <div className="mx-6 max-w-md w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl flex items-start gap-3">
+            <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
+              {(() => {
+                const Icon = getPoiIconComponent(selectedPoi.icon);
+                return (
+                  <div className="h-9 w-9 rounded-full border-2 border-white shadow" style={{ backgroundColor: selectedPoi.color || '#f97316' }}>
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Icon size={16} color="#ffffff" strokeWidth={2.5} />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <div className="truncate text-sm font-semibold text-gray-900">{selectedPoi.title}</div>
+              <div className="mt-1 text-xs text-gray-700 break-words">
+                {selectedPoi.comment || 'Aucune description'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedPoi(null)}
+              className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-3">
         <button
