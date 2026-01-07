@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { listPois, type ApiPoi } from '../lib/api';
+import { deletePoi, listPois, updatePoi, type ApiPoi } from '../lib/api';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!missionId) return;
@@ -45,6 +47,56 @@ export default function MissionPoisPage() {
                 <div className="text-xs font-mono text-gray-600">{p.color}</div>
               </div>
               <div className="mt-2 text-xs text-gray-600">{p.comment}</div>
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  disabled={!missionId || busyId === p.id}
+                  onClick={async () => {
+                    if (!missionId) return;
+                    const title = window.prompt('Titre POI', p.title);
+                    if (title === null) return;
+                    const comment = window.prompt('Commentaire', p.comment);
+                    if (comment === null) return;
+                    const color = window.prompt('Couleur (hex)', p.color);
+                    if (color === null) return;
+
+                    setBusyId(p.id);
+                    try {
+                      const updated = await updatePoi(missionId, p.id, {
+                        title: title.trim(),
+                        comment: comment.trim(),
+                        color: color.trim(),
+                      });
+                      setPois((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
+                    } finally {
+                      setBusyId(null);
+                    }
+                  }}
+                  className="h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Modifier
+                </button>
+                <button
+                  type="button"
+                  disabled={!missionId || busyId === p.id}
+                  onClick={async () => {
+                    if (!missionId) return;
+                    const ok = window.confirm('Supprimer ce POI ?');
+                    if (!ok) return;
+                    setBusyId(p.id);
+                    try {
+                      await deletePoi(missionId, p.id);
+                      setPois((prev) => prev.filter((x) => x.id !== p.id));
+                    } finally {
+                      setBusyId(null);
+                    }
+                  }}
+                  className="h-10 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                >
+                  Supprimer
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -106,13 +106,25 @@ export function clearTokens() {
 
 async function rawFetch(path: string, init?: RequestInit) {
   const url = `${getApiBaseUrl()}${path}`;
-  return fetch(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (e: any) {
+    const name = e?.name;
+    const message = e?.message;
+    console.warn('[api] fetch failed', { url, name, message });
+    throw e;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 async function refreshTokens() {
@@ -394,6 +406,22 @@ export async function deletePoi(missionId: string, poiId: string) {
   return (await res.json()) as { ok: true };
 }
 
+export async function updatePoi(
+  missionId: string,
+  poiId: string,
+  input: Partial<{ type: ApiPoiType; title: string; icon: string; color: string; comment: string; lng: number; lat: number }>
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/pois/${encodeURIComponent(poiId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_POI_FAILED');
+  }
+  return (await res.json()) as ApiPoi;
+}
+
 export async function deleteZone(missionId: string, zoneId: string) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones/${encodeURIComponent(zoneId)}`, {
     method: 'DELETE',
@@ -403,4 +431,20 @@ export async function deleteZone(missionId: string, zoneId: string) {
     throw new Error(body?.error ?? 'DELETE_ZONE_FAILED');
   }
   return (await res.json()) as { ok: true };
+}
+
+export async function updateZone(
+  missionId: string,
+  zoneId: string,
+  input: Partial<{ title: string; color: string; type: 'circle' | 'polygon'; circle: any; polygon: any; sectors: any }>
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones/${encodeURIComponent(zoneId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_ZONE_FAILED');
+  }
+  return (await res.json()) as ApiZone;
 }

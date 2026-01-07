@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ApiUser } from '../lib/api';
-import { clearTokens, login, me, register } from '../lib/api';
+import { clearTokens, getApiBaseUrl, login, me, register } from '../lib/api';
 
 interface AuthContextType {
   user: ApiUser | null;
@@ -18,10 +18,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      const startedAt = Date.now();
+      // Safe diagnostics (no secrets): helps debug mobile/prod networking issues.
+      console.log('[auth] bootstrap start', { apiBaseUrl: getApiBaseUrl() });
       try {
         const current = await me();
+        console.log('[auth] bootstrap me() ok', {
+          tookMs: Date.now() - startedAt,
+          hasUser: Boolean(current),
+        });
         setUser(current);
+      } catch (e: any) {
+        console.warn('[auth] bootstrap me() failed', {
+          tookMs: Date.now() - startedAt,
+          message: e?.message,
+        });
       } finally {
+        console.log('[auth] bootstrap done', { tookMs: Date.now() - startedAt });
         setLoading(false);
       }
     })();

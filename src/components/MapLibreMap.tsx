@@ -86,6 +86,26 @@ export default function MapLibreMap() {
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
 
+  const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!mapViewKey) return;
+
+    const saved = localStorage.getItem(mapViewKey);
+    if (!saved) return;
+    try {
+      const v = JSON.parse(saved) as any;
+      if (v && typeof v.lng === 'number' && typeof v.lat === 'number') {
+        map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom ?? map.getZoom(), bearing: v.bearing ?? 0, pitch: v.pitch ?? 0 });
+      }
+    } catch {
+      // ignore
+    }
+  }, [mapReady, mapViewKey]);
+
   function centerOnMe() {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -342,6 +362,20 @@ export default function MapLibreMap() {
     map.on('load', () => {
       setMapReady(true);
 
+      if (mapViewKey) {
+        const saved = localStorage.getItem(mapViewKey);
+        if (saved) {
+          try {
+            const v = JSON.parse(saved) as any;
+            if (v && typeof v.lng === 'number' && typeof v.lat === 'number') {
+              map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom ?? map.getZoom(), bearing: v.bearing ?? 0, pitch: v.pitch ?? 0 });
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       map.addSource('me', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -436,6 +470,22 @@ export default function MapLibreMap() {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+
+      map.addSource('draft-poi', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'draft-poi',
+        type: 'circle',
+        source: 'draft-poi',
+        paint: {
+          'circle-radius': 9,
+          'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
       map.addLayer({
         id: 'draft-zone-fill',
         type: 'fill',
@@ -479,6 +529,54 @@ export default function MapLibreMap() {
       setMapReady(false);
     };
   }, [styles, styleMode]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!mapViewKey) return;
+
+    const save = () => {
+      const c = map.getCenter();
+      const payload = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+      localStorage.setItem(mapViewKey, JSON.stringify(payload));
+    };
+
+    map.on('moveend', save);
+    map.on('zoomend', save);
+    map.on('rotateend', save);
+    map.on('pitchend', save);
+
+    return () => {
+      map.off('moveend', save);
+      map.off('zoomend', save);
+      map.off('rotateend', save);
+      map.off('pitchend', save);
+    };
+  }, [mapReady, mapViewKey]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    const src = map.getSource('draft-poi') as GeoJSONSource | undefined;
+    if (!src) return;
+
+    if (activeTool === 'poi' && draftLngLat) {
+      src.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: { color: draftColor },
+            geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+          },
+        ],
+      } as any);
+    } else {
+      src.setData({ type: 'FeatureCollection', features: [] } as any);
+    }
+  }, [activeTool, draftLngLat, draftColor, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
