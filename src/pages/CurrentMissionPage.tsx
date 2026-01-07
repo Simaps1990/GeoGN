@@ -8,7 +8,6 @@ import {
   getMission,
   listInvites,
   listMissions,
-  sendMissionInvite,
   updateMission,
   type ApiInvite,
   type ApiMission,
@@ -32,10 +31,6 @@ export default function CurrentMissionPage() {
   const [invites, setInvites] = useState<ApiInvite[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(true);
   const [invitesBusyToken, setInvitesBusyToken] = useState<string | null>(null);
-
-  const [inviteAppUserId, setInviteAppUserId] = useState('');
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
 
   const [retentionSeconds, setRetentionSeconds] = useState<number>(3600);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -135,23 +130,6 @@ export default function CurrentMissionPage() {
     }
   }
 
-  async function onSendInvite() {
-    if (!selectedMissionId) return;
-    const v = inviteAppUserId.trim();
-    if (!v) return;
-
-    setInviteBusy(true);
-    setInviteMsg(null);
-    try {
-      await sendMissionInvite(selectedMissionId, v);
-      setInviteAppUserId('');
-      setInviteMsg('Invitation envoyée');
-    } catch (e: any) {
-      setInviteMsg(e?.message ?? 'Erreur');
-    } finally {
-      setInviteBusy(false);
-    }
-  }
 
   async function onSaveSettings() {
     if (!selectedMissionId) return;
@@ -303,30 +281,7 @@ export default function CurrentMissionPage() {
             </button>
           </div>
 
-          <div className="mt-4 rounded-2xl border p-3">
-            <div className="text-xs font-semibold text-gray-700">Inviter un membre (appUserId)</div>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={inviteAppUserId}
-                onChange={(e) => setInviteAppUserId(e.target.value)}
-                placeholder="ex: 7F3K9Q"
-                className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
-              />
-              <button
-                type="button"
-                disabled={inviteBusy || !inviteAppUserId.trim()}
-                onClick={() => void onSendInvite()}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
-              >
-                Inviter
-              </button>
-            </div>
-            {inviteMsg ? (
-              <div className={`mt-3 text-sm ${inviteMsg === 'Invitation envoyée' ? 'text-green-700' : 'text-red-700'}`}>
-                {inviteMsg}
-              </div>
-            ) : null}
-          </div>
+          
         </div>
       ) : null}
     </div>

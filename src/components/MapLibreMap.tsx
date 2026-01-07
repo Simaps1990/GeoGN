@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Circle, Crosshair, Layers, MapPin, Pencil, X } from 'lucide-react';
+import { AlertTriangle, Circle, Crosshair, Flag, HelpCircle, Layers, MapPin, Pencil, ShieldAlert, Target, X } from 'lucide-react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
 import { getSocket } from '../lib/socket';
@@ -56,6 +57,8 @@ export default function MapLibreMap() {
   const watchIdRef = useRef<number | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
 
+  const poiMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+
   const polygonDraftRef = useRef<[number, number][]>([]);
 
   const [styleMode, setStyleMode] = useState<MapStyleMode>('streets');
@@ -79,6 +82,27 @@ export default function MapLibreMap() {
   const [draftColor, setDraftColor] = useState('#f97316');
   const [draftIcon, setDraftIcon] = useState('marker');
   const [draftPoiType, setDraftPoiType] = useState<ApiPoiType>('doute');
+
+  const poiColorOptions = useMemo(
+    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
+    []
+  );
+
+  const poiIconOptions = useMemo(
+    () => [
+      { id: 'marker', Icon: MapPin, label: 'Marker' },
+      { id: 'target', Icon: Target, label: 'Target' },
+      { id: 'flag', Icon: Flag, label: 'Flag' },
+      { id: 'alert', Icon: AlertTriangle, label: 'Alert' },
+      { id: 'danger', Icon: ShieldAlert, label: 'Danger' },
+      { id: 'help', Icon: HelpCircle, label: 'Help' },
+    ],
+    []
+  );
+
+  function getPoiIconComponent(iconId: string) {
+    return poiIconOptions.find((x) => x.id === iconId)?.Icon ?? MapPin;
+  }
 
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -440,6 +464,7 @@ export default function MapLibreMap() {
           'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
+          'circle-opacity': 0,
         },
       });
 
@@ -766,6 +791,53 @@ export default function MapLibreMap() {
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
+    if (!mapReady) return;
+
+    const markers = poiMarkersRef.current;
+    const nextIds = new Set(pois.map((p) => p.id));
+
+    // remove stale markers
+    for (const [id, marker] of markers.entries()) {
+      if (!nextIds.has(id)) {
+        marker.remove();
+        markers.delete(id);
+      }
+    }
+
+    for (const p of pois) {
+      const Icon = getPoiIconComponent(p.icon);
+      const svg = renderToStaticMarkup(<Icon size={16} color="#ffffff" strokeWidth={2.5} />);
+
+      const el = document.createElement('div');
+      el.style.width = '28px';
+      el.style.height = '28px';
+      el.style.borderRadius = '9999px';
+      el.style.background = p.color || '#f97316';
+      el.style.border = '2px solid #ffffff';
+      el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.25)';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.cursor = 'pointer';
+      el.innerHTML = svg;
+      el.title = p.title;
+
+      const existing = markers.get(p.id);
+      if (existing) {
+        existing.setLngLat([p.lng, p.lat]);
+        const oldEl = existing.getElement();
+        oldEl.replaceWith(el);
+        (existing as any)._element = el;
+      } else {
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lng, p.lat]).addTo(map);
+        markers.set(p.id, marker);
+      }
+    }
+  }, [pois, mapReady, poiIconOptions]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
     const src = map.getSource('zones') as GeoJSONSource | undefined;
     if (!src) return;
 
@@ -993,27 +1065,41 @@ export default function MapLibreMap() {
 
               {activeTool === 'poi' ? (
                 <>
-                  <select
-                    value={draftPoiType}
-                    onChange={(e) => setDraftPoiType(e.target.value as ApiPoiType)}
-                    className="h-11 w-full rounded-2xl border px-3 text-sm"
-                  >
-                    <option value="doute">Doute</option>
-                    <option value="danger">Danger</option>
-                    <option value="cible_trouvee">Cible trouvée</option>
-                    <option value="zone_a_verifier">Zone à vérifier</option>
-                    <option value="autre">Autre</option>
-                  </select>
-                  <select
-                    value={draftIcon}
-                    onChange={(e) => setDraftIcon(e.target.value)}
-                    className="h-11 w-full rounded-2xl border px-3 text-sm"
-                  >
-                    <option value="marker">Marker</option>
-                    <option value="warning">Warning</option>
-                    <option value="target">Target</option>
-                    <option value="eye">Eye</option>
-                  </select>
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Couleur</div>
+                    <div className="mt-2 grid grid-cols-8 gap-2">
+                      {poiColorOptions.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setDraftColor(c)}
+                          className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
+                          style={{ backgroundColor: c }}
+                          aria-label={c}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-2 text-xs font-mono text-gray-600">{draftColor}</div>
+                  </div>
+
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Icône</div>
+                    <div className="mt-2 grid grid-cols-6 gap-2">
+                      {poiIconOptions.map(({ id, Icon }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setDraftIcon(id)}
+                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border bg-white ${
+                            draftIcon === id ? 'ring-2 ring-blue-500' : 'hover:bg-gray-50'
+                          }`}
+                          aria-label={id}
+                        >
+                          <Icon size={18} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <input
                     value={draftComment}
                     onChange={(e) => setDraftComment(e.target.value)}
@@ -1038,13 +1124,24 @@ export default function MapLibreMap() {
                 </div>
               ) : null}
 
-              <div className="rounded-2xl border p-3">
-                <div className="text-xs font-semibold text-gray-700">Couleur</div>
-                <div className="mt-2 flex items-center gap-3">
-                  <input type="color" value={draftColor} onChange={(e) => setDraftColor(e.target.value)} />
-                  <div className="text-xs font-mono text-gray-600">{draftColor}</div>
+              {activeTool !== 'poi' ? (
+                <div className="rounded-2xl border p-3">
+                  <div className="text-xs font-semibold text-gray-700">Couleur</div>
+                  <div className="mt-2 grid grid-cols-8 gap-2">
+                    {poiColorOptions.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setDraftColor(c)}
+                        className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
+                        style={{ backgroundColor: c }}
+                        aria-label={c}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 text-xs font-mono text-gray-600">{draftColor}</div>
                 </div>
-              </div>
+              ) : null}
 
               {actionError ? <div className="text-sm text-red-600">{actionError}</div> : null}
 
