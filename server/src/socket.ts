@@ -96,6 +96,27 @@ export function setupSocket(app: FastifyInstance) {
       ack?.({ ok: true });
     });
 
+    socket.on('position:clear', async (_payload: any, ack?: (res: any) => void) => {
+      try {
+        const missionId = (socket as any as AuthedSocket).data.missionId;
+        if (!missionId) {
+          ack?.({ ok: false, error: 'NOT_IN_MISSION' });
+          return;
+        }
+
+        const ok = await requireMissionMember(userId, missionId);
+        if (!ok) {
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        io.to(`mission:${missionId}`).emit('position:clear', { missionId, userId });
+        ack?.({ ok: true });
+      } catch {
+        ack?.({ ok: false, error: 'POSITION_CLEAR_FAILED' });
+      }
+    });
+
     socket.on('position:update', async (payload: PositionUpdatePayload, ack?: (res: any) => void) => {
       try {
         const missionId = (socket as any as AuthedSocket).data.missionId;

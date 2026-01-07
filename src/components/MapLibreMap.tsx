@@ -68,6 +68,7 @@ export default function MapLibreMap() {
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: string }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
+  const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
@@ -115,6 +116,8 @@ export default function MapLibreMap() {
 
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
+  const tracesLoadedRef = useRef(false);
+
   useEffect(() => {
     // Load mission member colors so traces can match admin-assigned colors.
     if (!selectedMissionId) {
@@ -144,6 +147,56 @@ export default function MapLibreMap() {
     };
   }, [selectedMissionId]);
 
+  // Load previously saved traces for this mission (self + others) once per mission.
+  useEffect(() => {
+    if (!selectedMissionId) {
+      tracesLoadedRef.current = false;
+      return;
+    }
+
+    if (tracesLoadedRef.current) return;
+
+    const selfKey = user?.id ? `geogn.trace.self.${selectedMissionId}.${user.id}` : null;
+    const othersKey = `geogn.trace.others.${selectedMissionId}`;
+
+    try {
+      if (selfKey) {
+        const rawSelf = localStorage.getItem(selfKey);
+        if (rawSelf) {
+          const parsed = JSON.parse(rawSelf) as { lng: number; lat: number; t: number }[];
+          if (Array.isArray(parsed)) {
+            setTracePoints(parsed);
+            if (parsed.length) {
+              const last = parsed[parsed.length - 1];
+              setLastPos({ lng: last.lng, lat: last.lat });
+            }
+          }
+        }
+      }
+
+      const rawOthers = localStorage.getItem(othersKey);
+      if (rawOthers) {
+        const parsed = JSON.parse(rawOthers) as Record<string, { lng: number; lat: number; t: number }[]>;
+        if (parsed && typeof parsed === 'object') {
+          otherTracesRef.current = parsed;
+          const nextPositions: Record<string, { lng: number; lat: number; t: string }> = {};
+          for (const [userId, pts] of Object.entries(parsed)) {
+            if (!Array.isArray(pts) || pts.length === 0) continue;
+            const last = pts[pts.length - 1];
+            nextPositions[userId] = { lng: last.lng, lat: last.lat, t: String(last.t) };
+          }
+          if (Object.keys(nextPositions).length) {
+            setOtherPositions(nextPositions);
+          }
+        }
+      }
+    } catch {
+      // ignore malformed data
+    }
+
+    tracesLoadedRef.current = true;
+  }, [selectedMissionId, user?.id]);
+
   // Keep the current user's dot and personal trace in sync with their mission color.
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -160,6 +213,28 @@ export default function MapLibreMap() {
       map.setPaintProperty('trace-line', 'line-color', myColor);
     }
   }, [mapReady, user?.id, memberColors]);
+
+  // Persist self trace for this mission while the app is open.
+  useEffect(() => {
+    if (!selectedMissionId || !user?.id) return;
+    const key = `geogn.trace.self.${selectedMissionId}.${user.id}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(tracePoints));
+    } catch {
+      // storage might be full; ignore
+    }
+  }, [tracePoints, selectedMissionId, user?.id]);
+
+  // Persist others traces for this mission based on the ref, whenever positions update.
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const key = `geogn.trace.others.${selectedMissionId}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(otherTracesRef.current));
+    } catch {
+      // ignore storage errors
+    }
+  }, [otherPositions, selectedMissionId]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -232,6 +307,17 @@ export default function MapLibreMap() {
   function centerOnMe() {
     const map = mapInstanceRef.current;
     if (!map) return;
+    if (selectedMissionId) {
+      (async () => {
+        try {
+          const [p, z] = await Promise.all([listPois(selectedMissionId), listZones(selectedMissionId)]);
+          setPois(p);
+          setZones(z);
+        } catch {
+          // ignore refresh errors
+        }
+      })();
+    }
     if (lastPos) {
       map.easeTo({ center: [lastPos.lng, lastPos.lat], zoom: Math.max(map.getZoom(), 16) });
       return;
@@ -827,6 +913,18 @@ export default function MapLibreMap() {
 
     socket.on('position:update', onPos);
 
+    const onPosClear = (msg: any) => {
+      if (!msg?.userId) return;
+      setOtherPositions((prev) => {
+        const next = { ...prev };
+        delete next[msg.userId];
+        return next;
+      });
+      delete otherTracesRef.current[msg.userId];
+    };
+
+    socket.on('position:clear', onPosClear);
+
     const onPoiCreated = (msg: any) => {
       if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.poi?.id) return;
@@ -876,15 +974,16 @@ export default function MapLibreMap() {
 
     return () => {
       socket.off('position:update', onPos);
+      socket.off('position:clear', onPosClear);
       socket.off('poi:created', onPoiCreated);
       socket.off('poi:updated', onPoiUpdated);
       socket.off('poi:deleted', onPoiDeleted);
       socket.off('zone:created', onZoneCreated);
       socket.off('zone:updated', onZoneUpdated);
       socket.off('zone:deleted', onZoneDeleted);
-      socket.emit('mission:leave');
+      socket.emit('mission:leave', {});
     };
-  }, [selectedMissionId, user?.id]);
+  }, [selectedMissionId, user?.id, memberColors]);
 
   useEffect(() => {
     if (!selectedMissionId) return;
@@ -921,6 +1020,26 @@ export default function MapLibreMap() {
     }
 
     if (!trackingEnabled) {
+      // Tracking has been disabled: clear our own position and trace locally
+      setLastPos(null);
+      setTracePoints([]);
+
+      // Persist cleared self trace for this mission
+      if (selectedMissionId && user?.id) {
+        const key = `geogn.trace.self.${selectedMissionId}.${user.id}`;
+        try {
+          localStorage.setItem(key, JSON.stringify([]));
+        } catch {
+          // ignore storage errors
+        }
+      }
+
+      // Notify other clients so they remove our point and trace
+      const socket = socketRef.current;
+      if (socket) {
+        socket.emit('position:clear', {});
+      }
+
       return;
     }
 
@@ -1003,6 +1122,10 @@ export default function MapLibreMap() {
       // Slightly offset the icon inside the circle (mostly upward) without moving the marker anchor.
       el.innerHTML = `<div style="transform: translate(0px, -0.5px); display:flex; align-items:center; justify-content:center;">${svg}</div>`;
       el.title = p.title;
+
+      el.onclick = () => {
+        setSelectedPoi(p);
+      };
     };
 
     // remove stale markers

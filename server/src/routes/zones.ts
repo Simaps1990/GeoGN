@@ -89,7 +89,8 @@ export async function zonesRoutes(app: FastifyInstance) {
       }
 
       const mem = await getMembership(req.userId, missionId);
-      if (!mem || mem.role !== 'admin') {
+      // Allow any mission member (admin or member) to create zones
+      if (!mem) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
