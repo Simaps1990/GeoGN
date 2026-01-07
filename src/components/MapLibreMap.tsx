@@ -1,7 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, Check, CircleDot, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Navigation, NavigationOff, Skull, Target, Undo2, Waypoints, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  CircleDot,
+  CircleDotDashed,
+  Compass,
+  Crosshair,
+  Flag,
+  HelpCircle,
+  Layers,
+  MapPin,
+  Navigation,
+  NavigationOff,
+  Skull,
+  Tag,
+  Target,
+  Undo2,
+  Waypoints,
+  X,
+} from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
@@ -11,6 +30,8 @@ import { createPoi, createZone, listMissionMembers, listPois, listZones, type Ap
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
     version: 8,
+    // Required for text labels (symbol layers with text-field)
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
     sources: {
       raster: {
         type: 'raster',
@@ -63,6 +84,7 @@ export default function MapLibreMap() {
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
 
   const [memberColors, setMemberColors] = useState<Record<string, string>>({});
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
@@ -87,6 +109,8 @@ export default function MapLibreMap() {
   const [draftComment, setDraftComment] = useState('');
   const [draftColor, setDraftColor] = useState('#f97316');
   const [draftIcon, setDraftIcon] = useState('target');
+
+  const [labelsEnabled, setLabelsEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
     () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
@@ -119,9 +143,11 @@ export default function MapLibreMap() {
   const tracesLoadedRef = useRef(false);
 
   useEffect(() => {
-    // Load mission member colors so traces can match admin-assigned colors.
+    // Load mission member colors and names so traces can match admin-assigned colors
+    // and we can show labels (pseudos) above other users.
     if (!selectedMissionId) {
       setMemberColors({});
+      setMemberNames({});
       return;
     }
 
@@ -130,15 +156,21 @@ export default function MapLibreMap() {
       try {
         const members = await listMissionMembers(selectedMissionId);
         if (cancelled) return;
-        const map: Record<string, string> = {};
+        const colors: Record<string, string> = {};
+        const names: Record<string, string> = {};
         for (const m of members as ApiMissionMember[]) {
-          if (m.user?.id && m.color) {
-            map[m.user.id] = m.color;
+          if (m.user?.id) {
+            if (m.color) colors[m.user.id] = m.color;
+            if (m.user.displayName) names[m.user.id] = m.user.displayName;
           }
         }
-        setMemberColors(map);
+        setMemberColors(colors);
+        setMemberNames(names);
       } catch {
-        if (!cancelled) setMemberColors({});
+        if (!cancelled) {
+          setMemberColors({});
+          setMemberNames({});
+        }
       }
     })();
 
@@ -314,6 +346,43 @@ export default function MapLibreMap() {
     }
   }, [mapReady, mapViewKey]);
 
+  // Toggle visibility of labels (POIs + other users) based on labelsEnabled.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const othersLabels = map.getLayer('others-labels');
+    const poisLabels = map.getLayer('pois-labels');
+    const visibility = labelsEnabled ? 'visible' : 'none';
+
+    if (othersLabels) {
+      map.setLayoutProperty('others-labels', 'visibility', visibility);
+    }
+    if (poisLabels) {
+      map.setLayoutProperty('pois-labels', 'visibility', visibility);
+    }
+  }, [labelsEnabled, mapReady]);
+
+  // S'assurer que les labels (users + POI) sont au-dessus des tracés et des zones.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const labelLayers = ['others-labels', 'pois-labels'];
+    for (const id of labelLayers) {
+      if (map.getLayer(id)) {
+        // Appeler moveLayer sans beforeId place la couche tout en haut.
+        try {
+          map.moveLayer(id as any);
+        } catch {
+          // ignore move errors
+        }
+      }
+    }
+  }, [mapReady]);
+
   function centerOnMe() {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -427,20 +496,6 @@ export default function MapLibreMap() {
     if (!map.getSource('others')) {
       map.addSource('others', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
-    if (!map.getLayer('others-points')) {
-      map.addLayer({
-        id: 'others-points',
-        type: 'circle',
-        source: 'others',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': ['coalesce', ['get', 'color'], '#2563eb'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
-      });
-    }
-
     if (!map.getSource('others-traces')) {
       map.addSource('others-traces', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
@@ -453,6 +508,40 @@ export default function MapLibreMap() {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
           'line-width': 8,
           'line-opacity': 0.9,
+        },
+      });
+    }
+    if (!map.getLayer('others-points')) {
+      // Add points after traces so circles render above lines.
+      map.addLayer({
+        id: 'others-points',
+        type: 'circle',
+        source: 'others',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['coalesce', ['get', 'color'], '#2563eb'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+    }
+    if (!map.getLayer('others-labels')) {
+      // Labels (pseudos) au-dessus des points des autres utilisateurs.
+      map.addLayer({
+        id: 'others-labels',
+        type: 'symbol',
+        source: 'others',
+        layout: {
+          'text-field': ['coalesce', ['get', 'name'], ''],
+          'text-size': 13,
+          'text-offset': [0, -1.2],
+          'text-anchor': 'bottom',
+          'text-optional': true,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 2,
         },
       });
     }
@@ -471,6 +560,26 @@ export default function MapLibreMap() {
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
           'circle-opacity': 0,
+        },
+      });
+    }
+    if (!map.getLayer('pois-labels')) {
+      // Labels pour les POI, contrôlés en même temps que les labels utilisateurs.
+      map.addLayer({
+        id: 'pois-labels',
+        type: 'symbol',
+        source: 'pois',
+        layout: {
+          'text-field': ['coalesce', ['get', 'title'], ''],
+          'text-size': 13,
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
+          'text-optional': true,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 2,
         },
       });
     }
@@ -1199,7 +1308,12 @@ export default function MapLibreMap() {
 
     const features = Object.entries(otherPositions).map(([userId, p]) => ({
       type: 'Feature',
-      properties: { userId, t: p.t, color: otherColorsRef.current[userId] ?? '#2563eb' },
+      properties: {
+        userId,
+        t: p.t,
+        color: otherColorsRef.current[userId] ?? '#2563eb',
+        name: memberNames[userId] ?? '',
+      },
       geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
     }));
 
@@ -1207,7 +1321,7 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, mapReady]);
+  }, [otherPositions, memberNames, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1305,7 +1419,7 @@ export default function MapLibreMap() {
             <button
               type="button"
               onClick={() => setSelectedPoi(null)}
-              className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+              className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-700"
             >
               <X size={12} />
             </button>
@@ -1322,7 +1436,7 @@ export default function MapLibreMap() {
           {trackingEnabled ? (
             <Navigation className="mx-auto text-green-600" size={22} />
           ) : (
-            <NavigationOff className="mx-auto text-red-600" size={22} />
+            <NavigationOff className="mx-auto text-gray-600" size={22} />
           )}
         </button>
 
@@ -1332,7 +1446,7 @@ export default function MapLibreMap() {
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Centrer sur moi"
         >
-          <Crosshair className="mx-auto" size={22} />
+          <Crosshair className="mx-auto text-gray-600" size={22} />
         </button>
 
         <button
@@ -1341,7 +1455,19 @@ export default function MapLibreMap() {
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Changer le fond de carte"
         >
-          <Layers className="mx-auto" size={22} />
+          <Layers className="mx-auto text-gray-600" size={22} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setLabelsEnabled((v) => !v)}
+          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          title="Afficher les noms (POI + utilisateurs)"
+        >
+          <Tag
+            className={`mx-auto ${labelsEnabled ? 'text-green-600' : 'text-gray-600'}`}
+            size={20}
+          />
         </button>
 
         <button
@@ -1360,7 +1486,12 @@ export default function MapLibreMap() {
           }`}
           title="Ajouter un POI"
         >
-          <MapPin className="mx-auto" size={22} />
+          <MapPin
+            className={
+              activeTool === 'poi' ? 'mx-auto' : 'mx-auto text-gray-600'
+            }
+            size={22}
+          />
         </button>
 
         <div className="relative flex items-center justify-end">
@@ -1370,14 +1501,21 @@ export default function MapLibreMap() {
               setActionError(null);
               setZoneMenuOpen((v) => !v);
             }}
-            className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
+            className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
               activeTool === 'zone_circle' || activeTool === 'zone_polygon'
                 ? 'bg-blue-600 text-white'
-                : 'bg-white/90 hover:bg-white'
+                : 'bg-white/90 hover:bg-white text-gray-600'
             }`}
             title="Zones"
           >
-            <CircleDotDashed className="mx-auto" size={22} />
+            <CircleDotDashed
+              className={
+                activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                  ? 'mx-auto text-white'
+                  : 'mx-auto text-gray-600'
+              }
+              size={22}
+            />
           </button>
 
           {zoneMenuOpen ? (
@@ -1399,7 +1537,12 @@ export default function MapLibreMap() {
                 }`}
                 title="Zone cercle"
               >
-                <CircleDot size={20} />
+                <CircleDot
+                  className={
+                    activeTool === 'zone_circle' ? 'text-white' : 'text-gray-600'
+                  }
+                  size={20}
+                />
               </button>
               <button
                 type="button"
@@ -1418,7 +1561,12 @@ export default function MapLibreMap() {
                 }`}
                 title="Zone à la main"
               >
-                <Waypoints size={20} />
+                <Waypoints
+                  className={
+                    activeTool === 'zone_polygon' ? 'text-white' : 'text-gray-600'
+                  }
+                  size={20}
+                />
               </button>
             </div>
           ) : null}
@@ -1431,7 +1579,7 @@ export default function MapLibreMap() {
             className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
             title="Boussole"
           >
-            <Compass className="mx-auto" size={22} />
+            <Compass className="mx-auto text-gray-600" size={22} />
           </button>
         </div>
       </div>

@@ -31,7 +31,7 @@ export default function BottomTabs() {
                   }`
                 }
               >
-                <Icon size={20} />
+                <Icon size={24} />
                 <span className="text-[11px] font-medium leading-none">{label}</span>
               </NavLink>
             ))}

@@ -279,7 +279,7 @@ export async function getMission(missionId: string) {
 
 export async function updateMission(
   missionId: string,
-  input: { status?: 'draft' | 'active' | 'closed'; traceRetentionSeconds?: number }
+  input: { status?: 'draft' | 'active' | 'closed'; traceRetentionSeconds?: number; title?: string }
 ) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`, {
     method: 'PATCH',

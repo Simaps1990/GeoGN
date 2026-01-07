@@ -67,7 +67,7 @@ export default function MissionTabs() {
                   }`
                 }
               >
-                <Icon size={20} />
+                <Icon size={24} />
                 <span className="text-[11px] font-medium leading-none">{label}</span>
                 {label === 'Contacts' && pendingJoinCount > 0 ? (
                   <span className="absolute right-2 top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">

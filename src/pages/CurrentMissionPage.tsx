@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pencil, RefreshCcw, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
@@ -15,7 +15,9 @@ export default function CurrentMissionPage() {
   const [creatingMission, setCreatingMission] = useState(false);
 
   const [mission, setMission] = useState<ApiMission | null>(null);
+  const [missionTitle, setMissionTitle] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [joinMissionId, setJoinMissionId] = useState('');
@@ -23,12 +25,15 @@ export default function CurrentMissionPage() {
   const [joinMsg, setJoinMsg] = useState<string | null>(null);
 
   const [retentionSeconds, setRetentionSeconds] = useState<number>(3600);
+  const [retentionSecondsInput, setRetentionSecondsInput] = useState('3600');
   const [savingSettings, setSavingSettings] = useState(false);
 
   async function refreshSelectedMission() {
     if (!selectedMissionId) {
       setMission(null);
+      setMissionTitle('');
       setLoading(false);
+      setShowSettings(false);
       return;
     }
 
@@ -37,7 +42,10 @@ export default function CurrentMissionPage() {
     try {
       const data = await getMission(selectedMissionId);
       setMission(data);
-      setRetentionSeconds(data.traceRetentionSeconds ?? 3600);
+      setMissionTitle(data.title ?? '');
+      const rs = data.traceRetentionSeconds ?? 3600;
+      setRetentionSeconds(rs);
+      setRetentionSecondsInput(String(rs));
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
     } finally {
@@ -120,9 +128,40 @@ export default function CurrentMissionPage() {
     if (!selectedMissionId) return;
     setSavingSettings(true);
     try {
-      const updated = await updateMission(selectedMissionId, { traceRetentionSeconds: retentionSeconds });
+      let nextRetention = retentionSeconds;
+      const trimmedRetention = retentionSecondsInput.trim();
+      if (trimmedRetention) {
+        const parsed = Number(trimmedRetention);
+        if (!Number.isNaN(parsed)) {
+          nextRetention = parsed;
+        }
+      }
+
+      const payload: { traceRetentionSeconds?: number; title?: string } = {
+        traceRetentionSeconds: nextRetention,
+      };
+      const trimmedTitle = missionTitle.trim();
+      if (trimmedTitle && trimmedTitle !== mission?.title) {
+        (payload as any).title = trimmedTitle;
+      }
+
+      const updated = await updateMission(selectedMissionId, payload);
       setMission(updated);
-      setRetentionSeconds(updated.traceRetentionSeconds ?? retentionSeconds);
+
+      // Mettre à jour la liste des missions pour refléter immédiatement
+      // le nouveau nom et la nouvelle durée de traînée sans rechargement.
+      setMissions((prev) =>
+        prev.map((m) =>
+          m.id === updated.id
+            ? { ...m, title: updated.title, traceRetentionSeconds: updated.traceRetentionSeconds }
+            : m
+        )
+      );
+
+      const rs = updated.traceRetentionSeconds ?? nextRetention;
+      setRetentionSeconds(rs);
+      setRetentionSecondsInput(String(rs));
+      setMissionTitle(updated.title ?? missionTitle);
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
     } finally {
@@ -134,17 +173,6 @@ export default function CurrentMissionPage() {
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Accueil</h1>
-        <button
-          type="button"
-          onClick={() => {
-            void refreshMissions();
-            void refreshSelectedMission();
-          }}
-          className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50"
-        >
-          <RefreshCcw size={16} />
-          Actualiser
-        </button>
       </div>
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
@@ -209,19 +237,30 @@ export default function CurrentMissionPage() {
                   <div>
                     <div className="text-base font-semibold text-gray-900">{m.title}</div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenMission(m.id);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-                    >
-                      <Pencil size={16} />
-                      Éditer
-                    </button>
-                    {m.membership?.role === 'admin' ? (
+                  {m.membership?.role === 'admin' ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Sélectionner la mission pour afficher les réglages (nom + durée de traînée)
+                          selectMission(m.id);
+                          // Initialiser immédiatement l'état local pour afficher la section Réglages sans attendre la requête API
+                          setMission(m);
+                          setMissionTitle(m.title ?? '');
+                          const rs = m.traceRetentionSeconds ?? 3600;
+                          setRetentionSeconds(rs);
+                          setRetentionSecondsInput(String(rs));
+                          setLoading(false);
+                          setShowSettings(true);
+                          // Faire descendre la vue vers la section Réglages
+                          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                        }}
+                        className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                      >
+                        <Pencil size={16} />
+                        Éditer
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -233,8 +272,8 @@ export default function CurrentMissionPage() {
                         <Trash2 size={16} />
                         Supprimer
                       </button>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               </button>
             ))}
@@ -244,15 +283,23 @@ export default function CurrentMissionPage() {
 
       {loading ? (
         <div className="mt-4 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
-      ) : selectedMissionId && mission && mission.membership?.role === 'admin' ? (
+      ) : showSettings && selectedMissionId && mission && mission.membership?.role === 'admin' ? (
         <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-sm font-semibold text-gray-900">Réglages</div>
           <div className="mt-3 rounded-2xl border p-3">
-            <div className="text-xs font-semibold text-gray-700">Durée de traînée (secondes)</div>
+            <div className="text-xs font-semibold text-gray-700">Nom de la mission</div>
             <input
-              type="number"
-              value={retentionSeconds}
-              onChange={(e) => setRetentionSeconds(Number(e.target.value))}
+              type="text"
+              value={missionTitle}
+              onChange={(e) => setMissionTitle(e.target.value)}
+              className="mt-2 h-11 w-full rounded-xl border px-3 text-sm"
+            />
+            <div className="mt-3 text-xs font-semibold text-gray-700">Durée de traînée (secondes)</div>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={retentionSecondsInput}
+              onChange={(e) => setRetentionSecondsInput(e.target.value)}
               className="mt-2 h-11 w-full rounded-xl border px-3 text-sm"
             />
             <button

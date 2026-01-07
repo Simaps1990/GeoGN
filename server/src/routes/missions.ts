@@ -11,6 +11,7 @@ type CreateMissionBody = {
 type UpdateMissionBody = {
   status?: 'draft' | 'active' | 'closed';
   traceRetentionSeconds?: number;
+  title?: string;
 };
 
 function randomColor() {
@@ -162,7 +163,14 @@ export async function missionsRoutes(app: FastifyInstance) {
     const update: any = { updatedAt: new Date() };
     if (req.body.status) update.status = req.body.status;
     if (typeof req.body.traceRetentionSeconds === 'number') {
-      update.traceRetentionSeconds = Math.max(60, Math.floor(req.body.traceRetentionSeconds));
+      const v = Math.floor(req.body.traceRetentionSeconds);
+      if (v > 0) {
+        update.traceRetentionSeconds = v;
+      }
+    }
+    if (typeof req.body.title === 'string') {
+      const t = req.body.title.trim();
+      if (t) update.title = t;
     }
 
     const mission = await MissionModel.findOneAndUpdate({ _id: id }, { $set: update }, { new: true }).lean();
