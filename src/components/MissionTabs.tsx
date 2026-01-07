@@ -1,5 +1,5 @@
 import { NavLink, useParams } from 'react-router-dom';
-import { BookUser, Map, MapPin, PenTool } from 'lucide-react';
+import { BookUser, Map, MapPin, CircleDotDashed } from 'lucide-react';
 
 type Tab = {
   to: string;
@@ -13,7 +13,7 @@ export default function MissionTabs() {
 
   const tabs: Tab[] = [
     { to: `${base}/map`, label: 'Carte', Icon: Map },
-    { to: `${base}/zones`, label: 'Zones', Icon: PenTool },
+    { to: `${base}/zones`, label: 'Zones', Icon: CircleDotDashed },
     { to: `${base}/pois`, label: 'POI', Icon: MapPin },
     { to: `${base}/contacts`, label: 'Contacts', Icon: BookUser },
   ];

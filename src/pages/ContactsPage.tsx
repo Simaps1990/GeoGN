@@ -5,7 +5,6 @@ import { addContact, deleteContact, listContacts, type ApiContact } from '../lib
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<ApiContact[]>([]);
   const [appUserId, setAppUserId] = useState('');
-  const [alias, setAlias] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -33,9 +32,8 @@ export default function ContactsPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await addContact(appUserId.trim(), alias.trim() ? alias.trim() : undefined);
+      await addContact(appUserId.trim());
       setAppUserId('');
-      setAlias('');
       await refresh();
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
@@ -82,12 +80,6 @@ export default function ContactsPage() {
             value={appUserId}
             onChange={(e) => setAppUserId(e.target.value)}
             placeholder="appUserId du contact (ex: 7F3K9Q)"
-            className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
-          />
-          <input
-            value={alias}
-            onChange={(e) => setAlias(e.target.value)}
-            placeholder="Alias (optionnel)"
             className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
           />
           <button

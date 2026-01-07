@@ -936,8 +936,8 @@ export default function MapLibreMap() {
       el.style.alignItems = 'center';
       el.style.justifyContent = 'center';
       el.style.cursor = 'pointer';
-      // Slightly offset the icon inside the circle (up and left) without moving the marker anchor.
-      el.innerHTML = `<div style="transform: translate(-1px, -1px); display:flex; align-items:center; justify-content:center;">${svg}</div>`;
+      // Slightly offset the icon inside the circle (mostly upward) without moving the marker anchor.
+      el.innerHTML = `<div style="transform: translate(0px, -0.5px); display:flex; align-items:center; justify-content:center;">${svg}</div>`;
       el.title = p.title;
     };
 

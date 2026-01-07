@@ -56,7 +56,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Clear auth tokens **and** any cached mission/map state so the next
+    // session doesn't inherit a mission the new user can't access.
     clearTokens();
+    try {
+      // Selected mission
+      localStorage.removeItem('geotacops.selectedMissionId');
+
+      // Saved map views per mission
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('geotacops.mapView.')) {
+          toRemove.push(key);
+        }
+      }
+      for (const k of toRemove) {
+        localStorage.removeItem(k);
+      }
+
+      // Pending explicit centering instructions
+      sessionStorage.removeItem('geogn.centerPoi');
+      sessionStorage.removeItem('geogn.centerZone');
+    } catch {
+      // ignore storage errors
+    }
     setUser(null);
   };
 
