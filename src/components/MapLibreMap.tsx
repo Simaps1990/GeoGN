@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, SatelliteDish, Skull, Target, X } from 'lucide-react';
+import { AlertTriangle, CircleDot, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Navigation, NavigationOff, Skull, Target, Waypoints, X } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
 import { getSocket } from '../lib/socket';
-import { createPoi, createZone, listPois, listZones, type ApiPoi, type ApiZone } from '../lib/api';
+import { createPoi, createZone, listMissionMembers, listPois, listZones, type ApiMissionMember, type ApiPoi, type ApiZone } from '../lib/api';
 
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
@@ -62,6 +62,8 @@ export default function MapLibreMap() {
   const otherColorsRef = useRef<Record<string, string>>({});
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
 
+  const [memberColors, setMemberColors] = useState<Record<string, string>>({});
+
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: string }>>({});
@@ -114,19 +116,48 @@ export default function MapLibreMap() {
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
   useEffect(() => {
+    // Load mission member colors so traces can match admin-assigned colors.
+    if (!selectedMissionId) {
+      setMemberColors({});
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const members = await listMissionMembers(selectedMissionId);
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const m of members as ApiMissionMember[]) {
+          if (m.user?.id && m.color) {
+            map[m.user.id] = m.color;
+          }
+        }
+        setMemberColors(map);
+      } catch {
+        if (!cancelled) setMemberColors({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
-    if (!selectedMissionId) return;
 
     const raw = sessionStorage.getItem('geogn.centerPoi');
     if (!raw) return;
     try {
       const v = JSON.parse(raw) as any;
-      if (v?.missionId !== selectedMissionId) return;
       if (typeof v.lng !== 'number' || typeof v.lat !== 'number') return;
       const zoom = typeof v.zoom === 'number' ? v.zoom : Math.max(map.getZoom(), 16);
       map.easeTo({ center: [v.lng, v.lat], zoom, duration: 600 });
+      // Tell the mapView restore effect to skip once so this centering isn't overridden.
+      sessionStorage.setItem('geogn.skipMapViewOnce', '1');
       sessionStorage.removeItem('geogn.centerPoi');
     } catch {
       // ignore
@@ -137,16 +168,16 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
-    if (!selectedMissionId) return;
 
     const raw = sessionStorage.getItem('geogn.centerZone');
     if (!raw) return;
     try {
       const v = JSON.parse(raw) as any;
-      if (v?.missionId !== selectedMissionId) return;
       if (typeof v.lng !== 'number' || typeof v.lat !== 'number') return;
       const zoom = typeof v.zoom === 'number' ? v.zoom : Math.max(map.getZoom(), 14);
       map.easeTo({ center: [v.lng, v.lat], zoom, duration: 600 });
+      // Same as for POIs: skip one mapView restore so this centering keeps priority.
+      sessionStorage.setItem('geogn.skipMapViewOnce', '1');
       sessionStorage.removeItem('geogn.centerZone');
     } catch {
       // ignore
@@ -160,10 +191,14 @@ export default function MapLibreMap() {
     if (!mapViewKey) return;
 
     // If we have a pending explicit centering instruction (from POI/Zones pages),
-    // let that take precedence and skip restoring the last saved view.
+    // or we've just processed one, skip restoring the last saved view.
     const hasCenterPoi = sessionStorage.getItem('geogn.centerPoi');
     const hasCenterZone = sessionStorage.getItem('geogn.centerZone');
-    if (hasCenterPoi || hasCenterZone) return;
+    const skipOnce = sessionStorage.getItem('geogn.skipMapViewOnce');
+    if (hasCenterPoi || hasCenterZone || skipOnce) {
+      if (skipOnce) sessionStorage.removeItem('geogn.skipMapViewOnce');
+      return;
+    }
 
     const saved = localStorage.getItem(mapViewKey);
     if (!saved) return;
@@ -263,12 +298,16 @@ export default function MapLibreMap() {
       map.addSource('trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
     if (!map.getLayer('trace-line')) {
-      map.addLayer({
-        id: 'trace-line',
-        type: 'line',
-        source: 'trace',
-        paint: { 'line-color': '#00ff00', 'line-width': 7 },
-      });
+      // Insert the trace layer *under* the me-dot layer so the position icon stays above the line.
+      map.addLayer(
+        {
+          id: 'trace-line',
+          type: 'line',
+          source: 'trace',
+          paint: { 'line-color': '#00ff00', 'line-width': 7, 'line-opacity': 0.5 },
+        },
+        'me-dot'
+      );
     }
 
     if (!map.getSource('others')) {
@@ -747,9 +786,15 @@ export default function MapLibreMap() {
 
       const palette = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'];
       if (!otherColorsRef.current[msg.userId]) {
-        const used = new Set(Object.values(otherColorsRef.current));
-        const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
-        otherColorsRef.current[msg.userId] = next;
+        // Prefer the mission member color assigned by the admin when available.
+        const memberColor = memberColors[msg.userId];
+        if (memberColor) {
+          otherColorsRef.current[msg.userId] = memberColor;
+        } else {
+          const used = new Set(Object.values(otherColorsRef.current));
+          const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
+          otherColorsRef.current[msg.userId] = next;
+        }
       }
       const now = typeof msg.t === 'number' ? msg.t : Date.now();
       const traces = otherTracesRef.current[msg.userId] ?? [];
@@ -1091,18 +1136,13 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={() => setTrackingEnabled((v) => !v)}
-          className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center ${
-            trackingEnabled ? 'bg-green-600 text-white' : 'bg-white/90 text-gray-800'
-          }`}
-          >
-          <div className="relative flex items-center justify-center">
-            <SatelliteDish className="mx-auto" size={22} />
-            {!trackingEnabled ? (
-              <span className="absolute inset-0 flex items-center justify-center text-red-600">
-                <X size={18} strokeWidth={2.5} />
-              </span>
-            ) : null}
-          </div>
+          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+        >
+          {trackingEnabled ? (
+            <Navigation className="mx-auto text-green-600" size={22} />
+          ) : (
+            <NavigationOff className="mx-auto text-red-600" size={22} />
+          )}
         </button>
 
         <button
@@ -1142,64 +1182,66 @@ export default function MapLibreMap() {
           <MapPin className="mx-auto" size={22} />
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setActionError(null);
-            setZoneMenuOpen((v) => !v);
-          }}
-          className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
-            activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-              ? 'bg-blue-600 text-white'
-              : 'bg-white/90 hover:bg-white'
-          }`}
-          title="Zones"
-        >
-          <CircleDotDashed className="mx-auto" size={22} />
-        </button>
+        <div className="relative flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              setActionError(null);
+              setZoneMenuOpen((v) => !v);
+            }}
+            className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
+              activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white/90 hover:bg-white'
+            }`}
+            title="Zones"
+          >
+            <CircleDotDashed className="mx-auto" size={22} />
+          </button>
 
-        {zoneMenuOpen ? (
-          <div className="flex flex-col gap-2 rounded-2xl border bg-white/90 p-2 shadow backdrop-blur">
-            <button
-              type="button"
-              onClick={() => {
-                if (activeTool === 'zone_circle') {
+          {zoneMenuOpen ? (
+            <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 rounded-2xl border bg-white/90 p-2 shadow backdrop-blur">
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeTool === 'zone_circle') {
+                    cancelDraft();
+                    setZoneMenuOpen(false);
+                    return;
+                  }
                   cancelDraft();
-                  setZoneMenuOpen(false);
-                  return;
-                }
-                cancelDraft();
-                setDraftColor('#22c55e');
-                setActiveTool('zone_circle');
-              }}
-              className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                activeTool === 'zone_circle' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
-              }`}
-              title="Zone cercle"
-            >
-              <CircleDotDashed size={20} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (activeTool === 'zone_polygon') {
+                  setDraftColor('#22c55e');
+                  setActiveTool('zone_circle');
+                }}
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
+                  activeTool === 'zone_circle' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                }`}
+                title="Zone cercle"
+              >
+                <CircleDot size={20} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeTool === 'zone_polygon') {
+                    cancelDraft();
+                    setZoneMenuOpen(false);
+                    return;
+                  }
                   cancelDraft();
-                  setZoneMenuOpen(false);
-                  return;
-                }
-                cancelDraft();
-                setDraftColor('#22c55e');
-                setActiveTool('zone_polygon');
-              }}
-              className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                activeTool === 'zone_polygon' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
-              }`}
-              title="Zone à la main"
-            >
-              <CircleDotDashed size={20} />
-            </button>
-          </div>
-        ) : null}
+                  setDraftColor('#22c55e');
+                  setActiveTool('zone_polygon');
+                }}
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
+                  activeTool === 'zone_polygon' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                }`}
+                title="Zone à la main"
+              >
+                <Waypoints size={20} />
+              </button>
+            </div>
+          ) : null}
+        </div>
 
         <div className="flex flex-col gap-3 pt-1">
           <button

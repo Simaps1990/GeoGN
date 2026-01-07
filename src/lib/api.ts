@@ -373,7 +373,11 @@ export async function listMissionJoinRequests(missionId: string) {
 export async function acceptMissionJoinRequest(missionId: string, requestId: string) {
   const res = await apiFetch(
     `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/accept`,
-    { method: 'POST' }
+    {
+      method: 'POST',
+      // Fastify requires a non-empty JSON body when content-type is application/json.
+      body: JSON.stringify({}),
+    }
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -385,7 +389,11 @@ export async function acceptMissionJoinRequest(missionId: string, requestId: str
 export async function declineMissionJoinRequest(missionId: string, requestId: string) {
   const res = await apiFetch(
     `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/decline`,
-    { method: 'POST' }
+    {
+      method: 'POST',
+      // Same as above: send an explicit empty JSON object.
+      body: JSON.stringify({}),
+    }
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
