@@ -32,6 +32,24 @@ function getRasterStyle(tiles: string[], attribution: string) {
   return style;
 }
 
+function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: number, steps = 64) {
+  const latRad = (center.lat * Math.PI) / 180;
+  const metersPerDegLat = 111_320;
+  const metersPerDegLng = 111_320 * Math.cos(latRad);
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const dx = Math.cos(a) * radiusMeters;
+    const dy = Math.sin(a) * radiusMeters;
+    const lng = center.lng + dx / metersPerDegLng;
+    const lat = center.lat + dy / metersPerDegLat;
+    coords.push([lng, lat]);
+  }
+
+  return { type: 'Polygon' as const, coordinates: [coords] };
+}
+
 export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
@@ -106,6 +124,68 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
+    const src = map.getSource('draft-zone') as GeoJSONSource | undefined;
+    if (!src) return;
+
+    const features: any[] = [];
+
+    if (activeTool === 'zone_circle' && draftLngLat) {
+      features.push({
+        type: 'Feature',
+        properties: { kind: 'fill', color: draftColor },
+        geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
+      });
+      features.push({
+        type: 'Feature',
+        properties: { kind: 'point', color: draftColor },
+        geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+      });
+    }
+
+    if (activeTool === 'zone_polygon') {
+      const coords = polygonDraftRef.current;
+      for (const c of coords) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'point', color: draftColor },
+          geometry: { type: 'Point', coordinates: c },
+        });
+      }
+
+      if (coords.length >= 2) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'line', color: draftColor },
+          geometry: { type: 'LineString', coordinates: coords },
+        });
+      }
+
+      if (coords.length >= 3) {
+        const ring = [...coords, coords[0]];
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'fill', color: draftColor },
+          geometry: { type: 'Polygon', coordinates: [ring] },
+        });
+      }
+    }
+
+    src.setData({ type: 'FeatureCollection', features });
+  }, [activeTool, draftLngLat, draftCircleRadius, draftColor, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    const src = map.getSource('draft-zone') as GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData({ type: 'FeatureCollection', features: [] });
+  }, [selectedMissionId, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
 
     const onClick = (e: any) => {
       if (activeTool === 'none') return;
@@ -140,6 +220,17 @@ export default function MapLibreMap() {
       map.off('dblclick', onDblClick);
     };
   }, [activeTool, mapReady, styleMode]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    const src = map.getSource('draft-zone') as GeoJSONSource | undefined;
+    if (!src) return;
+    if (activeTool === 'none' || activeTool === 'poi') {
+      src.setData({ type: 'FeatureCollection', features: [] });
+    }
+  }, [activeTool, mapReady]);
 
   async function confirmCreate() {
     if (!selectedMissionId) return;
@@ -340,6 +431,44 @@ export default function MapLibreMap() {
           'line-width': 2,
         },
       });
+
+      map.addSource('draft-zone', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'draft-zone-fill',
+        type: 'fill',
+        source: 'draft-zone',
+        filter: ['==', ['get', 'kind'], 'fill'],
+        paint: {
+          'fill-color': ['coalesce', ['get', 'color'], '#22c55e'],
+          'fill-opacity': 0.18,
+        },
+      });
+      map.addLayer({
+        id: 'draft-zone-outline',
+        type: 'line',
+        source: 'draft-zone',
+        filter: ['any', ['==', ['get', 'kind'], 'fill'], ['==', ['get', 'kind'], 'line']],
+        paint: {
+          'line-color': ['coalesce', ['get', 'color'], '#22c55e'],
+          'line-width': 3,
+          'line-dasharray': [2, 1],
+        },
+      });
+      map.addLayer({
+        id: 'draft-zone-points',
+        type: 'circle',
+        source: 'draft-zone',
+        filter: ['==', ['get', 'kind'], 'point'],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['coalesce', ['get', 'color'], '#22c55e'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
     });
 
     mapInstanceRef.current = map;
@@ -534,7 +663,7 @@ export default function MapLibreMap() {
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       })) as any,
     });
-  }, [pois]);
+  }, [pois, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -544,6 +673,13 @@ export default function MapLibreMap() {
 
     const features: any[] = [];
     for (const z of zones) {
+      if (z.type === 'circle' && z.circle) {
+        features.push({
+          type: 'Feature',
+          properties: { id: z.id, title: z.title, color: z.color },
+          geometry: circleToPolygon(z.circle.center, z.circle.radiusMeters),
+        });
+      }
       if (z.type === 'polygon' && z.polygon) {
         features.push({ type: 'Feature', properties: { id: z.id, title: z.title, color: z.color }, geometry: z.polygon });
       }
@@ -559,7 +695,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features });
-  }, [zones]);
+  }, [zones, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -577,7 +713,7 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions]);
+  }, [otherPositions, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;

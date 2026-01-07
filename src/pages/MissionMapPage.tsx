@@ -1,10 +1,9 @@
 import { ArrowLeft } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import MapLibreMap from '../components/MapLibreMap';
 
 export default function MissionMapPage() {
   const navigate = useNavigate();
-  useParams();
 
   return (
     <div className="relative">
