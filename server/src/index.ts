@@ -1,0 +1,35 @@
+import 'dotenv/config';
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import { connectMongo } from './db.js';
+import './models/index.js';
+import { authRoutes } from './routes/auth.js';
+import { contactsRoutes } from './routes/contacts.js';
+import { missionsRoutes } from './routes/missions.js';
+import { invitesRoutes } from './routes/invites.js';
+import { poisRoutes } from './routes/pois.js';
+import { zonesRoutes } from './routes/zones.js';
+import { setupSocket } from './socket.js';
+
+const mongoUri = process.env.MONGO_URI;
+if (!mongoUri) {
+  throw new Error('Missing MONGO_URI');
+}
+
+const app = Fastify({ logger: true });
+await app.register(cors, { origin: true, credentials: true });
+
+await connectMongo(mongoUri);
+
+await authRoutes(app);
+await contactsRoutes(app);
+await missionsRoutes(app);
+await invitesRoutes(app);
+await poisRoutes(app);
+await zonesRoutes(app);
+
+app.get('/health', async () => ({ ok: true }));
+
+setupSocket(app);
+
+await app.listen({ port: Number(process.env.PORT ?? 4000), host: '0.0.0.0' });

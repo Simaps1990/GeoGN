@@ -1,0 +1,406 @@
+export type ApiUser = {
+  id: string;
+  appUserId: string;
+  displayName: string;
+  email?: string;
+};
+
+export type ApiMission = {
+  id: string;
+  title: string;
+  status: 'draft' | 'active' | 'closed';
+  mapStyle: string;
+  traceRetentionSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+  membership?: {
+    role: 'admin' | 'member';
+    color: string;
+    isActive: boolean;
+    joinedAt: string | null;
+  } | null;
+};
+
+export type ApiInvite = {
+  id: string;
+  token: string;
+  status: 'pending' | 'accepted' | 'declined' | 'revoked';
+  createdAt: string;
+  expiresAt: string;
+  mission: { id: string; title: string; status: string } | null;
+  invitedBy: { id: string; appUserId: string; displayName: string } | null;
+};
+
+export type ApiContact = {
+  id: string;
+  alias: string | null;
+  createdAt: string;
+  contact: { id: string; appUserId: string; displayName: string } | null;
+};
+
+export type ApiPoiType = 'zone_a_verifier' | 'doute' | 'cible_trouvee' | 'danger' | 'autre';
+
+export type ApiPoi = {
+  id: string;
+  type: ApiPoiType;
+  title: string;
+  icon: string;
+  color: string;
+  comment: string;
+  lng: number;
+  lat: number;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type ApiZone = {
+  id: string;
+  title: string;
+  color: string;
+  type: 'circle' | 'polygon';
+  circle: { center: { lng: number; lat: number }; radiusMeters: number } | null;
+  polygon: { type: 'Polygon'; coordinates: number[][][] } | null;
+  sectors:
+    | {
+        sectorId: string;
+        color: string;
+        geometry: { type: 'Polygon'; coordinates: number[][][] };
+      }[]
+    | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AuthResponse = {
+  accessToken: string;
+  refreshToken: string;
+  user: ApiUser;
+};
+
+type RefreshResponse = {
+  accessToken: string;
+  refreshToken: string;
+};
+
+const ACCESS_TOKEN_KEY = 'geotacops.accessToken';
+const REFRESH_TOKEN_KEY = 'geotacops.refreshToken';
+
+export function getApiBaseUrl() {
+  return (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:4000';
+}
+
+export function getAccessToken() {
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function setTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+export function clearTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+async function rawFetch(path: string, init?: RequestInit) {
+  const url = `${getApiBaseUrl()}${path}`;
+  return fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
+async function refreshTokens() {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!refreshToken) return null;
+
+  const res = await rawFetch('/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!res.ok) {
+    clearTokens();
+    return null;
+  }
+
+  const data = (await res.json()) as RefreshResponse;
+  setTokens(data.accessToken, data.refreshToken);
+  return data.accessToken;
+}
+
+export async function apiFetch(path: string, init?: RequestInit) {
+  const accessToken = getAccessToken();
+  const res = await rawFetch(path, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+
+  if (res.status !== 401) return res;
+
+  const newToken = await refreshTokens();
+  if (!newToken) return res;
+
+  return rawFetch(path, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${newToken}`,
+    },
+  });
+}
+
+export async function register(email: string, password: string, displayName: string) {
+  const res = await rawFetch('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, displayName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'REGISTER_FAILED');
+  }
+  const data = (await res.json()) as AuthResponse;
+  setTokens(data.accessToken, data.refreshToken);
+  return data.user;
+}
+
+export async function login(email: string, password: string) {
+  const res = await rawFetch('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LOGIN_FAILED');
+  }
+  const data = (await res.json()) as AuthResponse;
+  setTokens(data.accessToken, data.refreshToken);
+  return data.user;
+}
+
+export async function me() {
+  const res = await apiFetch('/me');
+  if (!res.ok) {
+    if (res.status === 401) return null;
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ME_FAILED');
+  }
+  return (await res.json()) as ApiUser;
+}
+
+export async function listMissions() {
+  const res = await apiFetch('/missions');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_MISSIONS_FAILED');
+  }
+  return (await res.json()) as ApiMission[];
+}
+
+export async function createMission(title: string) {
+  const res = await apiFetch('/missions', { method: 'POST', body: JSON.stringify({ title }) });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CREATE_MISSION_FAILED');
+  }
+  return (await res.json()) as ApiMission;
+}
+
+export async function getMission(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'GET_MISSION_FAILED');
+  }
+  return (await res.json()) as ApiMission;
+}
+
+export async function updateMission(
+  missionId: string,
+  input: { status?: 'draft' | 'active' | 'closed'; traceRetentionSeconds?: number }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_MISSION_FAILED');
+  }
+  return (await res.json()) as ApiMission;
+}
+
+export async function listInvites() {
+  const res = await apiFetch('/invites');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_INVITES_FAILED');
+  }
+  return (await res.json()) as ApiInvite[];
+}
+
+export async function acceptInvite(token: string) {
+  const res = await apiFetch(`/invites/${encodeURIComponent(token)}/accept`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ACCEPT_INVITE_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function declineInvite(token: string) {
+  const res = await apiFetch(`/invites/${encodeURIComponent(token)}/decline`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DECLINE_INVITE_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function sendMissionInvite(missionId: string, invitedAppUserId: string, expiresInHours?: number) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/invites`, {
+    method: 'POST',
+    body: JSON.stringify({ invitedAppUserId, expiresInHours }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'SEND_INVITE_FAILED');
+  }
+  return (await res.json()) as {
+    id: string;
+    token: string;
+    status: string;
+    createdAt: string;
+    expiresAt: string;
+    invitedUser: { id: string; appUserId: string; displayName: string };
+  };
+}
+
+export async function listContacts() {
+  const res = await apiFetch('/contacts');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_CONTACTS_FAILED');
+  }
+  return (await res.json()) as ApiContact[];
+}
+
+export async function addContact(appUserId: string, alias?: string) {
+  const res = await apiFetch('/contacts', { method: 'POST', body: JSON.stringify({ appUserId, alias }) });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ADD_CONTACT_FAILED');
+  }
+  return (await res.json()) as ApiContact;
+}
+
+export async function updateContact(contactId: string, alias?: string) {
+  const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ alias }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_CONTACT_FAILED');
+  }
+  return (await res.json()) as { id: string; alias: string | null; createdAt: string };
+}
+
+export async function deleteContact(contactId: string) {
+  const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_CONTACT_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function listPois(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/pois`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_POIS_FAILED');
+  }
+  return (await res.json()) as ApiPoi[];
+}
+
+export async function createPoi(
+  missionId: string,
+  input: { type: ApiPoiType; title: string; icon: string; color: string; comment: string; lng: number; lat: number }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/pois`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CREATE_POI_FAILED');
+  }
+  return (await res.json()) as ApiPoi;
+}
+
+export async function createZone(
+  missionId: string,
+  input:
+    | {
+        type: 'circle';
+        title: string;
+        color: string;
+        circle: { center: { lng: number; lat: number }; radiusMeters: number };
+      }
+    | {
+        type: 'polygon';
+        title: string;
+        color: string;
+        polygon: { type: 'Polygon'; coordinates: number[][][] };
+      }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CREATE_ZONE_FAILED');
+  }
+  return (await res.json()) as ApiZone;
+}
+
+export async function listZones(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_ZONES_FAILED');
+  }
+  return (await res.json()) as ApiZone[];
+}
+
+export async function deletePoi(missionId: string, poiId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/pois/${encodeURIComponent(poiId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_POI_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function deleteZone(missionId: string, zoneId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones/${encodeURIComponent(zoneId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_ZONE_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
