@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, CircleDot, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Navigation, NavigationOff, Skull, Target, Waypoints, X } from 'lucide-react';
+import { AlertTriangle, Check, CircleDot, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Navigation, NavigationOff, Skull, Target, Undo2, Waypoints, X } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
@@ -143,6 +143,23 @@ export default function MapLibreMap() {
       cancelled = true;
     };
   }, [selectedMissionId]);
+
+  // Keep the current user's dot and personal trace in sync with their mission color.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!user?.id) return;
+
+    const myColor = memberColors[user.id] ?? '#22c55e';
+
+    if (map.getLayer('me-dot')) {
+      map.setPaintProperty('me-dot', 'circle-color', myColor);
+    }
+    if (map.getLayer('trace-line')) {
+      map.setPaintProperty('trace-line', 'line-color', myColor);
+    }
+  }, [mapReady, user?.id, memberColors]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -287,6 +304,7 @@ export default function MapLibreMap() {
         source: 'me',
         paint: {
           'circle-radius': 7,
+          // color is updated dynamically in an effect using the mission member color
           'circle-color': '#3B82F6',
           'circle-stroke-width': 2,
           'circle-stroke-color': '#ffffff',
@@ -304,7 +322,7 @@ export default function MapLibreMap() {
           id: 'trace-line',
           type: 'line',
           source: 'trace',
-          paint: { 'line-color': '#00ff00', 'line-width': 7, 'line-opacity': 0.5 },
+          paint: { 'line-color': '#00ff00', 'line-width': 8, 'line-opacity': 0.5 },
         },
         'me-dot'
       );
@@ -337,7 +355,7 @@ export default function MapLibreMap() {
         source: 'others-traces',
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
-          'line-width': 3,
+          'line-width': 8,
           'line-opacity': 0.9,
         },
       });
@@ -1255,7 +1273,7 @@ export default function MapLibreMap() {
         </div>
       </div>
 
-      {activeTool !== 'none' && !showValidation ? (
+      {activeTool !== 'none' && activeTool !== 'zone_polygon' && !showValidation ? (
         <div className="absolute left-1/2 top-4 -translate-x-1/2 z-[1000] rounded-2xl border bg-white/90 px-4 py-2 text-sm shadow backdrop-blur">
           {activeTool === 'poi'
             ? 'Mode POI: clique sur la carte'
@@ -1266,19 +1284,21 @@ export default function MapLibreMap() {
       ) : null}
 
       {activeTool === 'zone_polygon' && !showValidation ? (
-        <div className="absolute left-1/2 bottom-24 -translate-x-1/2 z-[1100] flex gap-2">
+        <div className="absolute left-1/2 top-4 -translate-x-1/2 z-[1100] flex gap-2">
           <button
             type="button"
             onClick={undoPolygonPoint}
-            className="h-11 rounded-2xl border bg-white/90 px-4 text-sm font-semibold text-gray-800 shadow backdrop-blur hover:bg-white"
+            className="h-11 rounded-2xl bg-red-600 px-3 text-sm font-semibold text-white shadow inline-flex items-center gap-2 hover:bg-red-700"
           >
-            Précédent
+            <Undo2 size={16} />
+            Annuler
           </button>
           <button
             type="button"
             onClick={validatePolygon}
-            className="h-11 rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+            className="h-11 rounded-2xl bg-green-600 px-3 text-sm font-semibold text-white shadow inline-flex items-center gap-2 hover:bg-green-700"
           >
+            <Check size={16} />
             Valider
           </button>
         </div>
