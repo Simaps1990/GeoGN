@@ -179,8 +179,8 @@ export default function MapLibreMap() {
     };
   }, [selectedMissionId]);
 
-  // Keep otherColorsRef in sync when memberColors change so we always use
-  // the mission-assigned color (e.g. admin in green) instead of an older fallback.
+  // Garder otherColorsRef synchronisé avec les couleurs de membres de mission
+  // afin d'utiliser uniquement la couleur attribuée dans les contacts de la mission.
   useEffect(() => {
     for (const [userId, color] of Object.entries(memberColors)) {
       if (color) {
@@ -246,15 +246,19 @@ export default function MapLibreMap() {
     if (!mapReady) return;
     if (!user?.id) return;
 
-    const myColor = memberColors[user.id] ?? '#22c55e';
+    const myColor = memberColors[user.id];
+    // Si aucune couleur n'est définie pour moi dans la mission, laisser
+    // la couleur par défaut définie dans le style (pas de couleur inventée).
+    if (!myColor) return;
 
     if (map.getLayer('me-dot')) {
       map.setPaintProperty('me-dot', 'circle-color', myColor);
     }
+
     if (map.getLayer('trace-line')) {
       map.setPaintProperty('trace-line', 'line-color', myColor);
     }
-  }, [mapReady, user?.id, memberColors]);
+  }, [mapReady, selectedMissionId, user?.id, memberColors]);
 
   // Persist self trace for this mission while the app is open.
   useEffect(() => {
@@ -1007,15 +1011,10 @@ export default function MapLibreMap() {
       if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
       if (user?.id && msg.userId === user.id) return;
 
-      const palette = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'];
-      // Always prefer the mission member color assigned by the admin when available.
+      // Toujours utiliser uniquement la couleur de mission attribuée au membre.
       const memberColor = memberColors[msg.userId];
       if (memberColor) {
         otherColorsRef.current[msg.userId] = memberColor;
-      } else if (!otherColorsRef.current[msg.userId]) {
-        const used = new Set(Object.values(otherColorsRef.current));
-        const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
-        otherColorsRef.current[msg.userId] = next;
       }
       const now = typeof msg.t === 'number' ? msg.t : Date.now();
       const traces = otherTracesRef.current[msg.userId] ?? [];
@@ -1306,22 +1305,29 @@ export default function MapLibreMap() {
     const src = map.getSource('others') as GeoJSONSource | undefined;
     if (!src) return;
 
-    const features = Object.entries(otherPositions).map(([userId, p]) => ({
-      type: 'Feature',
-      properties: {
-        userId,
-        t: p.t,
-        color: otherColorsRef.current[userId] ?? '#2563eb',
-        name: memberNames[userId] ?? '',
-      },
-      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-    }));
+    const features = Object.entries(otherPositions).map(([userId, p]) => {
+      const memberColor = memberColors[userId];
+      // Si pas de couleur définie pour ce membre, utiliser un gris neutre commun
+      // plutôt que d'inventer une couleur différente.
+      const color = memberColor ?? '#4b5563';
+
+      return {
+        type: 'Feature',
+        properties: {
+          userId,
+          t: p.t,
+          color,
+          name: memberNames[userId] ?? '',
+        },
+        geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+      };
+    });
 
     src.setData({
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberNames, mapReady]);
+  }, [otherPositions, memberNames, memberColors, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1332,15 +1338,17 @@ export default function MapLibreMap() {
     const features: any[] = [];
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       if (pts.length < 2) continue;
+      const memberColor = memberColors[userId];
+      const color = memberColor ?? '#4b5563';
       features.push({
         type: 'Feature',
-        properties: { userId, color: otherColorsRef.current[userId] ?? '#2563eb' },
+        properties: { userId, color },
         geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
       });
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
-  }, [otherPositions, mapReady]);
+  }, [otherPositions, memberColors, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;

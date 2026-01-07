@@ -235,10 +235,17 @@ export default function CurrentMissionPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-base font-semibold text-gray-900">{m.title}</div>
+                    <div className="text-base font-semibold text-gray-900">
+                      {m.title}
+                      {m.membership ? (
+                        <span className="ml-2 text-xs font-medium text-gray-600">
+                          ({m.membership.role === 'admin' ? 'Admin' : 'Utilisateur'})
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   {m.membership?.role === 'admin' ? (
-                    <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-3">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -256,10 +263,10 @@ export default function CurrentMissionPage() {
                           // Faire descendre la vue vers la section Réglages
                           window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
                         }}
-                        className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+                        title="Éditer la mission"
                       >
                         <Pencil size={16} />
-                        Éditer
                       </button>
                       <button
                         type="button"
@@ -267,10 +274,10 @@ export default function CurrentMissionPage() {
                           e.stopPropagation();
                           void onDeleteMission(m.id);
                         }}
-                        className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-50"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-red-600 hover:bg-red-50"
+                        title="Supprimer la mission"
                       >
                         <Trash2 size={16} />
-                        Supprimer
                       </button>
                     </div>
                   ) : null}

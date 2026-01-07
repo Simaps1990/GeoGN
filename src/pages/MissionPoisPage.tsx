@@ -226,45 +226,47 @@ export default function MissionPoisPage() {
                 </>
               )}
 
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  disabled={!missionId || busyId === p.id}
-                  onClick={async () => {
-                    if (!missionId) return;
-                    setEditingId(p.id);
-                    setEditError(null);
-                    setEditDraft({
-                      title: p.title,
-                      icon: p.icon,
-                      color: p.color,
-                      comment: p.comment,
-                    });
-                  }}
-                  className="h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Modifier
-                </button>
-                <button
-                  type="button"
-                  disabled={!missionId || busyId === p.id}
-                  onClick={async () => {
-                    if (!missionId) return;
-                    const ok = window.confirm('Supprimer ce POI ?');
-                    if (!ok) return;
-                    setBusyId(p.id);
-                    try {
-                      await deletePoi(missionId, p.id);
-                      setPois((prev) => prev.filter((x) => x.id !== p.id));
-                    } finally {
-                      setBusyId(null);
-                    }
-                  }}
-                  className="h-10 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                >
-                  Supprimer
-                </button>
-              </div>
+              {editingId !== p.id && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={!missionId || busyId === p.id}
+                    onClick={async () => {
+                      if (!missionId) return;
+                      setEditingId(p.id);
+                      setEditError(null);
+                      setEditDraft({
+                        title: p.title,
+                        icon: p.icon,
+                        color: p.color,
+                        comment: p.comment,
+                      });
+                    }}
+                    className="h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Modifier
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!missionId || busyId === p.id}
+                    onClick={async () => {
+                      if (!missionId) return;
+                      const ok = window.confirm('Supprimer ce POI ?');
+                      if (!ok) return;
+                      setBusyId(p.id);
+                      try {
+                        await deletePoi(missionId, p.id);
+                        setPois((prev) => prev.filter((x) => x.id !== p.id));
+                      } finally {
+                        setBusyId(null);
+                      }
+                    }}
+                    className="h-10 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Supprimer
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
