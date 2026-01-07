@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, Circle, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Minus, Pencil, Plus, Skull, Target, X } from 'lucide-react';
+import { AlertTriangle, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Minus, Pencil, Plus, Skull, Target, X } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
@@ -156,6 +156,12 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!mapReady) return;
     if (!mapViewKey) return;
+
+    // If we have a pending explicit centering instruction (from POI/Zones pages),
+    // let that take precedence and skip restoring the last saved view.
+    const hasCenterPoi = sessionStorage.getItem('geogn.centerPoi');
+    const hasCenterZone = sessionStorage.getItem('geogn.centerZone');
+    if (hasCenterPoi || hasCenterZone) return;
 
     const saved = localStorage.getItem(mapViewKey);
     if (!saved) return;
@@ -930,7 +936,8 @@ export default function MapLibreMap() {
       el.style.alignItems = 'center';
       el.style.justifyContent = 'center';
       el.style.cursor = 'pointer';
-      el.innerHTML = svg;
+      // Slightly offset the icon inside the circle (up and left) without moving the marker anchor.
+      el.innerHTML = `<div style="transform: translate(-1px, -1px); display:flex; align-items:center; justify-content:center;">${svg}</div>`;
       el.title = p.title;
     };
 
@@ -1120,6 +1127,7 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={() => {
+            setActionError(null);
             setZoneMenuOpen((v) => !v);
           }}
           className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
@@ -1129,7 +1137,7 @@ export default function MapLibreMap() {
           }`}
           title="Zones"
         >
-          <Circle className="mx-auto" size={22} />
+          <CircleDotDashed className="mx-auto" size={22} />
         </button>
 
         {zoneMenuOpen ? (
@@ -1151,7 +1159,7 @@ export default function MapLibreMap() {
               }`}
               title="Zone cercle"
             >
-              <Circle size={20} />
+              <CircleDotDashed size={20} />
             </button>
             <button
               type="button"
