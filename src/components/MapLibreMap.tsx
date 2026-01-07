@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, Circle, Crosshair, Flag, HelpCircle, Layers, MapPin, Pencil, ShieldAlert, Target, X } from 'lucide-react';
+import { AlertTriangle, Circle, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Minus, Pencil, Plus, Skull, Target, X } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
 import { getSocket } from '../lib/socket';
-import { createPoi, createZone, listPois, listZones, type ApiPoi, type ApiPoiType, type ApiZone } from '../lib/api';
-
-type MapStyleMode = 'streets' | 'topo';
+import { createPoi, createZone, listPois, listZones, type ApiPoi, type ApiZone } from '../lib/api';
 
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
@@ -61,14 +59,14 @@ export default function MapLibreMap() {
 
   const polygonDraftRef = useRef<[number, number][]>([]);
 
-  const [styleMode, setStyleMode] = useState<MapStyleMode>('streets');
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: string }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [zones, setZones] = useState<ApiZone[]>([]);
-  const [mapStyleMode, setMapStyleMode] = useState<'city' | 'satellite'>('city');
   const [mapReady, setMapReady] = useState(false);
+
+  const [baseStyleIndex, setBaseStyleIndex] = useState(0);
 
   const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
 
@@ -80,8 +78,7 @@ export default function MapLibreMap() {
   const [draftTitle, setDraftTitle] = useState('');
   const [draftComment, setDraftComment] = useState('');
   const [draftColor, setDraftColor] = useState('#f97316');
-  const [draftIcon, setDraftIcon] = useState('marker');
-  const [draftPoiType, setDraftPoiType] = useState<ApiPoiType>('doute');
+  const [draftIcon, setDraftIcon] = useState('target');
 
   const poiColorOptions = useMemo(
     () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
@@ -90,12 +87,11 @@ export default function MapLibreMap() {
 
   const poiIconOptions = useMemo(
     () => [
-      { id: 'marker', Icon: MapPin, label: 'Marker' },
       { id: 'target', Icon: Target, label: 'Target' },
       { id: 'flag', Icon: Flag, label: 'Flag' },
       { id: 'alert', Icon: AlertTriangle, label: 'Alert' },
-      { id: 'danger', Icon: ShieldAlert, label: 'Danger' },
       { id: 'help', Icon: HelpCircle, label: 'Help' },
+      { id: 'skull', Icon: Skull, label: 'Skull' },
     ],
     []
   );
@@ -146,14 +142,231 @@ export default function MapLibreMap() {
     );
   }
 
+  const baseStyles = useMemo(
+    () => [
+      {
+        id: 'plan',
+        style: getRasterStyle(
+          [
+            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          ],
+          '© OpenStreetMap contributors'
+        ),
+      },
+      {
+        id: 'topo',
+        style: getRasterStyle(
+          [
+            'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
+          ],
+          '© OpenTopoMap (CC-BY-SA) / © OpenStreetMap contributors'
+        ),
+      },
+      {
+        id: 'light',
+        style: getRasterStyle(
+          [
+            'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+            'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+          ],
+          '© OpenStreetMap contributors © CARTO'
+        ),
+      },
+      {
+        id: 'sat',
+        style: getRasterStyle(
+          ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          'Tiles © Esri'
+        ),
+      },
+    ],
+    []
+  );
+
+  const currentBaseStyle = baseStyles[baseStyleIndex]?.style;
+
   function toggleMapStyle() {
-    setMapStyleMode((m: 'city' | 'satellite') => (m === 'city' ? 'satellite' : 'city'));
-    setStyleMode((m: MapStyleMode) => (m === 'streets' ? 'topo' : 'streets'));
+    setBaseStyleIndex((i) => (i + 1) % baseStyles.length);
+  }
+
+  function zoomIn() {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.zoomIn();
+  }
+
+  function zoomOut() {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.zoomOut();
+  }
+
+  function resetNorth() {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.easeTo({ bearing: 0, pitch: 0 });
+  }
+
+  function ensureOverlays(map: MapLibreMapInstance) {
+    if (!map.getSource('me')) {
+      map.addSource('me', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('me-dot')) {
+      map.addLayer({
+        id: 'me-dot',
+        type: 'circle',
+        source: 'me',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': '#3B82F6',
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+    }
+
+    if (!map.getSource('trace')) {
+      map.addSource('trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('trace-line')) {
+      map.addLayer({
+        id: 'trace-line',
+        type: 'line',
+        source: 'trace',
+        paint: { 'line-color': '#00ff00', 'line-width': 4 },
+      });
+    }
+
+    if (!map.getSource('others')) {
+      map.addSource('others', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('others-points')) {
+      map.addLayer({
+        id: 'others-points',
+        type: 'circle',
+        source: 'others',
+        paint: { 'circle-radius': 6, 'circle-color': '#2563eb', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+      });
+    }
+
+    if (!map.getSource('pois')) {
+      map.addSource('pois', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('pois')) {
+      map.addLayer({
+        id: 'pois',
+        type: 'circle',
+        source: 'pois',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-opacity': 0,
+        },
+      });
+    }
+
+    if (!map.getSource('zones')) {
+      map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('zones-fill')) {
+      map.addLayer({
+        id: 'zones-fill',
+        type: 'fill',
+        source: 'zones',
+        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0.12 },
+      });
+    }
+    if (!map.getLayer('zones-outline')) {
+      map.addLayer({
+        id: 'zones-outline',
+        type: 'line',
+        source: 'zones',
+        paint: { 'line-color': ['coalesce', ['get', 'color'], '#16a34a'], 'line-width': 2 },
+      });
+    }
+
+    if (!map.getSource('draft-zone')) {
+      map.addSource('draft-zone', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('draft-poi')) {
+      map.addSource('draft-poi', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('draft-poi')) {
+      map.addLayer({
+        id: 'draft-poi',
+        type: 'circle',
+        source: 'draft-poi',
+        paint: {
+          'circle-radius': 9,
+          'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+    }
+    if (!map.getLayer('draft-zone-fill')) {
+      map.addLayer({
+        id: 'draft-zone-fill',
+        type: 'fill',
+        source: 'draft-zone',
+        filter: ['==', ['get', 'kind'], 'fill'],
+        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0.18 },
+      });
+    }
+    if (!map.getLayer('draft-zone-outline')) {
+      map.addLayer({
+        id: 'draft-zone-outline',
+        type: 'line',
+        source: 'draft-zone',
+        filter: ['any', ['==', ['get', 'kind'], 'fill'], ['==', ['get', 'kind'], 'line']],
+        paint: { 'line-color': ['coalesce', ['get', 'color'], '#22c55e'], 'line-width': 3, 'line-dasharray': [2, 1] },
+      });
+    }
+    if (!map.getLayer('draft-zone-points')) {
+      map.addLayer({
+        id: 'draft-zone-points',
+        type: 'circle',
+        source: 'draft-zone',
+        filter: ['==', ['get', 'kind'], 'point'],
+        paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#22c55e'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+      });
+    }
   }
 
   function openValidation() {
     setActionError(null);
     setShowValidation(true);
+  }
+
+  function undoPolygonPoint() {
+    if (activeTool !== 'zone_polygon') return;
+    const coords = polygonDraftRef.current;
+    if (coords.length === 0) return;
+    polygonDraftRef.current = coords.slice(0, -1);
+    const next = polygonDraftRef.current;
+    if (next.length === 0) {
+      setDraftLngLat(null);
+    } else {
+      const last = next[next.length - 1];
+      setDraftLngLat({ lng: last[0], lat: last[1] });
+    }
+  }
+
+  function validatePolygon() {
+    if (activeTool !== 'zone_polygon') return;
+    if (polygonDraftRef.current.length < 3) {
+      setActionError('Polygone: au moins 3 points');
+      return;
+    }
+    openValidation();
   }
 
   function cancelDraft() {
@@ -248,22 +461,12 @@ export default function MapLibreMap() {
       }
     };
 
-    const onDblClick = (e: any) => {
-      if (activeTool !== 'zone_polygon') return;
-      e.preventDefault();
-      if (polygonDraftRef.current.length >= 3) {
-        openValidation();
-      }
-    };
-
     map.on('click', onClick);
-    map.on('dblclick', onDblClick);
 
     return () => {
       map.off('click', onClick);
-      map.off('dblclick', onDblClick);
     };
-  }, [activeTool, mapReady, styleMode]);
+  }, [activeTool, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -287,13 +490,30 @@ export default function MapLibreMap() {
       return;
     }
 
+    const nextTitle = draftTitle.trim();
+    const nextKey = nextTitle.toLowerCase();
+    if (activeTool === 'poi') {
+      const dup = pois.some((p) => p.title.trim().toLowerCase() === nextKey);
+      if (dup) {
+        setActionError('Ce titre est déjà utilisé');
+        return;
+      }
+    }
+    if (activeTool === 'zone_circle' || activeTool === 'zone_polygon') {
+      const dup = zones.some((z) => z.title.trim().toLowerCase() === nextKey);
+      if (dup) {
+        setActionError('Ce titre est déjà utilisé');
+        return;
+      }
+    }
+
     setActionBusy(true);
     setActionError(null);
     try {
       if (activeTool === 'poi') {
         const created = await createPoi(selectedMissionId, {
-          type: draftPoiType,
-          title: draftTitle.trim(),
+          type: 'autre',
+          title: nextTitle,
           icon: draftIcon,
           color: draftColor,
           comment: draftComment.trim() || '-',
@@ -306,7 +526,7 @@ export default function MapLibreMap() {
       if (activeTool === 'zone_circle') {
         const created = await createZone(selectedMissionId, {
           type: 'circle',
-          title: draftTitle.trim(),
+          title: nextTitle,
           color: draftColor,
           circle: { center: { lng: draftLngLat.lng, lat: draftLngLat.lat }, radiusMeters: draftCircleRadius },
         });
@@ -323,7 +543,7 @@ export default function MapLibreMap() {
         const ring = [...coords, coords[0]];
         const created = await createZone(selectedMissionId, {
           type: 'polygon',
-          title: draftTitle.trim(),
+          title: nextTitle,
           color: draftColor,
           polygon: { type: 'Polygon', coordinates: [ring] },
         });
@@ -333,8 +553,7 @@ export default function MapLibreMap() {
       setDraftTitle('');
       setDraftComment('');
       setDraftColor('#f97316');
-      setDraftIcon('marker');
-      setDraftPoiType('doute');
+      setDraftIcon('target');
       setShowValidation(false);
       setActiveTool('none');
       setDraftLngLat(null);
@@ -346,214 +565,51 @@ export default function MapLibreMap() {
     }
   }
 
-  const styles = useMemo(
-    () => ({
-      streets: getRasterStyle(
-        [
-          'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        ],
-        '© OpenStreetMap contributors'
-      ),
-      topo: getRasterStyle(
-        [
-          'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
-        ],
-        '© OpenTopoMap (CC-BY-SA) / © OpenStreetMap contributors'
-      ),
-    }),
-    []
-  );
-
   useEffect(() => {
     if (!mapRef.current) return;
     if (mapInstanceRef.current) return;
 
     setMapReady(false);
 
+    if (!currentBaseStyle) return;
+
     const map = new maplibregl.Map({
       container: mapRef.current,
-      style: styles[styleMode],
+      style: currentBaseStyle,
       center: [2.3522, 48.8566],
       zoom: 13,
     });
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-left');
-
-    map.on('load', () => {
+    const onLoad = () => {
+      ensureOverlays(map);
       setMapReady(true);
+    };
 
-      if (mapViewKey) {
-        const saved = localStorage.getItem(mapViewKey);
-        if (saved) {
-          try {
-            const v = JSON.parse(saved) as any;
-            if (v && typeof v.lng === 'number' && typeof v.lat === 'number') {
-              map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom ?? map.getZoom(), bearing: v.bearing ?? 0, pitch: v.pitch ?? 0 });
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
+    const onStyleLoad = () => {
+      ensureOverlays(map);
+      setMapReady(true);
+    };
 
-      map.addSource('me', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-
-      map.addLayer({
-        id: 'me-dot',
-        type: 'circle',
-        source: 'me',
-        paint: {
-          'circle-radius': 7,
-          'circle-color': '#3B82F6',
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
-        },
-      });
-
-      map.addSource('trace', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-
-      map.addLayer({
-        id: 'trace-line',
-        type: 'line',
-        source: 'trace',
-        paint: {
-          'line-color': '#00ff00',
-          'line-width': 4,
-        },
-      });
-
-      map.addSource('others', {
-        type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: [],
-        },
-      });
-      map.addLayer({
-        id: 'others-points',
-        type: 'circle',
-        source: 'others',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': '#2563eb',
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
-      });
-
-      map.addSource('pois', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'pois',
-        type: 'circle',
-        source: 'pois',
-        paint: {
-          'circle-radius': 7,
-          'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-          'circle-opacity': 0,
-        },
-      });
-
-      map.addSource('zones', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'zones-fill',
-        type: 'fill',
-        source: 'zones',
-        paint: {
-          'fill-color': ['coalesce', ['get', 'color'], '#22c55e'],
-          'fill-opacity': 0.12,
-        },
-      });
-      map.addLayer({
-        id: 'zones-outline',
-        type: 'line',
-        source: 'zones',
-        paint: {
-          'line-color': ['coalesce', ['get', 'color'], '#16a34a'],
-          'line-width': 2,
-        },
-      });
-
-      map.addSource('draft-zone', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-
-      map.addSource('draft-poi', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'draft-poi',
-        type: 'circle',
-        source: 'draft-poi',
-        paint: {
-          'circle-radius': 9,
-          'circle-color': ['coalesce', ['get', 'color'], '#f97316'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
-      });
-      map.addLayer({
-        id: 'draft-zone-fill',
-        type: 'fill',
-        source: 'draft-zone',
-        filter: ['==', ['get', 'kind'], 'fill'],
-        paint: {
-          'fill-color': ['coalesce', ['get', 'color'], '#22c55e'],
-          'fill-opacity': 0.18,
-        },
-      });
-      map.addLayer({
-        id: 'draft-zone-outline',
-        type: 'line',
-        source: 'draft-zone',
-        filter: ['any', ['==', ['get', 'kind'], 'fill'], ['==', ['get', 'kind'], 'line']],
-        paint: {
-          'line-color': ['coalesce', ['get', 'color'], '#22c55e'],
-          'line-width': 3,
-          'line-dasharray': [2, 1],
-        },
-      });
-      map.addLayer({
-        id: 'draft-zone-points',
-        type: 'circle',
-        source: 'draft-zone',
-        filter: ['==', ['get', 'kind'], 'point'],
-        paint: {
-          'circle-radius': 6,
-          'circle-color': ['coalesce', ['get', 'color'], '#22c55e'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
-      });
-    });
+    map.on('load', onLoad);
+    map.on('style.load', onStyleLoad);
 
     mapInstanceRef.current = map;
 
     return () => {
+      map.off('load', onLoad);
+      map.off('style.load', onStyleLoad);
       map.remove();
       mapInstanceRef.current = null;
-      setMapReady(false);
     };
-  }, [styles, styleMode]);
+  }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!currentBaseStyle) return;
+    setMapReady(false);
+    map.setStyle(currentBaseStyle);
+  }, [currentBaseStyle]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -952,7 +1008,7 @@ export default function MapLibreMap() {
           type="button"
           onClick={toggleMapStyle}
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-          title={mapStyleMode === 'city' ? 'Passer en satellite' : 'Passer en plan'}
+          title="Changer le fond de carte"
         >
           <Layers className="mx-auto" size={22} />
         </button>
@@ -1033,6 +1089,33 @@ export default function MapLibreMap() {
             </button>
           </div>
         ) : null}
+
+        <div className="flex flex-col gap-3 pt-1">
+          <button
+            type="button"
+            onClick={zoomIn}
+            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+            title="Zoom +"
+          >
+            <Plus className="mx-auto" size={22} />
+          </button>
+          <button
+            type="button"
+            onClick={zoomOut}
+            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+            title="Zoom -"
+          >
+            <Minus className="mx-auto" size={22} />
+          </button>
+          <button
+            type="button"
+            onClick={resetNorth}
+            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+            title="Boussole"
+          >
+            <Compass className="mx-auto" size={22} />
+          </button>
+        </div>
       </div>
 
       {activeTool !== 'none' && !showValidation ? (
@@ -1041,7 +1124,26 @@ export default function MapLibreMap() {
             ? 'Mode POI: clique sur la carte'
             : activeTool === 'zone_circle'
               ? 'Zone ronde: clique sur le centre'
-              : 'Zone libre: clique pour poser des points, double-clic pour valider'}
+              : 'Zone libre: clique pour poser des points'}
+        </div>
+      ) : null}
+
+      {activeTool === 'zone_polygon' && !showValidation ? (
+        <div className="absolute left-1/2 bottom-24 -translate-x-1/2 z-[1100] flex gap-2">
+          <button
+            type="button"
+            onClick={undoPolygonPoint}
+            className="h-11 rounded-2xl border bg-white/90 px-4 text-sm font-semibold text-gray-800 shadow backdrop-blur hover:bg-white"
+          >
+            Précédent
+          </button>
+          <button
+            type="button"
+            onClick={validatePolygon}
+            className="h-11 rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+          >
+            Valider
+          </button>
         </div>
       ) : null}
 
