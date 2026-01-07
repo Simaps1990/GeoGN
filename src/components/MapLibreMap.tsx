@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertTriangle, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, Minus, Pencil, Plus, Skull, Target, X } from 'lucide-react';
+import { AlertTriangle, CircleDotDashed, Compass, Crosshair, Flag, HelpCircle, Layers, MapPin, SatelliteDish, Skull, Target, X } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
@@ -70,6 +70,8 @@ export default function MapLibreMap() {
   const [mapReady, setMapReady] = useState(false);
 
   const [baseStyleIndex, setBaseStyleIndex] = useState(0);
+
+  const [trackingEnabled, setTrackingEnabled] = useState(true);
 
   const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
 
@@ -233,18 +235,6 @@ export default function MapLibreMap() {
     setBaseStyleIndex((i) => (i + 1) % baseStyles.length);
   }
 
-  function zoomIn() {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    map.zoomIn();
-  }
-
-  function zoomOut() {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    map.zoomOut();
-  }
-
   function resetNorth() {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -277,7 +267,7 @@ export default function MapLibreMap() {
         id: 'trace-line',
         type: 'line',
         source: 'trace',
-        paint: { 'line-color': '#00ff00', 'line-width': 4 },
+        paint: { 'line-color': '#00ff00', 'line-width': 7 },
       });
     }
 
@@ -852,12 +842,23 @@ export default function MapLibreMap() {
   }, [selectedMissionId]);
 
   useEffect(() => {
-    if (!selectedMissionId) return;
+    if (!selectedMissionId) {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      return;
+    }
     if (!navigator.geolocation) return;
 
+    // Stop any existing watcher before applying new tracking state.
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
+    }
+
+    if (!trackingEnabled) {
+      return;
     }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -898,7 +899,7 @@ export default function MapLibreMap() {
         watchIdRef.current = null;
       }
     };
-  }, [selectedMissionId]);
+  }, [selectedMissionId, trackingEnabled]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1089,6 +1090,23 @@ export default function MapLibreMap() {
       <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-3">
         <button
           type="button"
+          onClick={() => setTrackingEnabled((v) => !v)}
+          className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center ${
+            trackingEnabled ? 'bg-green-600 text-white' : 'bg-white/90 text-gray-800'
+          }`}
+          >
+          <div className="relative flex items-center justify-center">
+            <SatelliteDish className="mx-auto" size={22} />
+            {!trackingEnabled ? (
+              <span className="absolute inset-0 flex items-center justify-center text-red-600">
+                <X size={18} strokeWidth={2.5} />
+              </span>
+            ) : null}
+          </div>
+        </button>
+
+        <button
+          type="button"
           onClick={centerOnMe}
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Centrer sur moi"
@@ -1178,28 +1196,12 @@ export default function MapLibreMap() {
               }`}
               title="Zone à la main"
             >
-              <Pencil size={20} />
+              <CircleDotDashed size={20} />
             </button>
           </div>
         ) : null}
 
         <div className="flex flex-col gap-3 pt-1">
-          <button
-            type="button"
-            onClick={zoomIn}
-            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-            title="Zoom +"
-          >
-            <Plus className="mx-auto" size={22} />
-          </button>
-          <button
-            type="button"
-            onClick={zoomOut}
-            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-            title="Zoom -"
-          >
-            <Minus className="mx-auto" size={22} />
-          </button>
           <button
             type="button"
             onClick={resetNorth}

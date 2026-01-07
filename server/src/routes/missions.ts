@@ -180,4 +180,27 @@ export async function missionsRoutes(app: FastifyInstance) {
       updatedAt: mission.updatedAt,
     });
   });
+
+  app.delete<{ Params: { id: string } }>('/missions/:id', async (req, reply) => {
+    try {
+      requireAuth(req);
+    } catch (e: any) {
+      return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({ error: 'INVALID_ID' });
+    }
+
+    const membership = await MissionMemberModel.findOne({ missionId: id, userId: req.userId, removedAt: null }).lean();
+    if (!membership || membership.role !== 'admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN' });
+    }
+
+    await MissionMemberModel.deleteMany({ missionId: id });
+    await MissionModel.deleteOne({ _id: id });
+
+    return reply.send({ ok: true });
+  });
 }

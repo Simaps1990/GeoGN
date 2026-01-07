@@ -259,6 +259,15 @@ export async function createMission(title: string) {
   return (await res.json()) as ApiMission;
 }
 
+export async function deleteMission(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_MISSION_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
 export async function getMission(missionId: string) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`);
   if (!res.ok) {
@@ -339,7 +348,12 @@ export async function listMissionMembers(missionId: string) {
 }
 
 export async function requestMissionJoin(missionId: string) {
-  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/join-requests`, { method: 'POST' });
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/join-requests`, {
+    method: 'POST',
+    // Fastify rejects empty bodies when content-type is application/json,
+    // so send an explicit empty JSON object.
+    body: JSON.stringify({}),
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? 'REQUEST_JOIN_FAILED');

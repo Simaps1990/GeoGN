@@ -20,7 +20,7 @@ export default function ProfilePage() {
   const shareText = useMemo(() => {
     const name = user?.displayName?.trim() ? user.displayName.trim() : 'Moi';
     const code = user?.appUserId ?? '-';
-    return `GeoGN — ${name}\n\nMon code: ${code}\n\nCopie/colle ce code dans l’app pour m’ajouter dans une mission.`;
+    return `GeoGN — ${name}\n\nMon code (à copier) :\n${code}\n`;
   }, [user?.appUserId, user?.displayName]);
 
   const whatsappUrl = useMemo(() => {

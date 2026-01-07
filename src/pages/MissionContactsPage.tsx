@@ -56,7 +56,7 @@ export default function MissionContactsPage() {
   const shareText = useMemo(() => {
     const title = mission?.title?.trim() ? mission.title.trim() : 'Mission';
     const code = missionId ?? '-';
-    return `GeoGN — ${title}\n\nCode mission: ${code}\n\nOuvre GeoGN > Accueil > Rejoindre une mission, puis colle le code.`;
+    return `GeoGN — ${title}\n\nCode mission (à copier) :\n${code}\n`;
   }, [mission?.title, missionId]);
 
   const whatsappUrl = useMemo(() => {

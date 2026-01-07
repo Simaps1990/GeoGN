@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, RefreshCcw } from 'lucide-react';
+import { Pencil, RefreshCcw, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import {
-  createMission,
-  getMission,
-  listMissions,
-  requestMissionJoin,
-  updateMission,
-  type ApiMission,
-} from '../lib/api';
+import { createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
 
 export default function CurrentMissionPage() {
@@ -78,6 +71,21 @@ export default function CurrentMissionPage() {
   function onOpenMission(missionId: string) {
     selectMission(missionId);
     navigate(`/mission/${missionId}`);
+  }
+
+  async function onDeleteMission(missionId: string) {
+    const ok = window.confirm('Supprimer cette mission ?');
+    if (!ok) return;
+    try {
+      await deleteMission(missionId);
+      if (selectedMissionId === missionId) {
+        // If we deleted the currently selected mission, clear it.
+        selectMission('');
+      }
+      await refreshMissions();
+    } catch (e: any) {
+      setError(e?.message ?? 'Erreur');
+    }
   }
 
   async function onCreateMission() {
@@ -202,9 +210,31 @@ export default function CurrentMissionPage() {
                     <div className="text-base font-semibold text-gray-900">{m.title}</div>
                     <div className="mt-1 text-xs text-gray-500">statut: {m.status}</div>
                   </div>
-                  <div className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white">
-                    Ouvrir
-                    <ArrowRight size={16} />
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenMission(m.id);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      <Pencil size={16} />
+                      Éditer
+                    </button>
+                    {m.membership?.role === 'admin' ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onDeleteMission(m.id);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-50"
+                      >
+                        <Trash2 size={16} />
+                        Supprimer
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </button>

@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { BookUser, Map, MapPin, CircleDotDashed } from 'lucide-react';
+import { listMissionJoinRequests } from '../lib/api';
 
 type Tab = {
   to: string;
@@ -10,6 +12,38 @@ type Tab = {
 export default function MissionTabs() {
   const { missionId } = useParams();
   const base = missionId ? `/mission/${missionId}` : '/home';
+
+  const [pendingJoinCount, setPendingJoinCount] = useState(0);
+
+  useEffect(() => {
+    if (!missionId) {
+      setPendingJoinCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function refresh() {
+      if (!missionId) return;
+      try {
+        const reqs = await listMissionJoinRequests(missionId);
+        if (!cancelled) setPendingJoinCount(reqs.length);
+      } catch (e: any) {
+        // If the user is not admin or cannot list requests, hide the badge.
+        if (!cancelled) setPendingJoinCount(0);
+      }
+    }
+
+    void refresh();
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [missionId]);
 
   const tabs: Tab[] = [
     { to: `${base}/map`, label: 'Carte', Icon: Map },
@@ -35,6 +69,11 @@ export default function MissionTabs() {
               >
                 <Icon size={20} />
                 <span className="text-[11px] font-medium leading-none">{label}</span>
+                {label === 'Contacts' && pendingJoinCount > 0 ? (
+                  <span className="absolute right-2 top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+                    {pendingJoinCount}
+                  </span>
+                ) : null}
               </NavLink>
             ))}
           </div>
