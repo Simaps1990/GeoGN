@@ -72,6 +72,21 @@ export type ApiZone = {
   updatedAt: string;
 };
 
+export type ApiMissionMember = {
+  user: { id: string; appUserId: string; displayName: string } | null;
+  role: 'admin' | 'member';
+  color: string;
+  isActive: boolean;
+  joinedAt: string | null;
+};
+
+export type ApiMissionJoinRequest = {
+  id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+  requestedBy: { id: string; appUserId: string; displayName: string } | null;
+};
+
 type AuthResponse = {
   accessToken: string;
   refreshToken: string;
@@ -208,6 +223,24 @@ export async function me() {
   return (await res.json()) as ApiUser;
 }
 
+export async function updateMyProfile(displayName: string) {
+  const res = await apiFetch('/me', { method: 'PATCH', body: JSON.stringify({ displayName }) });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_PROFILE_FAILED');
+  }
+  return (await res.json()) as ApiUser;
+}
+
+export async function changeMyPassword(currentPassword: string, newPassword: string) {
+  const res = await apiFetch('/me/password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CHANGE_PASSWORD_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
 export async function listMissions() {
   const res = await apiFetch('/missions');
   if (!res.ok) {
@@ -294,6 +327,57 @@ export async function sendMissionInvite(missionId: string, invitedAppUserId: str
     expiresAt: string;
     invitedUser: { id: string; appUserId: string; displayName: string };
   };
+}
+
+export async function listMissionMembers(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/members`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_MEMBERS_FAILED');
+  }
+  return (await res.json()) as ApiMissionMember[];
+}
+
+export async function requestMissionJoin(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/join-requests`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'REQUEST_JOIN_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function listMissionJoinRequests(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/join-requests`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_JOIN_REQUESTS_FAILED');
+  }
+  return (await res.json()) as ApiMissionJoinRequest[];
+}
+
+export async function acceptMissionJoinRequest(missionId: string, requestId: string) {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/accept`,
+    { method: 'POST' }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ACCEPT_JOIN_REQUEST_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function declineMissionJoinRequest(missionId: string, requestId: string) {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/decline`,
+    { method: 'POST' }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DECLINE_JOIN_REQUEST_FAILED');
+  }
+  return (await res.json()) as { ok: true };
 }
 
 export async function listContacts() {

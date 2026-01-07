@@ -59,6 +59,9 @@ export default function MapLibreMap() {
 
   const polygonDraftRef = useRef<[number, number][]>([]);
 
+  const otherColorsRef = useRef<Record<string, string>>({});
+  const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
+
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: string }>>({});
@@ -112,6 +115,46 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
+    if (!selectedMissionId) return;
+
+    const raw = sessionStorage.getItem('geogn.centerPoi');
+    if (!raw) return;
+    try {
+      const v = JSON.parse(raw) as any;
+      if (v?.missionId !== selectedMissionId) return;
+      if (typeof v.lng !== 'number' || typeof v.lat !== 'number') return;
+      const zoom = typeof v.zoom === 'number' ? v.zoom : Math.max(map.getZoom(), 16);
+      map.easeTo({ center: [v.lng, v.lat], zoom, duration: 600 });
+      sessionStorage.removeItem('geogn.centerPoi');
+    } catch {
+      // ignore
+    }
+  }, [mapReady, selectedMissionId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!selectedMissionId) return;
+
+    const raw = sessionStorage.getItem('geogn.centerZone');
+    if (!raw) return;
+    try {
+      const v = JSON.parse(raw) as any;
+      if (v?.missionId !== selectedMissionId) return;
+      if (typeof v.lng !== 'number' || typeof v.lat !== 'number') return;
+      const zoom = typeof v.zoom === 'number' ? v.zoom : Math.max(map.getZoom(), 14);
+      map.easeTo({ center: [v.lng, v.lat], zoom, duration: 600 });
+      sessionStorage.removeItem('geogn.centerZone');
+    } catch {
+      // ignore
+    }
+  }, [mapReady, selectedMissionId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
     if (!mapViewKey) return;
 
     const saved = localStorage.getItem(mapViewKey);
@@ -153,17 +196,6 @@ export default function MapLibreMap() {
             'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
           '© OpenStreetMap contributors'
-        ),
-      },
-      {
-        id: 'topo',
-        style: getRasterStyle(
-          [
-            'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
-            'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
-            'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
-          ],
-          '© OpenTopoMap (CC-BY-SA) / © OpenStreetMap contributors'
         ),
       },
       {
@@ -251,7 +283,28 @@ export default function MapLibreMap() {
         id: 'others-points',
         type: 'circle',
         source: 'others',
-        paint: { 'circle-radius': 6, 'circle-color': '#2563eb', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['coalesce', ['get', 'color'], '#2563eb'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+    }
+
+    if (!map.getSource('others-traces')) {
+      map.addSource('others-traces', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('others-traces-line')) {
+      map.addLayer({
+        id: 'others-traces-line',
+        type: 'line',
+        source: 'others-traces',
+        paint: {
+          'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
+          'line-width': 3,
+          'line-opacity': 0.9,
+        },
       });
     }
 
@@ -695,9 +748,21 @@ export default function MapLibreMap() {
     const onPos = (msg: any) => {
       if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
       if (user?.id && msg.userId === user.id) return;
+
+      const palette = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'];
+      if (!otherColorsRef.current[msg.userId]) {
+        const used = new Set(Object.values(otherColorsRef.current));
+        const next = palette.find((c) => !used.has(c)) ?? palette[msg.userId.length % palette.length] ?? '#3b82f6';
+        otherColorsRef.current[msg.userId] = next;
+      }
+      const now = typeof msg.t === 'number' ? msg.t : Date.now();
+      const traces = otherTracesRef.current[msg.userId] ?? [];
+      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }].slice(-200);
+      otherTracesRef.current[msg.userId] = nextTraces;
+
       setOtherPositions((prev) => ({
         ...prev,
-        [msg.userId]: { lng: msg.lng, lat: msg.lat, t: msg.t },
+        [msg.userId]: { lng: msg.lng, lat: msg.lat, t: String(msg.t ?? now) },
       }));
     };
 
@@ -852,19 +917,9 @@ export default function MapLibreMap() {
     const markers = poiMarkersRef.current;
     const nextIds = new Set(pois.map((p) => p.id));
 
-    // remove stale markers
-    for (const [id, marker] of markers.entries()) {
-      if (!nextIds.has(id)) {
-        marker.remove();
-        markers.delete(id);
-      }
-    }
-
-    for (const p of pois) {
+    const applyMarkerContent = (el: HTMLDivElement, p: ApiPoi) => {
       const Icon = getPoiIconComponent(p.icon);
       const svg = renderToStaticMarkup(<Icon size={16} color="#ffffff" strokeWidth={2.5} />);
-
-      const el = document.createElement('div');
       el.style.width = '28px';
       el.style.height = '28px';
       el.style.borderRadius = '9999px';
@@ -877,14 +932,25 @@ export default function MapLibreMap() {
       el.style.cursor = 'pointer';
       el.innerHTML = svg;
       el.title = p.title;
+    };
 
+    // remove stale markers
+    for (const [id, marker] of markers.entries()) {
+      if (!nextIds.has(id)) {
+        marker.remove();
+        markers.delete(id);
+      }
+    }
+
+    for (const p of pois) {
       const existing = markers.get(p.id);
       if (existing) {
         existing.setLngLat([p.lng, p.lat]);
-        const oldEl = existing.getElement();
-        oldEl.replaceWith(el);
-        (existing as any)._element = el;
+        const el = existing.getElement() as HTMLDivElement;
+        applyMarkerContent(el, p);
       } else {
+        const el = document.createElement('div');
+        applyMarkerContent(el, p);
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lng, p.lat]).addTo(map);
         markers.set(p.id, marker);
       }
@@ -931,7 +997,7 @@ export default function MapLibreMap() {
 
     const features = Object.entries(otherPositions).map(([userId, p]) => ({
       type: 'Feature',
-      properties: { userId, t: p.t },
+      properties: { userId, t: p.t, color: otherColorsRef.current[userId] ?? '#2563eb' },
       geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
     }));
 
@@ -939,6 +1005,25 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
+  }, [otherPositions, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const src = map.getSource('others-traces') as GeoJSONSource | undefined;
+    if (!src) return;
+
+    const features: any[] = [];
+    for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+      if (pts.length < 2) continue;
+      features.push({
+        type: 'Feature',
+        properties: { userId, color: otherColorsRef.current[userId] ?? '#2563eb' },
+        geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
+      });
+    }
+
+    src.setData({ type: 'FeatureCollection', features } as any);
   }, [otherPositions, mapReady]);
 
   useEffect(() => {
@@ -988,7 +1073,7 @@ export default function MapLibreMap() {
     };
 
     update();
-  }, [lastPos, tracePoints]);
+  }, [lastPos, tracePoints, mapReady]);
 
   return (
     <div className="relative w-full h-screen">

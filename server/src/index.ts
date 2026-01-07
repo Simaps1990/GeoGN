@@ -7,6 +7,7 @@ import { authRoutes } from './routes/auth.js';
 import { contactsRoutes } from './routes/contacts.js';
 import { missionsRoutes } from './routes/missions.js';
 import { invitesRoutes } from './routes/invites.js';
+import { joinRequestsRoutes } from './routes/joinRequests.js';
 import { poisRoutes } from './routes/pois.js';
 import { zonesRoutes } from './routes/zones.js';
 import { setupSocket } from './socket.js';
@@ -25,6 +26,7 @@ await authRoutes(app);
 await contactsRoutes(app);
 await missionsRoutes(app);
 await invitesRoutes(app);
+await joinRequestsRoutes(app);
 await poisRoutes(app);
 await zonesRoutes(app);
 

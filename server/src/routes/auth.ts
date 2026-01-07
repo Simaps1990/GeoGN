@@ -21,6 +21,15 @@ type RefreshBody = {
   refreshToken: string;
 };
 
+type UpdateMeBody = {
+  displayName?: string;
+};
+
+type ChangePasswordBody = {
+  currentPassword: string;
+  newPassword: string;
+};
+
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: RegisterBody }>('/auth/register', async (req: FastifyRequest<{ Body: RegisterBody }>, reply: FastifyReply) => {
     const { email, password, displayName } = req.body;
@@ -135,4 +144,68 @@ export async function authRoutes(app: FastifyInstance) {
       email: user.email,
     });
   });
+
+  app.patch<{ Body: UpdateMeBody }>('/me', async (req: FastifyRequest<{ Body: UpdateMeBody }>, reply: FastifyReply) => {
+    try {
+      requireAuth(req);
+    } catch (e: any) {
+      return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+    }
+
+    const displayName = req.body.displayName;
+    if (typeof displayName !== 'string' || !displayName.trim()) {
+      return reply.code(400).send({ error: 'DISPLAY_NAME_REQUIRED' });
+    }
+
+    const updated = await UserModel.findOneAndUpdate(
+      { _id: req.userId },
+      { $set: { displayName: displayName.trim() } },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      return reply.code(404).send({ error: 'NOT_FOUND' });
+    }
+
+    return reply.send({
+      id: updated._id.toString(),
+      appUserId: updated.appUserId,
+      displayName: updated.displayName,
+      email: updated.email,
+    });
+  });
+
+  app.post<{ Body: ChangePasswordBody }>(
+    '/me/password',
+    async (req: FastifyRequest<{ Body: ChangePasswordBody }>, reply: FastifyReply) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return reply.code(400).send({ error: 'PASSWORD_REQUIRED' });
+      }
+      if (typeof newPassword !== 'string' || newPassword.length < 6) {
+        return reply.code(400).send({ error: 'WEAK_PASSWORD' });
+      }
+
+      const user = await UserModel.findById(req.userId);
+      if (!user) {
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
+      const ok = await verifyPassword(currentPassword, user.passwordHash);
+      if (!ok) {
+        return reply.code(401).send({ error: 'INVALID_CREDENTIALS' });
+      }
+
+      user.passwordHash = await hashPassword(newPassword);
+      await user.save();
+
+      return reply.send({ ok: true });
+    }
+  );
 }

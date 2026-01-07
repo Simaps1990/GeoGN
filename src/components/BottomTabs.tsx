@@ -1,7 +1,5 @@
 import { NavLink } from 'react-router-dom';
 import { BookUser, Home, Map, User } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { listInvites } from '../lib/api';
 
 type Tab = {
   to: string;
@@ -10,34 +8,6 @@ type Tab = {
 };
 
 export default function BottomTabs() {
-  const [invitesCount, setInvitesCount] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const invites = await listInvites();
-        if (!cancelled) setInvitesCount(invites.length);
-      } catch {
-        if (!cancelled) setInvitesCount(0);
-      }
-    })();
-    const id = window.setInterval(() => {
-      void (async () => {
-        try {
-          const invites = await listInvites();
-          if (!cancelled) setInvitesCount(invites.length);
-        } catch {
-          // ignore
-        }
-      })();
-    }, 15000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
-
   const tabs: Tab[] = [
     { to: '/home', label: 'Accueil', Icon: Home },
     { to: '/contacts', label: 'Contacts', Icon: BookUser },
@@ -63,11 +33,6 @@ export default function BottomTabs() {
               >
                 <Icon size={20} />
                 <span className="text-[11px] font-medium leading-none">{label}</span>
-                {to === '/home' && invitesCount > 0 ? (
-                  <span className="absolute right-2 top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
-                    {invitesCount}
-                  </span>
-                ) : null}
               </NavLink>
             ))}
           </div>

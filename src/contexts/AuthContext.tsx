@@ -8,6 +8,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,6 +30,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         setUser(current);
       } catch (e: any) {
+        if (e?.message === 'NOT_FOUND') {
+          clearTokens();
+          setUser(null);
+        }
         console.warn('[auth] bootstrap me() failed', {
           tookMs: Date.now() - startedAt,
           message: e?.message,
@@ -55,8 +60,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const current = await me();
+      setUser(current);
+    } catch (e: any) {
+      if (e?.message === 'NOT_FOUND') {
+        clearTokens();
+        setUser(null);
+        return;
+      }
+      throw e;
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

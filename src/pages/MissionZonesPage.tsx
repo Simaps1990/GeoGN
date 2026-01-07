@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Map as MapIcon } from 'lucide-react';
 import { deleteZone, listZones, updateZone, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
   const { missionId } = useParams();
+  const navigate = useNavigate();
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,13 +40,47 @@ export default function MissionZonesPage() {
         <div className="mt-3 grid gap-2">
           {zones.map((z) => (
             <div key={z.id} className="rounded-2xl border bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-gray-900">{z.title}</div>
-                <div className="text-xs text-gray-600">{z.type}</div>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <div className="h-4 w-4 rounded" style={{ backgroundColor: z.color }} />
-                <div className="text-xs font-mono text-gray-600">{z.color}</div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div
+                    className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-2xl border-2 border-white shadow"
+                    style={{ backgroundColor: z.color || '#22c55e' }}
+                    title={z.title}
+                  />
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">{z.title}</div>
+                    <div className="mt-1 text-xs text-gray-600">Zone</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={!missionId}
+                  onClick={() => {
+                    if (!missionId) return;
+
+                    let lng = 0;
+                    let lat = 0;
+
+                    if (z.type === 'circle' && z.circle?.center) {
+                      lng = z.circle.center.lng;
+                      lat = z.circle.center.lat;
+                    } else if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+                      const ring = z.polygon.coordinates[0];
+                      const pts = ring.slice(0, Math.max(0, ring.length - 1));
+                      if (pts.length) {
+                        lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+                        lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                      }
+                    }
+
+                    sessionStorage.setItem('geogn.centerZone', JSON.stringify({ missionId, lng, lat, zoom: 15 }));
+                    navigate(`/mission/${missionId}/map`);
+                  }}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                  title="Voir sur la carte"
+                >
+                  <MapIcon size={18} />
+                </button>
               </div>
 
               <div className="mt-3 flex gap-2">

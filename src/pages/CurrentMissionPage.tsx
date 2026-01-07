@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Check, RefreshCcw, X } from 'lucide-react';
+import { ArrowRight, RefreshCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
-  acceptInvite,
   createMission,
-  declineInvite,
   getMission,
-  listInvites,
   listMissions,
+  requestMissionJoin,
   updateMission,
-  type ApiInvite,
   type ApiMission,
 } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
@@ -28,9 +25,9 @@ export default function CurrentMissionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [invites, setInvites] = useState<ApiInvite[]>([]);
-  const [invitesLoading, setInvitesLoading] = useState(true);
-  const [invitesBusyToken, setInvitesBusyToken] = useState<string | null>(null);
+  const [joinMissionId, setJoinMissionId] = useState('');
+  const [joinSubmitting, setJoinSubmitting] = useState(false);
+  const [joinMsg, setJoinMsg] = useState<string | null>(null);
 
   const [retentionSeconds, setRetentionSeconds] = useState<number>(3600);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -67,21 +64,8 @@ export default function CurrentMissionPage() {
     }
   }
 
-  async function refreshInvites() {
-    setInvitesLoading(true);
-    try {
-      const data = await listInvites();
-      setInvites(data);
-    } catch {
-      setInvites([]);
-    } finally {
-      setInvitesLoading(false);
-    }
-  }
-
   useEffect(() => {
     void refreshMissions();
-    void refreshInvites();
   }, []);
 
   useEffect(() => {
@@ -109,27 +93,20 @@ export default function CurrentMissionPage() {
     }
   }
 
-  async function onAcceptInvite(token: string) {
-    setInvitesBusyToken(token);
+  async function onRequestJoin() {
+    if (!joinMissionId.trim()) return;
+    setJoinSubmitting(true);
+    setJoinMsg(null);
     try {
-      await acceptInvite(token);
-      await refreshInvites();
-      await refreshMissions();
+      await requestMissionJoin(joinMissionId.trim());
+      setJoinMissionId('');
+      setJoinMsg('Demande envoyée');
+    } catch (e: any) {
+      setJoinMsg(e?.message ?? 'Erreur');
     } finally {
-      setInvitesBusyToken(null);
+      setJoinSubmitting(false);
     }
   }
-
-  async function onDeclineInvite(token: string) {
-    setInvitesBusyToken(token);
-    try {
-      await declineInvite(token);
-      await refreshInvites();
-    } finally {
-      setInvitesBusyToken(null);
-    }
-  }
-
 
   async function onSaveSettings() {
     if (!selectedMissionId) return;
@@ -153,7 +130,6 @@ export default function CurrentMissionPage() {
           type="button"
           onClick={() => {
             void refreshMissions();
-            void refreshInvites();
             void refreshSelectedMission();
           }}
           className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50"
@@ -163,48 +139,29 @@ export default function CurrentMissionPage() {
         </button>
       </div>
 
-      {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}
-
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-gray-900">Invitations</div>
-          <div className="text-xs font-semibold text-gray-600">{invites.length}</div>
+        <div className="text-sm font-semibold text-gray-900">Rejoindre une mission</div>
+        <div className="mt-1 text-xs text-gray-600">Entre le code (ID) de la mission.</div>
+        <div className="mt-3 grid gap-2">
+          <input
+            value={joinMissionId}
+            onChange={(e) => setJoinMissionId(e.target.value)}
+            placeholder="ID mission"
+            className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
+          />
+          <button
+            type="button"
+            disabled={joinSubmitting || !joinMissionId.trim()}
+            onClick={() => void onRequestJoin()}
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+          >
+            Envoyer la demande
+          </button>
+          {joinMsg ? <div className="text-sm text-gray-700">{joinMsg}</div> : null}
         </div>
-        {invitesLoading ? (
-          <div className="mt-2 text-sm text-gray-600">Chargement…</div>
-        ) : invites.length === 0 ? (
-          <div className="mt-2 text-sm text-gray-600">Aucune invitation.</div>
-        ) : (
-          <div className="mt-3 grid gap-2">
-            {invites.map((i) => (
-              <div key={i.id} className="rounded-xl border bg-white p-3">
-                <div className="text-sm font-semibold text-gray-900">{i.mission?.title ?? 'Mission'}</div>
-                <div className="mt-1 text-xs text-gray-500">Invité par: {i.invitedBy?.displayName ?? '-'}</div>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    disabled={invitesBusyToken === i.token}
-                    onClick={() => void onDeclineInvite(i.token)}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800"
-                  >
-                    <X size={16} />
-                    Refuser
-                  </button>
-                  <button
-                    type="button"
-                    disabled={invitesBusyToken === i.token}
-                    onClick={() => void onAcceptInvite(i.token)}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white"
-                  >
-                    <Check size={16} />
-                    Accepter
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-gray-900">Missions</div>
@@ -238,9 +195,7 @@ export default function CurrentMissionPage() {
                 key={m.id}
                 type="button"
                 onClick={() => onOpenMission(m.id)}
-                className={`w-full rounded-2xl border p-4 text-left shadow-sm ${
-                  selectedMissionId === m.id ? 'border-blue-300 bg-blue-50' : 'bg-white hover:bg-gray-50'
-                }`}
+                className="w-full rounded-2xl border bg-white p-4 text-left shadow-sm hover:bg-gray-50"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>

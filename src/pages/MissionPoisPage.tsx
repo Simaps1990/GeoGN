@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { AlertTriangle, Flag, HelpCircle, Skull, Target } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { AlertTriangle, Flag, HelpCircle, Map as MapIcon, Skull, Target } from 'lucide-react';
 import { deletePoi, listPois, updatePoi, type ApiPoi } from '../lib/api';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
+  const navigate = useNavigate();
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -34,6 +35,19 @@ export default function MissionPoisPage() {
     ],
     []
   );
+
+  const iconById = useMemo(() => {
+    const m: Record<string, typeof Target> = {};
+    for (const { id, Icon } of iconOptions) {
+      m[id] = Icon;
+    }
+    return m;
+  }, [iconOptions]);
+
+  function IconForId({ id, size }: { id: string; size?: number }) {
+    const Icon = iconById[id] ?? Target;
+    return <Icon size={size ?? 18} />;
+  }
 
   useEffect(() => {
     if (!missionId) return;
@@ -176,15 +190,39 @@ export default function MissionPoisPage() {
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-900">{p.title}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-white shadow"
+                        style={{ backgroundColor: p.color || '#f97316' }}
+                        title={p.title}
+                      >
+                        <div className="text-white">
+                          <IconForId id={p.icon} size={18} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">{p.title}</div>
+                        <div className="mt-1 text-xs text-gray-600">{p.comment}</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!missionId}
+                      onClick={() => {
+                        if (!missionId) return;
+                        sessionStorage.setItem(
+                          'geogn.centerPoi',
+                          JSON.stringify({ missionId, lng: p.lng, lat: p.lat, zoom: 17 })
+                        );
+                        navigate(`/mission/${missionId}/map`);
+                      }}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      title="Voir sur la carte"
+                    >
+                      <MapIcon size={18} />
+                    </button>
                   </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <div className="h-4 w-4 rounded" style={{ backgroundColor: p.color }} />
-                    <div className="text-xs font-mono text-gray-600">{p.color}</div>
-                    <div className="ml-auto text-xs text-gray-500">{p.icon}</div>
-                  </div>
-                  <div className="mt-2 text-xs text-gray-600">{p.comment}</div>
                 </>
               )}
 

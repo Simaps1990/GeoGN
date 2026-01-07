@@ -3,6 +3,7 @@ export { ContactModel } from './contact.js';
 export { MissionModel } from './mission.js';
 export { MissionMemberModel } from './missionMember.js';
 export { MissionInviteModel } from './missionInvite.js';
+export { MissionJoinRequestModel } from './missionJoinRequest.js';
 export { ZoneModel } from './zone.js';
 export { PositionModel } from './position.js';
 export { TraceModel } from './trace.js';
