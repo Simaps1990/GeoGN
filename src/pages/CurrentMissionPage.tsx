@@ -197,28 +197,32 @@ export default function CurrentMissionPage() {
         </div>
       </div>
 
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="text-sm font-semibold text-gray-900">Créer une mission</div>
+        <div className="mt-1 text-xs text-gray-600">Crée une nouvelle mission et deviens son administrateur.</div>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newMissionTitle}
+            onChange={(e) => setNewMissionTitle(e.target.value)}
+            placeholder="Nom de mission"
+            className="h-11 w-full rounded-xl border px-3 text-sm"
+          />
+          <button
+            type="button"
+            disabled={creatingMission || !newMissionTitle.trim()}
+            onClick={() => void onCreateMission()}
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            Créer
+          </button>
+        </div>
+      </div>
+
       {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="text-sm font-semibold text-gray-900">Missions</div>
-        <div className="mt-3 rounded-2xl border p-3">
-          <div className="text-xs font-semibold text-gray-700">Créer une mission</div>
-          <div className="mt-2 flex gap-2">
-            <input
-              value={newMissionTitle}
-              onChange={(e) => setNewMissionTitle(e.target.value)}
-              placeholder="Nom de mission"
-              className="h-11 w-full rounded-xl border px-3 text-sm"
-            />
-            <button
-              type="button"
-              disabled={creatingMission || !newMissionTitle.trim()}
-              onClick={() => void onCreateMission()}
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              Créer
-            </button>
-          </div>
+        <div className="text-sm font-semibold text-gray-900">
+          {missions.length === 1 ? 'Mission en cours' : 'Missions en cours'}
         </div>
         {missionsLoading ? (
           <div className="mt-2 text-sm text-gray-600">Chargement…</div>

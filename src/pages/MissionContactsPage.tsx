@@ -108,7 +108,7 @@ export default function MissionContactsPage() {
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Gestion de mon equipe</h1>
+        <h1 className="text-xl font-bold text-gray-900">Gestion de mon équipe</h1>
       </div>
 
       {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}

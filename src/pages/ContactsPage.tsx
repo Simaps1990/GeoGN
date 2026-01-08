@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCcw, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { addContact, deleteContact, listContacts, type ApiContact } from '../lib/api';
 
 export default function ContactsPage() {
@@ -9,6 +9,7 @@ export default function ContactsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   async function refresh() {
     setError(null);
@@ -56,21 +57,21 @@ export default function ContactsPage() {
   }
 
   const sorted = useMemo(() => {
-    return [...contacts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  }, [contacts]);
+    const base = [...contacts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    const q = search.trim().toLowerCase();
+    if (!q) return base;
+
+    return base.filter((c) => {
+      const name = (c.alias?.trim() || c.contact?.displayName || '').toLowerCase();
+      const id = (c.contact?.appUserId || '').toLowerCase();
+      return name.includes(q) || id.includes(q);
+    });
+  }, [contacts, search]);
 
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Contacts</h1>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50"
-        >
-          <RefreshCcw size={16} />
-          Actualiser
-        </button>
+        <h1 className="text-xl font-bold text-gray-900">Mon équipe</h1>
       </div>
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
@@ -96,6 +97,14 @@ export default function ContactsPage() {
       </div>
 
       <div className="mt-4">
+        <div className="mb-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher par nom ou numéro (appUserId)"
+            className="h-10 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
+          />
+        </div>
         {loading ? (
           <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
         ) : sorted.length === 0 ? (
