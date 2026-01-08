@@ -1084,11 +1084,15 @@ export default function MapLibreMap() {
 
   useEffect(() => {
     if (!mapRef.current) return;
-    if (mapInstanceRef.current) return;
+    if (!currentBaseStyle) return;
+
+    // Détruire proprement toute instance précédente avant de recréer la carte
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
 
     setMapReady(false);
-
-    if (!currentBaseStyle) return;
 
     const map = new maplibregl.Map({
       container: mapRef.current,
@@ -1099,10 +1103,11 @@ export default function MapLibreMap() {
 
     const onLoad = () => {
       ensureOverlays(map);
+      resyncAllOverlays(map);
       setMapReady(true);
     };
-    map.on('load', onLoad);
 
+    map.on('load', onLoad);
     mapInstanceRef.current = map;
 
     return () => {
@@ -1110,19 +1115,6 @@ export default function MapLibreMap() {
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, []);
-
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    if (!currentBaseStyle) return;
-    setMapReady(false);
-    map.once('style.load', () => {
-      ensureOverlays(map);
-      resyncAllOverlays(map);
-      setMapReady(true);
-    });
-    map.setStyle(currentBaseStyle);
   }, [currentBaseStyle]);
 
   useEffect(() => {
