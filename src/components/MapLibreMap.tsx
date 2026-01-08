@@ -99,6 +99,35 @@ function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: num
   return { type: 'Polygon' as const, coordinates: [coords] };
 }
 
+function isPointInZone(lng: number, lat: number, z: ApiZone) {
+  if (z.type === 'circle' && z.circle) {
+    const { center, radiusMeters } = z.circle;
+    const metersPerDegLat = 111_320;
+    const metersPerDegLng = 111_320 * Math.cos((center.lat * Math.PI) / 180);
+    const dx = (lng - center.lng) * metersPerDegLng;
+    const dy = (lat - center.lat) * metersPerDegLat;
+    const distSq = dx * dx + dy * dy;
+    return distSq <= radiusMeters * radiusMeters;
+  }
+
+  if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+    const ring = z.polygon.coordinates[0];
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0];
+      const yi = ring[i][1];
+      const xj = ring[j][0];
+      const yj = ring[j][1];
+
+      const intersects = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
+  return false;
+}
+
 function getZoneBbox(z: ApiZone) {
   if (z.type === 'circle' && z.circle) {
     const { lng, lat } = z.circle.center;
@@ -638,6 +667,37 @@ export default function MapLibreMap() {
 
   const currentBaseStyle = baseStyles[baseStyleIndex]?.style;
 
+  function applyGridLabelStyle(map: MapLibreMapInstance) {
+    if (!map.getLayer('zones-grid-labels')) return;
+
+    const styleId = baseStyles[baseStyleIndex]?.id;
+
+    if (styleId === 'sat') {
+      // Fond satellite: texte blanc 60%, sans contour.
+      map.setPaintProperty('zones-grid-labels', 'text-color', '#ffffff');
+      map.setPaintProperty('zones-grid-labels', 'text-halo-color', 'rgba(0,0,0,0)');
+      map.setPaintProperty('zones-grid-labels', 'text-halo-width', 0);
+      map.setPaintProperty('zones-grid-labels', 'text-opacity', [
+        'case',
+        ['<=', ['*', ['get', 'rows'], ['get', 'cols']], 64],
+        0.6,
+        0,
+      ]);
+      return;
+    }
+
+    // Fonds plan / clair: texte gris foncé plein, sans halo.
+    map.setPaintProperty('zones-grid-labels', 'text-color', '#111827');
+    map.setPaintProperty('zones-grid-labels', 'text-halo-color', 'rgba(0,0,0,0)');
+    map.setPaintProperty('zones-grid-labels', 'text-halo-width', 0);
+    map.setPaintProperty('zones-grid-labels', 'text-opacity', [
+      'case',
+      ['<=', ['*', ['get', 'rows'], ['get', 'cols']], 64],
+      0.55,
+      0,
+    ]);
+  }
+
   function toggleMapStyle() {
     setBaseStyleIndex((i) => (i + 1) % baseStyles.length);
 
@@ -726,22 +786,39 @@ export default function MapLibreMap() {
         id: 'zones-grid-labels',
         type: 'symbol',
         source: 'zones-grid',
-        filter: ['==', ['get', 'kind'], 'label'],
+        filter: ['==', ['get', 'kind'], 'cell'],
         layout: {
           'text-field': ['coalesce', ['get', 'text'], ''],
-          'text-size': 14,
+          'text-size': [
+            'case',
+            // Cellules au centre: très discrètes, à peine plus grandes que le texte standard.
+            ['==', ['get', 'kind'], 'cell'],
+            13,
+            12,
+          ],
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
-          'text-anchor': ['case', ['==', ['get', 'axis'], 'x'], 'bottom', 'right'],
-          'text-offset': ['case', ['==', ['get', 'axis'], 'x'], ['literal', [0, 1.75]], ['literal', [-0.9, 0]]],
+          'text-anchor': [
+            'case',
+            ['==', ['get', 'kind'], 'cell'],
+            'center',
+            ['case', ['==', ['get', 'axis'], 'x'], 'bottom', 'right'],
+          ],
+          'text-offset': [
+            'case',
+            ['==', ['get', 'kind'], 'cell'],
+            ['literal', [0, 0]],
+            ['case', ['==', ['get', 'axis'], 'x'], ['literal', [0, 1.75]], ['literal', [-0.9, 0]]],
+          ],
           'text-optional': true,
           'text-allow-overlap': true,
           'text-ignore-placement': true,
         },
         paint: {
+          // Valeurs par défaut neutres; elles seront surchargées par applyGridLabelStyle
           'text-color': '#111827',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 1.5,
-          'text-opacity': 0.95,
+          'text-halo-color': 'rgba(0,0,0,0)',
+          'text-halo-width': 0,
+          'text-opacity': 0.9,
         },
       });
     }
@@ -1136,7 +1213,7 @@ export default function MapLibreMap() {
             const y2 = z.circle.center.lat + dym / metersPerDegLat;
             features.push({
               type: 'Feature',
-              properties: { kind: 'line', zoneId: z.id, color: z.color },
+              properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
               geometry: { type: 'LineString', coordinates: [[x, y1], [x, y2]] },
             });
             return;
@@ -1147,7 +1224,7 @@ export default function MapLibreMap() {
             for (const [a, b] of segs) {
               features.push({
                 type: 'Feature',
-                properties: { kind: 'line', zoneId: z.id, color: z.color },
+                properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
                 geometry: { type: 'LineString', coordinates: [[x, a], [x, b]] },
               });
             }
@@ -1204,7 +1281,7 @@ export default function MapLibreMap() {
           const letter = String.fromCharCode('A'.charCodeAt(0) + c);
           features.push({
             type: 'Feature',
-            properties: { kind: 'label', axis: 'x', zoneId: z.id, text: letter },
+            properties: { kind: 'label', axis: 'x', zoneId: z.id, text: letter, rows, cols },
             geometry: { type: 'Point', coordinates: [x, y] },
           });
         }
@@ -1218,9 +1295,33 @@ export default function MapLibreMap() {
           const num = String(r + 1);
           features.push({
             type: 'Feature',
-            properties: { kind: 'label', axis: 'y', zoneId: z.id, text: num },
+            properties: { kind: 'label', axis: 'y', zoneId: z.id, text: num, rows, cols },
             geometry: { type: 'Point', coordinates: [x, y] },
           });
+        }
+
+        // cell labels (center): A1, B2, etc.
+        // On ne les génère que si la grille n'est pas trop dense (<= 8x8 env.)
+        // ET uniquement si le centre de la case est dans la zone.
+        if (rows * cols <= 64) {
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const x = bbox.minLng + (c + 0.5) * dx;
+              const y = bbox.minLat + (r + 0.5) * dy;
+
+              if (!isPointInZone(x, y, z)) continue;
+
+              const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
+              const rowNumber = r + 1;
+              const text = `${colLetter}${rowNumber}`;
+
+              features.push({
+                type: 'Feature',
+                properties: { kind: 'cell', zoneId: z.id, text, rows, cols },
+                geometry: { type: 'Point', coordinates: [x, y] },
+              });
+            }
+          }
         }
       }
 
@@ -1542,6 +1643,7 @@ export default function MapLibreMap() {
 
     const onLoad = () => {
       ensureOverlays(map);
+      applyGridLabelStyle(map);
       resyncAllOverlays(map);
       setMapReady(true);
     };
@@ -1571,6 +1673,7 @@ export default function MapLibreMap() {
 
     const onStyleData = () => {
       ensureOverlays(map);
+      applyGridLabelStyle(map);
       resyncAllOverlays(map);
     };
 
