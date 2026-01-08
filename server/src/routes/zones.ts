@@ -173,7 +173,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       }
 
       const mem = await getMembership(req.userId, missionId);
-      if (!mem || (mem as any).role !== 'admin') {
+      if (!mem || (mem as any).role === 'viewer') {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
