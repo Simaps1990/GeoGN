@@ -277,11 +277,11 @@ export default function MissionPoisPage() {
                 </>
               )}
 
-              {editingId !== p.id && (
+              {editingId !== p.id && canEdit ? (
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    disabled={!missionId || !canEdit || busyId === p.id}
+                    disabled={!missionId || busyId === p.id}
                     onClick={async () => {
                       if (!missionId) return;
                       setEditingId(p.id);
@@ -299,7 +299,7 @@ export default function MissionPoisPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!missionId || !canEdit || busyId === p.id}
+                    disabled={!missionId || busyId === p.id}
                     onClick={async () => {
                       if (!missionId) return;
                       const ok = window.confirm('Supprimer ce POI ?');
@@ -317,7 +317,7 @@ export default function MissionPoisPage() {
                     Supprimer
                   </button>
                 </div>
-              )}
+              ) : null}
             </div>
           ))}
         </div>

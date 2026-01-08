@@ -310,43 +310,45 @@ export default function MissionZonesPage() {
                     </div>
                   ) : null}
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={!missionId || !canEdit || busyId === z.id}
-                      onClick={async () => {
-                        if (!missionId) return;
-                        setEditingId(z.id);
-                        setEditError(null);
-                        setEditDraft({
-                          title: z.title,
-                          color: z.color,
-                        });
-                      }}
-                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Modifier
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!missionId || !canEdit || busyId === z.id}
-                      onClick={async () => {
-                        if (!missionId) return;
-                        const ok = window.confirm('Supprimer cette zone ?');
-                        if (!ok) return;
-                        setBusyId(z.id);
-                        try {
-                          await deleteZone(missionId, z.id);
-                          setZones((prev) => prev.filter((x) => x.id !== z.id));
-                        } finally {
-                          setBusyId(null);
-                        }
-                      }}
-                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                    >
-                      Supprimer
-                    </button>
-                  </div>
+                  {canEdit ? (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          if (!missionId) return;
+                          setEditingId(z.id);
+                          setEditError(null);
+                          setEditDraft({
+                            title: z.title,
+                            color: z.color,
+                          });
+                        }}
+                        className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Modifier
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          if (!missionId) return;
+                          const ok = window.confirm('Supprimer cette zone ?');
+                          if (!ok) return;
+                          setBusyId(z.id);
+                          try {
+                            await deleteZone(missionId, z.id);
+                            setZones((prev) => prev.filter((x) => x.id !== z.id));
+                          } finally {
+                            setBusyId(null);
+                          }
+                        }}
+                        className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                      >
+                        Supprimer
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               )}
 

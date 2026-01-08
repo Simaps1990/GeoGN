@@ -2265,111 +2265,111 @@ export default function MapLibreMap() {
           />
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (!canEdit) return;
-            if (activeTool === 'poi') {
-              cancelDraft();
-              return;
-            }
-            cancelDraft();
-            setZoneMenuOpen(false);
-            setActiveTool('poi');
-          }}
-          className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
-            activeTool === 'poi' ? 'bg-blue-600 text-white' : 'bg-white/90 hover:bg-white'
-          }`}
-          title="Ajouter un POI"
-          disabled={!canEdit}
-        >
-          <MapPin
-            className={
-              activeTool === 'poi' ? 'mx-auto' : 'mx-auto text-gray-600'
-            }
-            size={22}
-          />
-        </button>
+        {canEdit ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                if (activeTool === 'poi') {
+                  cancelDraft();
+                  return;
+                }
+                cancelDraft();
+                setZoneMenuOpen(false);
+                setActiveTool('poi');
+              }}
+              className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
+                activeTool === 'poi' ? 'bg-blue-600 text-white' : 'bg-white/90 hover:bg-white'
+              }`}
+              title="Ajouter un POI"
+            >
+              <MapPin
+                className={
+                  activeTool === 'poi' ? 'mx-auto' : 'mx-auto text-gray-600'
+                }
+                size={22}
+              />
+            </button>
 
-        <div className="relative flex items-center justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              if (!canEdit) return;
-              setActionError(null);
-              setZoneMenuOpen((v) => !v);
-            }}
-            className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
-              activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white/90 hover:bg-white text-gray-600'
-            }`}
-            title="Zones"
-            disabled={!canEdit}
-          >
-            <CircleDotDashed
-              className={
-                activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                  ? 'mx-auto text-white'
-                  : 'mx-auto text-gray-600'
-              }
-              size={22}
-            />
-          </button>
-
-          {zoneMenuOpen ? (
-            <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 rounded-2xl border bg-white/90 p-2 shadow backdrop-blur">
+            <div className="relative flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => {
-                  if (activeTool === 'zone_circle') {
-                    cancelDraft();
-                    setZoneMenuOpen(false);
-                    return;
-                  }
-                  cancelDraft();
-                  setDraftColor('#22c55e');
-                  setActiveTool('zone_circle');
+                  setActionError(null);
+                  setZoneMenuOpen((v) => !v);
                 }}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                  activeTool === 'zone_circle' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
+                  activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white/90 hover:bg-white text-gray-600'
                 }`}
-                title="Zone cercle"
+                title="Zones"
               >
-                <CircleDot
+                <CircleDotDashed
                   className={
-                    activeTool === 'zone_circle' ? 'text-white' : 'text-gray-600'
+                    activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                      ? 'mx-auto text-white'
+                      : 'mx-auto text-gray-600'
                   }
-                  size={20}
+                  size={22}
                 />
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeTool === 'zone_polygon') {
-                    cancelDraft();
-                    setZoneMenuOpen(false);
-                    return;
-                  }
-                  cancelDraft();
-                  setDraftColor('#22c55e');
-                  setActiveTool('zone_polygon');
-                }}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                  activeTool === 'zone_polygon' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
-                }`}
-                title="Zone à la main"
-              >
-                <Spline
-                  className={
-                    activeTool === 'zone_polygon' ? 'text-white' : 'text-gray-600'
-                  }
-                  size={20}
-                />
-              </button>
+
+              {zoneMenuOpen ? (
+                <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 rounded-2xl border bg-white/90 p-2 shadow backdrop-blur">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTool === 'zone_circle') {
+                        cancelDraft();
+                        setZoneMenuOpen(false);
+                        return;
+                      }
+                      cancelDraft();
+                      setDraftColor('#22c55e');
+                      setActiveTool('zone_circle');
+                    }}
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
+                      activeTool === 'zone_circle' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                    }`}
+                    title="Zone cercle"
+                  >
+                    <CircleDot
+                      className={
+                        activeTool === 'zone_circle' ? 'text-white' : 'text-gray-600'
+                      }
+                      size={20}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTool === 'zone_polygon') {
+                        cancelDraft();
+                        setZoneMenuOpen(false);
+                        return;
+                      }
+                      cancelDraft();
+                      setDraftColor('#22c55e');
+                      setActiveTool('zone_polygon');
+                    }}
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
+                      activeTool === 'zone_polygon' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                    }`}
+                    title="Zone à la main"
+                  >
+                    <Spline
+                      className={
+                        activeTool === 'zone_polygon' ? 'text-white' : 'text-gray-600'
+                      }
+                      size={20}
+                    />
+                  </button>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
+          </>
+        ) : null}
 
         <div className="flex flex-col gap-3 pt-1">
           <button
