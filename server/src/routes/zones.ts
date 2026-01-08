@@ -9,6 +9,11 @@ type GeoJSONPolygon = {
   coordinates: number[][][];
 };
 
+type ZoneGrid = {
+  rows: number;
+  cols: number;
+};
+
 type CreateZoneBody =
   | {
       type: 'circle';
@@ -16,6 +21,7 @@ type CreateZoneBody =
       color: string;
       circle: { center: { lng: number; lat: number }; radiusMeters: number };
       sectors?: { sectorId: string; color: string; geometry: GeoJSONPolygon }[];
+      grid?: ZoneGrid;
     }
   | {
       type: 'polygon';
@@ -23,6 +29,7 @@ type CreateZoneBody =
       color: string;
       polygon: GeoJSONPolygon;
       sectors?: { sectorId: string; color: string; geometry: GeoJSONPolygon }[];
+      grid?: ZoneGrid;
     };
 
 type UpdateZoneBody = Partial<CreateZoneBody>;
@@ -60,6 +67,7 @@ export async function zonesRoutes(app: FastifyInstance) {
           type: z.type,
           circle: z.circle ?? null,
           polygon: z.polygon ?? null,
+          grid: z.grid ?? null,
           sectors:
             z.sectors?.map((s) => ({
               sectorId: s.sectorId.toString(),
@@ -111,6 +119,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         type,
         circle: type === 'circle' ? body.circle : undefined,
         polygon: type === 'polygon' ? body.polygon : undefined,
+        grid: body.grid ? { rows: body.grid.rows, cols: body.grid.cols } : undefined,
         sectors:
           Array.isArray(body.sectors)
             ? body.sectors.map((s: any) => ({
@@ -131,6 +140,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         type: zone.type,
         circle: zone.circle ?? null,
         polygon: zone.polygon ?? null,
+        grid: (zone as any).grid ?? null,
         sectors:
           zone.sectors?.map((s) => ({
             sectorId: s.sectorId.toString(),
@@ -183,7 +193,16 @@ export async function zonesRoutes(app: FastifyInstance) {
         }));
       }
 
-      const zone = await ZoneModel.findOneAndUpdate({ _id: zoneId, missionId }, { $set: update }, { new: true }).lean();
+      const unset: any = {};
+      if (body.grid === null) unset.grid = 1;
+      if (body.grid && typeof body.grid.rows === 'number' && typeof body.grid.cols === 'number') {
+        update.grid = { rows: body.grid.rows, cols: body.grid.cols };
+      }
+
+      const updateDoc: any = { $set: update };
+      if (Object.keys(unset).length) updateDoc.$unset = unset;
+
+      const zone = await ZoneModel.findOneAndUpdate({ _id: zoneId, missionId }, updateDoc, { new: true }).lean();
       if (!zone) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
       }
@@ -195,6 +214,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         type: zone.type,
         circle: zone.circle ?? null,
         polygon: zone.polygon ?? null,
+        grid: (zone as any).grid ?? null,
         sectors:
           zone.sectors?.map((s) => ({
             sectorId: s.sectorId.toString(),

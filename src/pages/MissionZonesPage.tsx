@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Map as MapIcon } from 'lucide-react';
+import { Grid2X2, Map as MapIcon } from 'lucide-react';
 import { deleteZone, getMission, listZones, updateZone, type ApiMission, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
@@ -18,9 +18,10 @@ export default function MissionZonesPage() {
     color: string;
   } | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [gridErrorByZoneId, setGridErrorByZoneId] = useState<Record<string, string>>({});
 
   const colorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
+    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
     []
   );
 
@@ -45,6 +46,29 @@ export default function MissionZonesPage() {
   }, [missionId]);
 
   const canEdit = mission?.membership?.role !== 'viewer';
+  const isAdmin = mission?.membership?.role === 'admin';
+
+  async function setZoneGrid(zoneId: string, nextGrid: ApiZone['grid']) {
+    if (!missionId) return;
+    setGridErrorByZoneId((prev) => {
+      const { [zoneId]: _ignored, ...rest } = prev;
+      return rest;
+    });
+
+    const prevZone = zones.find((x) => x.id === zoneId);
+    setZones((prev) => prev.map((x) => (x.id === zoneId ? { ...x, grid: nextGrid } : x)));
+
+    setBusyId(zoneId);
+    try {
+      const updated = await updateZone(missionId, zoneId, { grid: nextGrid });
+      setZones((prev) => prev.map((x) => (x.id === zoneId ? updated : x)));
+    } catch (e: any) {
+      if (prevZone) setZones((prev) => prev.map((x) => (x.id === zoneId ? prevZone : x)));
+      setGridErrorByZoneId((prev) => ({ ...prev, [zoneId]: e?.message ?? 'Erreur' }));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="p-4 pb-24">
@@ -82,7 +106,6 @@ export default function MissionZonesPage() {
                         />
                       ))}
                     </div>
-                    <div className="mt-2 text-xs font-mono text-gray-600">{editDraft.color}</div>
                   </div>
 
                   {editError ? <div className="text-sm text-red-700">{editError}</div> : null}
@@ -182,6 +205,92 @@ export default function MissionZonesPage() {
 
               {editingId !== z.id && (
                 <div className="mt-3 flex gap-2">
+                  {isAdmin ? (
+                    <div className="flex flex-1 items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 2, cols: 2 });
+                        }}
+                        className={`h-10 rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 2 && z.grid?.cols === 2 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 2x2"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>2x2</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 3, cols: 3 });
+                        }}
+                        className={`h-10 rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 3 && z.grid?.cols === 3 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 3x3"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>3x3</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 4, cols: 4 });
+                        }}
+                        className={`h-10 rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 4 && z.grid?.cols === 4 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 4x4"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>4x4</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 5, cols: 5 });
+                        }}
+                        className={`h-10 rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 5 && z.grid?.cols === 5 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 5x5"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>5x5</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, null);
+                        }}
+                        className={`h-10 rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          !z.grid ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Désactiver le carroyage"
+                      >
+                        <span className="relative inline-flex h-5 w-5 items-center justify-center">
+                          <Grid2X2 size={16} />
+                          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                            <span className="h-[2px] w-6 rotate-[-45deg] rounded bg-gray-900/70" />
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     disabled={!missionId || !canEdit || busyId === z.id}
@@ -219,6 +328,8 @@ export default function MissionZonesPage() {
                   </button>
                 </div>
               )}
+
+              {gridErrorByZoneId[z.id] ? <div className="mt-2 text-sm text-red-700">{gridErrorByZoneId[z.id]}</div> : null}
             </div>
           ))}
         </div>

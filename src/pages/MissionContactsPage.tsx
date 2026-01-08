@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Copy, MessageCircle, Pencil, Send, X } from 'lucide-react';
+import { Check, Copy, MessageCircle, Pencil, RefreshCw, Send, X } from 'lucide-react';
 import {
   acceptMissionJoinRequestWithRole,
   declineMissionJoinRequest,
@@ -30,31 +30,14 @@ export default function MissionContactsPage() {
       '#3b82f6',
       '#22c55e',
       '#f97316',
-      '#a855f7',
       '#ef4444',
+      '#a855f7',
       '#14b8a6',
       '#eab308',
-      '#6366f1',
+      '#64748b',
       '#ec4899',
-      '#0ea5e9',
-      '#10b981',
-      '#f59e0b',
-      '#8b5cf6',
-      '#f43f5e',
-      '#93c5fd',
-      '#86efac',
-      '#fdba74',
-      '#d8b4fe',
-      '#fca5a5',
-      '#99f6e4',
-      '#fde68a',
-      '#a5b4fc',
-      '#f9a8d4',
-      '#7dd3fc',
-      '#6ee7b7',
-      '#fcd34d',
-      '#c4b5fd',
-      '#fda4af',
+      '#000000',
+      '#ffffff',
     ],
     []
   );
@@ -196,8 +179,18 @@ export default function MissionContactsPage() {
 
   return (
     <div className="p-4 pb-24">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-bold text-gray-900">Gestion de mon équipe</h1>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={loading}
+          className="inline-flex h-9 items-center gap-2 rounded-xl border bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+          title="Rafraîchir l'équipe"
+        >
+          <RefreshCw size={14} />
+          Actualiser
+        </button>
       </div>
 
       {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}
@@ -432,7 +425,6 @@ export default function MissionContactsPage() {
                   );
                 })}
               </div>
-              <div className="mt-2 text-xs font-mono text-gray-600">{editColor}</div>
             </div>
 
             <div className="mt-4 flex gap-2">

@@ -8,36 +8,17 @@ import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
 
 const MEMBER_COLOR_PALETTE = [
-  // Vives
   '#3b82f6',
   '#22c55e',
   '#f97316',
-  '#a855f7',
   '#ef4444',
+  '#a855f7',
   '#14b8a6',
   '#eab308',
-  '#6366f1',
+  '#64748b',
   '#ec4899',
-  '#0ea5e9',
-  '#10b981',
-  '#f59e0b',
-  '#8b5cf6',
-  '#f43f5e',
-  // Pastels
-  '#93c5fd',
-  '#86efac',
-  '#fdba74',
-  '#d8b4fe',
-  '#fca5a5',
-  '#99f6e4',
-  '#fde68a',
-  '#a5b4fc',
-  '#f9a8d4',
-  '#7dd3fc',
-  '#6ee7b7',
-  '#fcd34d',
-  '#c4b5fd',
-  '#fda4af',
+  '#000000',
+  '#ffffff',
 ];
 
 function pickColor(used: Set<string>) {

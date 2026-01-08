@@ -24,6 +24,9 @@ import {
   Tent,
   Truck,
   Warehouse,
+  MessageCircle,
+  Users,
+  Dog,
 } from 'lucide-react';
 import { deletePoi, getMission, listPois, updatePoi, type ApiMission, type ApiPoi } from '../lib/api';
 
@@ -46,7 +49,7 @@ export default function MissionPoisPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const colorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
+    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
     []
   );
 
@@ -74,6 +77,9 @@ export default function MissionPoisPage() {
       { id: 'shield', Icon: Shield },
       { id: 'tent', Icon: Tent },
       { id: 'house', Icon: House },
+      { id: 'speech', Icon: MessageCircle },
+      { id: 'users', Icon: Users },
+      { id: 'dog', Icon: Dog },
     ],
     []
   );
@@ -168,7 +174,6 @@ export default function MissionPoisPage() {
                         />
                       ))}
                     </div>
-                    <div className="mt-2 text-xs font-mono text-gray-600">{editDraft.color}</div>
                   </div>
 
                   <textarea
@@ -243,7 +248,7 @@ export default function MissionPoisPage() {
                         style={{ backgroundColor: p.color || '#f97316' }}
                         title={p.title}
                       >
-                        <div className="text-white">
+                        <div className={p.color?.toLowerCase() === '#ffffff' ? 'text-black' : 'text-white'}>
                           <IconForId id={p.icon} size={18} />
                         </div>
                       </div>

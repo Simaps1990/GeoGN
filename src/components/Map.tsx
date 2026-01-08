@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase, UserLocation, LocationTrail, Zone } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Navigation, Square, LogOut, Trash2 } from 'lucide-react';
+import { Navigation, Spline, LogOut, Trash2 } from 'lucide-react';
 
 const USER_COLORS = [
   '#3B82F6',
@@ -398,7 +398,7 @@ export default function Map() {
               : 'bg-gray-700 hover:bg-gray-800 text-white'
           }`}
         >
-          <Square size={18} />
+          <Spline size={18} />
           {isCreatingZone ? 'Terminer la zone' : 'Créer une zone'}
         </button>
 

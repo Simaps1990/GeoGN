@@ -24,18 +24,20 @@ import {
   Mic,
   Navigation,
   NavigationOff,
+  MessageCircle,
+  Users,
+  Dog,
   PawPrint,
   Plane,
   Radiation,
   Shield,
   Skull,
+  Spline,
   Tag,
   Tent,
-  Target,
   Truck,
   Undo2,
   Warehouse,
-  Waypoints,
   X,
 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -47,6 +49,7 @@ import {
   createZone,
   getMission,
   listPois,
+  listMissionMembers,
   listZones,
   type ApiMission,
   type ApiPoi,
@@ -96,6 +99,113 @@ function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: num
   return { type: 'Polygon' as const, coordinates: [coords] };
 }
 
+function getZoneBbox(z: ApiZone) {
+  if (z.type === 'circle' && z.circle) {
+    const { lng, lat } = z.circle.center;
+    const metersPerDegLat = 111_320;
+    const metersPerDegLng = 111_320 * Math.cos((lat * Math.PI) / 180);
+    const dLat = z.circle.radiusMeters / metersPerDegLat;
+    const dLng = z.circle.radiusMeters / metersPerDegLng;
+    return { minLng: lng - dLng, minLat: lat - dLat, maxLng: lng + dLng, maxLat: lat + dLat };
+  }
+
+  if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+    const ring = z.polygon.coordinates[0];
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
+    for (const p of ring) {
+      minLng = Math.min(minLng, p[0]);
+      minLat = Math.min(minLat, p[1]);
+      maxLng = Math.max(maxLng, p[0]);
+      maxLat = Math.max(maxLat, p[1]);
+    }
+    return { minLng, minLat, maxLng, maxLat };
+  }
+
+  return null;
+}
+
+function closeRing(ring: number[][]) {
+  if (ring.length === 0) return ring;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return ring;
+  return [...ring, first];
+}
+
+function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
+  const ring = closeRing(ringInput);
+  const ys: number[] = [];
+  const eps = 1e-12;
+
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    const dx = x2 - x1;
+    if (Math.abs(dx) < eps) {
+      if (Math.abs(lng - x1) < eps) {
+        ys.push(y1, y2);
+      }
+      continue;
+    }
+    const t = (lng - x1) / dx;
+    if (t < -eps || t > 1 + eps) continue;
+    const y = y1 + t * (y2 - y1);
+    ys.push(y);
+  }
+
+  ys.sort((a, b) => a - b);
+  const segments: [number, number][] = [];
+  for (let i = 0; i + 1 < ys.length; i += 2) {
+    const a = ys[i];
+    const b = ys[i + 1];
+    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) > eps) segments.push([a, b]);
+  }
+  return segments;
+}
+
+function getZoneLabelPoint(z: ApiZone) {
+  const bbox = getZoneBbox(z);
+  if (!bbox) return null;
+  const cx = (bbox.minLng + bbox.maxLng) / 2;
+  const height = bbox.maxLat - bbox.minLat;
+  const y = bbox.minLat - height * 0.04;
+  return { lng: cx, lat: y };
+}
+
+function clipHorizontalLineToPolygon(lat: number, ringInput: number[][]) {
+  const ring = closeRing(ringInput);
+  const xs: number[] = [];
+  const eps = 1e-12;
+
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    const dy = y2 - y1;
+    if (Math.abs(dy) < eps) {
+      if (Math.abs(lat - y1) < eps) {
+        xs.push(x1, x2);
+      }
+      continue;
+    }
+    const t = (lat - y1) / dy;
+    if (t < -eps || t > 1 + eps) continue;
+    const x = x1 + t * (x2 - x1);
+    xs.push(x);
+  }
+
+  xs.sort((a, b) => a - b);
+  const segments: [number, number][] = [];
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    const a = xs[i];
+    const b = xs[i + 1];
+    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) > eps) segments.push([a, b]);
+  }
+  return segments;
+}
+
 export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
@@ -141,13 +251,13 @@ export default function MapLibreMap() {
   const [labelsEnabled, setLabelsEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b'],
+    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
     []
   );
 
   const poiIconOptions = useMemo(
     () => [
-      { id: 'target', Icon: Target, label: 'Target' },
+      { id: 'target', Icon: Crosshair, label: 'Target' },
       { id: 'flag', Icon: Flag, label: 'Flag' },
       { id: 'alert', Icon: AlertTriangle, label: 'Alert' },
       { id: 'help', Icon: HelpCircle, label: 'Help' },
@@ -169,6 +279,9 @@ export default function MapLibreMap() {
       { id: 'shield', Icon: Shield, label: 'Shield' },
       { id: 'tent', Icon: Tent, label: 'Tent' },
       { id: 'house', Icon: House, label: 'House' },
+      { id: 'speech', Icon: MessageCircle, label: 'Speech' },
+      { id: 'users', Icon: Users, label: 'Users' },
+      { id: 'dog', Icon: Dog, label: 'Dog' },
     ],
     []
   );
@@ -199,6 +312,33 @@ export default function MapLibreMap() {
         if (!cancelled) setMission(m);
       } catch {
         if (!cancelled) setMission(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) {
+      setMemberColors({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const members = await listMissionMembers(selectedMissionId);
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        for (const m of members) {
+          const id = m.user?.id;
+          if (!id) continue;
+          const c = typeof m.color === 'string' ? m.color.trim() : '';
+          if (c) next[id] = c;
+        }
+        setMemberColors(next);
+      } catch {
+        // non bloquant
       }
     })();
     return () => {
@@ -522,6 +662,30 @@ export default function MapLibreMap() {
     map.easeTo({ bearing: 0, pitch: 0 });
   }
 
+  function enforceLayerOrder(map: MapLibreMapInstance) {
+    const safeMoveToTop = (id: string) => {
+      if (!map.getLayer(id)) return;
+      try {
+        map.moveLayer(id);
+      } catch {
+      }
+    };
+
+    safeMoveToTop('zones-fill');
+    safeMoveToTop('zones-outline');
+    safeMoveToTop('zones-grid-lines');
+    safeMoveToTop('zones-grid-labels');
+    safeMoveToTop('pois');
+    safeMoveToTop('pois-labels');
+
+    safeMoveToTop('trace-line');
+    safeMoveToTop('others-traces-line');
+    safeMoveToTop('others-points');
+    safeMoveToTop('others-labels');
+    safeMoveToTop('me-dot');
+    safeMoveToTop('zones-labels');
+  }
+
   function ensureOverlays(map: MapLibreMapInstance) {
     if (!map.getSource('me')) {
       map.addSource('me', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -537,6 +701,47 @@ export default function MapLibreMap() {
           'circle-color': '#3B82F6',
           'circle-stroke-width': 2,
           'circle-stroke-color': '#ffffff',
+        },
+      });
+    }
+
+    if (!map.getSource('zones-grid')) {
+      map.addSource('zones-grid', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('zones-grid-lines')) {
+      map.addLayer({
+        id: 'zones-grid-lines',
+        type: 'line',
+        source: 'zones-grid',
+        filter: ['==', ['get', 'kind'], 'line'],
+        paint: {
+          'line-color': ['coalesce', ['get', 'color'], '#ffffff'],
+          'line-opacity': 0.9,
+          'line-width': 1.5,
+        },
+      });
+    }
+    if (!map.getLayer('zones-grid-labels')) {
+      map.addLayer({
+        id: 'zones-grid-labels',
+        type: 'symbol',
+        source: 'zones-grid',
+        filter: ['==', ['get', 'kind'], 'label'],
+        layout: {
+          'text-field': ['coalesce', ['get', 'text'], ''],
+          'text-size': 14,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-anchor': ['case', ['==', ['get', 'axis'], 'x'], 'bottom', 'right'],
+          'text-offset': ['case', ['==', ['get', 'axis'], 'x'], ['literal', [0, 1.75]], ['literal', [-0.9, 0]]],
+          'text-optional': true,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1.5,
+          'text-opacity': 0.95,
         },
       });
     }
@@ -651,12 +856,15 @@ export default function MapLibreMap() {
     if (!map.getSource('zones')) {
       map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
+    if (!map.getSource('zones-labels')) {
+      map.addSource('zones-labels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
     if (!map.getLayer('zones-fill')) {
       map.addLayer({
         id: 'zones-fill',
         type: 'fill',
         source: 'zones',
-        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0.12 },
+        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0 },
       });
     }
     if (!map.getLayer('zones-outline')) {
@@ -668,11 +876,15 @@ export default function MapLibreMap() {
       });
     }
 
+    const existingZonesLabelsLayer = map.getLayer('zones-labels') as any;
+    if (existingZonesLabelsLayer && existingZonesLabelsLayer.source !== 'zones-labels') {
+      map.removeLayer('zones-labels');
+    }
     if (!map.getLayer('zones-labels')) {
       map.addLayer({
         id: 'zones-labels',
         type: 'symbol',
-        source: 'zones',
+        source: 'zones-labels',
         layout: {
           'text-field': ['coalesce', ['get', 'title'], ''],
           'text-size': 13,
@@ -734,6 +946,8 @@ export default function MapLibreMap() {
         paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#22c55e'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
       });
     }
+
+    enforceLayerOrder(map);
   }
 
   function resyncAllOverlays(map: MapLibreMapInstance) {
@@ -742,6 +956,7 @@ export default function MapLibreMap() {
     const othersSource = map.getSource('others') as GeoJSONSource | undefined;
     const othersTracesSource = map.getSource('others-traces') as GeoJSONSource | undefined;
     const zonesSource = map.getSource('zones') as GeoJSONSource | undefined;
+    const zonesLabelsSource = map.getSource('zones-labels') as GeoJSONSource | undefined;
     const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
     const draftZoneSource = map.getSource('draft-zone') as GeoJSONSource | undefined;
     const draftPoiSource = map.getSource('draft-poi') as GeoJSONSource | undefined;
@@ -846,6 +1061,170 @@ export default function MapLibreMap() {
         }
       }
       zonesSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+
+    if (zonesLabelsSource) {
+      const features: any[] = [];
+      for (const z of zones) {
+        const p = getZoneLabelPoint(z);
+        if (!p) continue;
+        features.push({
+          type: 'Feature',
+          properties: { id: z.id, title: z.title, color: z.color },
+          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+        });
+      }
+      zonesLabelsSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+
+    const zonesGridSource = map.getSource('zones-grid') as GeoJSONSource | undefined;
+    if (zonesGridSource) {
+      const features: any[] = [];
+
+      for (const z of zones) {
+        if (!z.grid?.rows || !z.grid?.cols) continue;
+        const bbox = getZoneBbox(z);
+        if (!bbox) continue;
+
+        const rows = Math.max(1, z.grid.rows);
+        const cols = Math.max(1, Math.min(26, z.grid.cols));
+
+        const dx = (bbox.maxLng - bbox.minLng) / cols;
+        const dy = (bbox.maxLat - bbox.minLat) / rows;
+
+        const metersPerDegLat = 111_320;
+        const metersPerDegLng = 111_320 * Math.cos((((z.type === 'circle' && z.circle) ? z.circle.center.lat : (bbox.minLat + bbox.maxLat) / 2) * Math.PI) / 180);
+
+        const getBottomBoundaryAtX = (x: number) => {
+          if (z.type === 'circle' && z.circle) {
+            const dxm = (x - z.circle.center.lng) * metersPerDegLng;
+            if (Math.abs(dxm) >= z.circle.radiusMeters) return null;
+            const dym = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dxm * dxm);
+            return z.circle.center.lat - dym / metersPerDegLat;
+          }
+          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+            const segs = clipVerticalLineToPolygon(x, z.polygon.coordinates[0]);
+            if (segs.length === 0) return null;
+            return Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+          }
+          return null;
+        };
+
+        const getLeftBoundaryAtY = (y: number) => {
+          if (z.type === 'circle' && z.circle) {
+            const dym = (y - z.circle.center.lat) * metersPerDegLat;
+            if (Math.abs(dym) >= z.circle.radiusMeters) return null;
+            const dxm = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dym * dym);
+            return z.circle.center.lng - dxm / metersPerDegLng;
+          }
+          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+            const segs = clipHorizontalLineToPolygon(y, z.polygon.coordinates[0]);
+            if (segs.length === 0) return null;
+            return Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+          }
+          return null;
+        };
+
+        const addVerticalSegments = (x: number) => {
+          if (z.type === 'circle' && z.circle) {
+            const metersPerDegLat = 111_320;
+            const metersPerDegLng = 111_320 * Math.cos((z.circle.center.lat * Math.PI) / 180);
+            const dxm = (x - z.circle.center.lng) * metersPerDegLng;
+            if (Math.abs(dxm) >= z.circle.radiusMeters) return;
+            const dym = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dxm * dxm);
+            const y1 = z.circle.center.lat - dym / metersPerDegLat;
+            const y2 = z.circle.center.lat + dym / metersPerDegLat;
+            features.push({
+              type: 'Feature',
+              properties: { kind: 'line', zoneId: z.id, color: z.color },
+              geometry: { type: 'LineString', coordinates: [[x, y1], [x, y2]] },
+            });
+            return;
+          }
+          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+            const ring = z.polygon.coordinates[0];
+            const segs = clipVerticalLineToPolygon(x, ring);
+            for (const [a, b] of segs) {
+              features.push({
+                type: 'Feature',
+                properties: { kind: 'line', zoneId: z.id, color: z.color },
+                geometry: { type: 'LineString', coordinates: [[x, a], [x, b]] },
+              });
+            }
+          }
+        };
+
+        const addHorizontalSegments = (y: number) => {
+          if (z.type === 'circle' && z.circle) {
+            const metersPerDegLat = 111_320;
+            const metersPerDegLng = 111_320 * Math.cos((z.circle.center.lat * Math.PI) / 180);
+            const dym = (y - z.circle.center.lat) * metersPerDegLat;
+            if (Math.abs(dym) >= z.circle.radiusMeters) return;
+            const dxm = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dym * dym);
+            const x1 = z.circle.center.lng - dxm / metersPerDegLng;
+            const x2 = z.circle.center.lng + dxm / metersPerDegLng;
+            features.push({
+              type: 'Feature',
+              properties: { kind: 'line', zoneId: z.id, color: z.color },
+              geometry: { type: 'LineString', coordinates: [[x1, y], [x2, y]] },
+            });
+            return;
+          }
+          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+            const ring = z.polygon.coordinates[0];
+            const segs = clipHorizontalLineToPolygon(y, ring);
+            for (const [a, b] of segs) {
+              features.push({
+                type: 'Feature',
+                properties: { kind: 'line', zoneId: z.id, color: z.color },
+                geometry: { type: 'LineString', coordinates: [[a, y], [b, y]] },
+              });
+            }
+          }
+        };
+
+        // vertical lines
+        for (let c = 1; c < cols; c++) {
+          const x = bbox.minLng + c * dx;
+          addVerticalSegments(x);
+        }
+
+        // horizontal lines
+        for (let r = 1; r < rows; r++) {
+          const y = bbox.minLat + r * dy;
+          addHorizontalSegments(y);
+        }
+
+        // column labels (bottom): A, B, C...
+        for (let c = 0; c < cols; c++) {
+          const x = bbox.minLng + (c + 0.5) * dx;
+          const bottom = getBottomBoundaryAtX(x);
+          if (bottom == null) continue;
+          const y = bottom;
+          const letter = String.fromCharCode('A'.charCodeAt(0) + c);
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'label', axis: 'x', zoneId: z.id, text: letter },
+            geometry: { type: 'Point', coordinates: [x, y] },
+          });
+        }
+
+        // row labels (left): 1.. (bottom->top)
+        for (let r = 0; r < rows; r++) {
+          const y = bbox.minLat + (r + 0.5) * dy;
+          const left = getLeftBoundaryAtY(y);
+          if (left == null) continue;
+          const x = left;
+          const num = String(r + 1);
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'label', axis: 'y', zoneId: z.id, text: num },
+            geometry: { type: 'Point', coordinates: [x, y] },
+          });
+        }
+      }
+
+      zonesGridSource.setData({ type: 'FeatureCollection', features } as any);
     }
 
     if (poisSource) {
@@ -1150,25 +1529,13 @@ export default function MapLibreMap() {
 
   useEffect(() => {
     if (!mapRef.current) return;
-    if (!currentBaseStyle) return;
+    if (mapInstanceRef.current) return;
 
-    // Détruire proprement toute instance précédente avant de recréer la carte
-    if (mapInstanceRef.current) {
-      // Supprimer tous les markers POI associés à l'ancienne carte
-      for (const marker of poiMarkersRef.current.values()) {
-        marker.remove();
-      }
-      poiMarkersRef.current.clear();
-
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
-
-    setMapReady(false);
+    const initialStyle = currentBaseStyle ?? baseStyles[0]?.style;
 
     const map = new maplibregl.Map({
       container: mapRef.current,
-      style: currentBaseStyle,
+      style: initialStyle,
       center: [2.3522, 48.8566],
       zoom: 13,
     });
@@ -1185,7 +1552,6 @@ export default function MapLibreMap() {
     return () => {
       map.off('load', onLoad);
 
-      // Nettoyer les markers POI avant de retirer la carte
       for (const marker of poiMarkersRef.current.values()) {
         marker.remove();
       }
@@ -1193,6 +1559,25 @@ export default function MapLibreMap() {
 
       map.remove();
       mapInstanceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!currentBaseStyle) return;
+
+    map.setStyle(currentBaseStyle);
+
+    const onStyleData = () => {
+      ensureOverlays(map);
+      resyncAllOverlays(map);
+    };
+
+    map.once('styledata', onStyleData);
+
+    return () => {
+      map.off('styledata', onStyleData as any);
     };
   }, [currentBaseStyle]);
 
@@ -1212,6 +1597,13 @@ export default function MapLibreMap() {
       });
     }
   }, [pois, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    resyncAllOverlays(map);
+  }, [zones, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1511,7 +1903,8 @@ export default function MapLibreMap() {
 
     const applyMarkerContent = (el: HTMLDivElement, p: ApiPoi) => {
       const Icon = getPoiIconComponent(p.icon);
-      const svg = renderToStaticMarkup(<Icon size={16} color="#ffffff" strokeWidth={2.5} />);
+      const iconColor = (p.color || '').toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
+      const svg = renderToStaticMarkup(<Icon size={16} color={iconColor} strokeWidth={2.5} />);
       el.style.width = '28px';
       el.style.height = '28px';
       el.style.borderRadius = '9999px';
@@ -1864,7 +2257,7 @@ export default function MapLibreMap() {
                 }`}
                 title="Zone à la main"
               >
-                <Waypoints
+                <Spline
                   className={
                     activeTool === 'zone_polygon' ? 'text-white' : 'text-gray-600'
                   }
@@ -1952,7 +2345,6 @@ export default function MapLibreMap() {
                         />
                       ))}
                     </div>
-                    <div className="mt-2 text-xs font-mono text-gray-600">{draftColor}</div>
                   </div>
 
                   <div className="rounded-2xl border p-3">
@@ -1998,9 +2390,9 @@ export default function MapLibreMap() {
               ) : null}
 
               {activeTool !== 'poi' ? (
-                <div className="rounded-2xl border p-3">
+                <div className="mt-3 rounded-2xl border p-3">
                   <div className="text-xs font-semibold text-gray-700">Couleur</div>
-                  <div className="mt-2 grid grid-cols-8 gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {poiColorOptions.map((c) => (
                       <button
                         key={c}
@@ -2012,7 +2404,6 @@ export default function MapLibreMap() {
                       />
                     ))}
                   </div>
-                  <div className="mt-2 text-xs font-mono text-gray-600">{draftColor}</div>
                 </div>
               ) : null}
 

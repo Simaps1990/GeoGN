@@ -18,6 +18,11 @@ export interface ZoneSector {
   geometry: GeoJSONPolygon;
 }
 
+export interface ZoneGrid {
+  rows: number;
+  cols: number;
+}
+
 export interface ZoneDoc {
   _id: mongoose.Types.ObjectId;
   missionId: mongoose.Types.ObjectId;
@@ -27,6 +32,7 @@ export interface ZoneDoc {
   circle?: Circle;
   polygon?: GeoJSONPolygon;
   sectors?: ZoneSector[];
+  grid?: ZoneGrid;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -49,6 +55,14 @@ const ZoneSectorSchema = new Schema<ZoneSector>(
   { _id: false }
 );
 
+const ZoneGridSchema = new Schema<ZoneGrid>(
+  {
+    rows: { type: Number, required: true, min: 1, max: 26 },
+    cols: { type: Number, required: true, min: 1, max: 26 },
+  },
+  { _id: false }
+);
+
 const ZoneSchema = new Schema<ZoneDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
@@ -64,6 +78,7 @@ const ZoneSchema = new Schema<ZoneDoc>(
     },
     polygon: { type: GeoJSONPolygonSchema, required: false },
     sectors: { type: [ZoneSectorSchema], required: false },
+    grid: { type: ZoneGridSchema, required: false },
     createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
     createdAt: { type: Date, required: true, default: () => new Date() },
     updatedAt: { type: Date, required: true, default: () => new Date() },
