@@ -424,7 +424,7 @@ export default function MapLibreMap() {
             'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
             'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors'
+          ' OpenStreetMap contributors'
         ),
       },
       {
@@ -436,14 +436,14 @@ export default function MapLibreMap() {
             'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
             'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors © CARTO'
+          ' OpenStreetMap contributors CARTO'
         ),
       },
       {
         id: 'sat',
         style: getRasterStyle(
           ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-          'Tiles © Esri'
+          'Tiles Esri'
         ),
       },
     ],
@@ -667,6 +667,194 @@ export default function MapLibreMap() {
         filter: ['==', ['get', 'kind'], 'point'],
         paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#22c55e'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
       });
+    }
+  }
+
+  function resyncAllOverlays(map: MapLibreMapInstance) {
+    const meSource = map.getSource('me') as GeoJSONSource | undefined;
+    const traceSource = map.getSource('trace') as GeoJSONSource | undefined;
+    const othersSource = map.getSource('others') as GeoJSONSource | undefined;
+    const othersTracesSource = map.getSource('others-traces') as GeoJSONSource | undefined;
+    const zonesSource = map.getSource('zones') as GeoJSONSource | undefined;
+    const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
+    const draftZoneSource = map.getSource('draft-zone') as GeoJSONSource | undefined;
+    const draftPoiSource = map.getSource('draft-poi') as GeoJSONSource | undefined;
+
+    if (meSource && lastPos) {
+      meSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [lastPos.lng, lastPos.lat] },
+            properties: {},
+          },
+        ],
+      } as any);
+    }
+
+    if (traceSource) {
+      const retentionMs = 60 * 60 * 1000;
+      const now = Date.now();
+      const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
+
+      if (filtered.length >= 2) {
+        traceSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: filtered.map((p) => [p.lng, p.lat]),
+              },
+              properties: {},
+            },
+          ],
+        } as any);
+      } else {
+        traceSource.setData({ type: 'FeatureCollection', features: [] } as any);
+      }
+    }
+
+    if (othersSource) {
+      const features = Object.entries(otherPositions).map(([userId, p]) => {
+        const memberColor = memberColors[userId];
+        const color = memberColor ?? '#4b5563';
+
+        return {
+          type: 'Feature',
+          properties: {
+            userId,
+            t: p.t,
+            color,
+            name: memberNames[userId] ?? '',
+          },
+          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+        };
+      });
+
+      othersSource.setData({
+        type: 'FeatureCollection',
+        features: features as any,
+      });
+    }
+
+    if (othersTracesSource) {
+      const features: any[] = [];
+      for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+        if (pts.length < 2) continue;
+        const memberColor = memberColors[userId];
+        const color = memberColor ?? '#4b5563';
+        features.push({
+          type: 'Feature',
+          properties: { userId, color },
+          geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
+        });
+      }
+
+      othersTracesSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+
+    if (zonesSource) {
+      const features: any[] = [];
+      for (const z of zones) {
+        if (z.type === 'circle' && z.circle) {
+          features.push({
+            type: 'Feature',
+            properties: { id: z.id, title: z.title, color: z.color },
+            geometry: circleToPolygon(z.circle.center, z.circle.radiusMeters),
+          });
+        }
+        if (z.type === 'polygon' && z.polygon) {
+          features.push({ type: 'Feature', properties: { id: z.id, title: z.title, color: z.color }, geometry: z.polygon });
+        }
+        if (Array.isArray(z.sectors)) {
+          for (const s of z.sectors) {
+            features.push({
+              type: 'Feature',
+              properties: { id: z.id, title: z.title, sectorId: s.sectorId, color: s.color },
+              geometry: s.geometry,
+            });
+          }
+        }
+      }
+      zonesSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+
+    if (poisSource) {
+      poisSource.setData({
+        type: 'FeatureCollection',
+        features: pois.map((p) => ({
+          type: 'Feature',
+          properties: { id: p.id, type: p.type, title: p.title, icon: p.icon, color: p.color, comment: p.comment },
+          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+        })) as any,
+      });
+    }
+
+    if (draftPoiSource) {
+      if (activeTool === 'poi' && draftLngLat) {
+        draftPoiSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              properties: { color: draftColor },
+              geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+            },
+          ],
+        } as any);
+      } else {
+        draftPoiSource.setData({ type: 'FeatureCollection', features: [] } as any);
+      }
+    }
+
+    if (draftZoneSource) {
+      const features: any[] = [];
+
+      if (activeTool === 'zone_circle' && draftLngLat) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'fill', color: draftColor },
+          geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
+        });
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'point', color: draftColor },
+          geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+        });
+      }
+
+      if (activeTool === 'zone_polygon') {
+        const coords = polygonDraftRef.current;
+        for (const c of coords) {
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'point', color: draftColor },
+            geometry: { type: 'Point', coordinates: c },
+          });
+        }
+
+        if (coords.length >= 2) {
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'line', color: draftColor },
+            geometry: { type: 'LineString', coordinates: coords },
+          });
+        }
+
+        if (coords.length >= 3) {
+          const ring = [...coords, coords[0]];
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'fill', color: draftColor },
+            geometry: { type: 'Polygon', coordinates: [ring] },
+          });
+        }
+      }
+
+      draftZoneSource.setData({ type: 'FeatureCollection', features } as any);
     }
   }
 
@@ -931,6 +1119,7 @@ export default function MapLibreMap() {
     setMapReady(false);
     map.once('style.load', () => {
       ensureOverlays(map);
+      resyncAllOverlays(map);
       setMapReady(true);
     });
     map.setStyle(currentBaseStyle);
