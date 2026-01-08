@@ -1591,6 +1591,10 @@ export default function MapLibreMap() {
             },
           ],
         });
+      } else {
+        // Si aucune position n'est disponible (par exemple localisation désactivée),
+        // vider la source pour faire disparaître le point "me" de la carte.
+        meSource.setData({ type: 'FeatureCollection', features: [] } as any);
       }
 
       const retentionMs = 60 * 60 * 1000;

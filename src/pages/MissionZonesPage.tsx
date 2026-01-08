@@ -43,7 +43,7 @@ export default function MissionZonesPage() {
 
   return (
     <div className="p-4 pb-24">
-      <h1 className="text-xl font-bold text-gray-900">Zones</h1>
+      <h1 className="text-xl font-bold text-gray-900">Gestion des zones</h1>
       {loading ? (
         <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
       ) : zones.length === 0 ? (

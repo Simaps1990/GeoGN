@@ -54,10 +54,9 @@ export default function MissionContactsPage() {
   }, [missionId]);
 
   const shareText = useMemo(() => {
-    const title = mission?.title?.trim() ? mission.title.trim() : 'Mission';
-    const code = missionId ?? '-';
-    return `GeoGN — ${title}\n\nCode mission (à copier) :\n${code}\n`;
-  }, [mission?.title, missionId]);
+    // Ne partager que le code mission brut, sans texte additionnel
+    return missionId ?? '-';
+  }, [missionId]);
 
   const whatsappUrl = useMemo(() => {
     return `https://wa.me/?text=${encodeURIComponent(shareText)}`;
@@ -109,15 +108,7 @@ export default function MissionContactsPage() {
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Contacts mission</h1>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50"
-        >
-          <RefreshCcw size={16} />
-          Actualiser
-        </button>
+        <h1 className="text-xl font-bold text-gray-900">Gestion de mon equipe</h1>
       </div>
 
       {error ? <div className="mt-3 text-sm text-red-600">{error}</div> : null}
@@ -127,7 +118,6 @@ export default function MissionContactsPage() {
         <div className="mt-1 text-xs text-gray-500">
           Ce code permet de rejoindre directement cette mission.
         </div>
-        <div className="mt-2 rounded-xl border bg-gray-50 p-3 text-xs text-gray-800 whitespace-pre-wrap">{shareText}</div>
         <div className="mt-3 grid gap-2">
           <button
             type="button"
@@ -212,7 +202,7 @@ export default function MissionContactsPage() {
       ) : null}
 
       <div className="mt-4">
-        <div className="text-sm font-semibold text-gray-900">Contacts mission</div>
+        <div className="text-sm font-semibold text-gray-900">Membres actifs</div>
 
         {loading ? (
           <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
