@@ -117,7 +117,8 @@ export default function MissionPoisPage() {
     };
   }, [missionId]);
 
-  const canEdit = mission?.membership?.role !== 'viewer';
+  // Tant que la mission n'est pas chargée, masquer les contrôles d'édition
+  const canEdit = !!mission && mission.membership?.role !== 'viewer';
 
   return (
     <div className="p-4 pb-24">

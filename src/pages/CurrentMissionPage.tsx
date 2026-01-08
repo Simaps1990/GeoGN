@@ -243,7 +243,13 @@ export default function CurrentMissionPage() {
                       {m.title}
                       {m.membership ? (
                         <span className="ml-2 text-xs font-medium text-gray-600">
-                          ({m.membership.role === 'admin' ? 'Admin' : 'Utilisateur'})
+                          ({
+                            m.membership.role === 'admin'
+                              ? 'Admin'
+                              : m.membership.role === 'viewer'
+                              ? 'Visualisateur'
+                              : 'Utilisateur'
+                          })
                         </span>
                       ) : null}
                     </div>

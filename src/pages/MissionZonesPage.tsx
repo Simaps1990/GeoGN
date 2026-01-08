@@ -45,7 +45,8 @@ export default function MissionZonesPage() {
     };
   }, [missionId]);
 
-  const canEdit = mission?.membership?.role !== 'viewer';
+  // Tant que la mission n'est pas chargée, ne pas afficher les contrôles d'édition
+  const canEdit = !!mission && mission.membership?.role !== 'viewer';
   const isAdmin = mission?.membership?.role === 'admin';
 
   async function setZoneGrid(zoneId: string, nextGrid: ApiZone['grid']) {

@@ -327,7 +327,9 @@ export default function MapLibreMap() {
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
-  const canEdit = mission?.membership?.role !== 'viewer';
+  // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
+  // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
+  const canEdit = !!mission && mission.membership?.role !== 'viewer';
 
   useEffect(() => {
     if (!selectedMissionId) {
