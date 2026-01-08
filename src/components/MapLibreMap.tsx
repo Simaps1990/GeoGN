@@ -929,15 +929,29 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!currentBaseStyle) return;
     setMapReady(false);
-    // À chaque changement de style de base, on attend explicitement le nouvel
-    // évènement "style.load" pour recréer toutes les sources/couches et
-    // remettre la carte en état prêt.
     map.once('style.load', () => {
       ensureOverlays(map);
       setMapReady(true);
     });
     map.setStyle(currentBaseStyle);
   }, [currentBaseStyle]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
+    if (poisSource) {
+      poisSource.setData({
+        type: 'FeatureCollection',
+        features: pois.map((p) => ({
+          type: 'Feature',
+          properties: { color: p.color },
+          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+        })),
+      });
+    }
+  }, [pois, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
