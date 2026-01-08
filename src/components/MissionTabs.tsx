@@ -54,7 +54,7 @@ export default function MissionTabs() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-[1100]">
-      <div className="mx-auto max-w-md px-3 pb-[max(env(safe-area-inset-bottom),10px)]">
+      <div className="mx-auto w-full max-w-md sm:max-w-lg md:max-w-2xl lg:max-w-4xl px-3 pb-[max(env(safe-area-inset-bottom),10px)]">
         <div className="h-20 rounded-2xl border border-white/20 bg-white/80 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-white/60">
           <div className="grid h-full grid-cols-4 items-center px-1">
             {tabs.map(({ to, label, Icon }) => (

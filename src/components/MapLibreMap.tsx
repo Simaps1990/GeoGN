@@ -454,6 +454,20 @@ export default function MapLibreMap() {
 
   function toggleMapStyle() {
     setBaseStyleIndex((i) => (i + 1) % baseStyles.length);
+
+    // Recharger explicitement les POI et zones à chaque changement de fond de carte
+    // pour s'assurer que tout est bien synchronisé après un setStyle.
+    if (selectedMissionId) {
+      (async () => {
+        try {
+          const [p, z] = await Promise.all([listPois(selectedMissionId), listZones(selectedMissionId)]);
+          setPois(p);
+          setZones(z);
+        } catch {
+          // non bloquant: si ça échoue, la carte reste utilisable avec les données existantes
+        }
+      })();
+    }
   }
 
   function resetNorth() {
@@ -899,20 +913,12 @@ export default function MapLibreMap() {
       ensureOverlays(map);
       setMapReady(true);
     };
-
-    const onStyleLoad = () => {
-      ensureOverlays(map);
-      setMapReady(true);
-    };
-
     map.on('load', onLoad);
-    map.on('style.load', onStyleLoad);
 
     mapInstanceRef.current = map;
 
     return () => {
       map.off('load', onLoad);
-      map.off('style.load', onStyleLoad);
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -923,6 +929,13 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!currentBaseStyle) return;
     setMapReady(false);
+    // À chaque changement de style de base, on attend explicitement le nouvel
+    // évènement "style.load" pour recréer toutes les sources/couches et
+    // remettre la carte en état prêt.
+    map.once('style.load', () => {
+      ensureOverlays(map);
+      setMapReady(true);
+    });
     map.setStyle(currentBaseStyle);
   }, [currentBaseStyle]);
 
