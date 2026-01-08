@@ -1088,6 +1088,12 @@ export default function MapLibreMap() {
 
     // Détruire proprement toute instance précédente avant de recréer la carte
     if (mapInstanceRef.current) {
+      // Supprimer tous les markers POI associés à l'ancienne carte
+      for (const marker of poiMarkersRef.current.values()) {
+        marker.remove();
+      }
+      poiMarkersRef.current.clear();
+
       mapInstanceRef.current.remove();
       mapInstanceRef.current = null;
     }
@@ -1112,6 +1118,13 @@ export default function MapLibreMap() {
 
     return () => {
       map.off('load', onLoad);
+
+      // Nettoyer les markers POI avant de retirer la carte
+      for (const marker of poiMarkersRef.current.values()) {
+        marker.remove();
+      }
+      poiMarkersRef.current.clear();
+
       map.remove();
       mapInstanceRef.current = null;
     };

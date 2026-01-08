@@ -10,7 +10,7 @@ type Tab = {
 export default function BottomTabs() {
   const tabs: Tab[] = [
     { to: '/home', label: 'Accueil', Icon: Home },
-    { to: '/contacts', label: 'Contacts', Icon: BookUser },
+    { to: '/contacts', label: 'Équipe', Icon: BookUser },
     { to: '/profile', label: 'Profil', Icon: User },
   ];
 

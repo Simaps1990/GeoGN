@@ -49,7 +49,7 @@ export default function MissionTabs() {
     { to: `${base}/map`, label: 'Carte', Icon: Map },
     { to: `${base}/zones`, label: 'Zones', Icon: CircleDotDashed },
     { to: `${base}/pois`, label: 'POI', Icon: MapPin },
-    { to: `${base}/contacts`, label: 'Contacts', Icon: BookUser },
+    { to: `${base}/contacts`, label: 'Équipe', Icon: BookUser },
   ];
 
   return (
@@ -69,7 +69,7 @@ export default function MissionTabs() {
               >
                 <Icon size={24} />
                 <span className="text-[11px] font-medium leading-none">{label}</span>
-                {label === 'Contacts' && pendingJoinCount > 0 ? (
+                {label === 'Équipe' && pendingJoinCount > 0 ? (
                   <span className="absolute right-2 top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
                     {pendingJoinCount}
                   </span>

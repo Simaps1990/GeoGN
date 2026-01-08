@@ -124,6 +124,9 @@ export default function MissionContactsPage() {
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-gray-900">Code mission</div>
+        <div className="mt-1 text-xs text-gray-500">
+          Ce code permet de rejoindre directement cette mission.
+        </div>
         <div className="mt-2 rounded-xl border bg-gray-50 p-3 text-xs text-gray-800 whitespace-pre-wrap">{shareText}</div>
         <div className="mt-3 grid gap-2">
           <button

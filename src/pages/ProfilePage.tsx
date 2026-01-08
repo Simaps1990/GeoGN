@@ -18,10 +18,9 @@ export default function ProfilePage() {
   const [pwdMsg, setPwdMsg] = useState<string | null>(null);
 
   const shareText = useMemo(() => {
-    const name = user?.displayName?.trim() ? user.displayName.trim() : 'Moi';
-    const code = user?.appUserId ?? '-';
-    return `GeoGN — ${name}\n\nMon code (à copier) :\n${code}\n`;
-  }, [user?.appUserId, user?.displayName]);
+    // Ne partager que le code brut, sans texte additionnel
+    return user?.appUserId ?? '-';
+  }, [user?.appUserId]);
 
   const whatsappUrl = useMemo(() => {
     return `https://wa.me/?text=${encodeURIComponent(shareText)}`;
@@ -121,7 +120,9 @@ export default function ProfilePage() {
 
       <div className="mt-4 rounded-lg border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Partager mon code</div>
-        <div className="mt-2 rounded-xl border bg-gray-50 p-3 text-xs text-gray-800 whitespace-pre-wrap">{shareText}</div>
+        <div className="mt-1 text-xs text-gray-500">
+          Ce code est ton identifiant GeoGN personnel. Partage-le pour que d'autres puissent t'ajouter.
+        </div>
         <div className="mt-3 grid gap-2">
           <button
             type="button"
