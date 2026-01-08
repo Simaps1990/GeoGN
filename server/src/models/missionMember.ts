@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 
-export type MissionRole = 'admin' | 'member';
+export type MissionRole = 'admin' | 'member' | 'viewer';
 
 export interface MissionMemberDoc {
   _id: mongoose.Types.ObjectId;
@@ -18,7 +18,7 @@ const MissionMemberSchema = new Schema<MissionMemberDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
-    role: { type: String, required: true, enum: ['admin', 'member'] },
+    role: { type: String, required: true, enum: ['admin', 'member', 'viewer'] },
     color: { type: String, required: true },
     assignedSectorId: { type: Schema.Types.ObjectId, required: false },
     joinedAt: { type: Date, required: false },

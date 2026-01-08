@@ -14,9 +14,49 @@ type UpdateMissionBody = {
   title?: string;
 };
 
-function randomColor() {
-  const palette = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ef4444', '#14b8a6', '#eab308'];
-  return palette[Math.floor(Math.random() * palette.length)] ?? '#3b82f6';
+const MEMBER_COLOR_PALETTE = [
+  // Vives
+  '#3b82f6',
+  '#22c55e',
+  '#f97316',
+  '#a855f7',
+  '#ef4444',
+  '#14b8a6',
+  '#eab308',
+  '#6366f1',
+  '#ec4899',
+  '#0ea5e9',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#f43f5e',
+  // Pastels
+  '#93c5fd',
+  '#86efac',
+  '#fdba74',
+  '#d8b4fe',
+  '#fca5a5',
+  '#99f6e4',
+  '#fde68a',
+  '#a5b4fc',
+  '#f9a8d4',
+  '#7dd3fc',
+  '#6ee7b7',
+  '#fcd34d',
+  '#c4b5fd',
+  '#fda4af',
+];
+
+function pickColor(used: Set<string>) {
+  const available = MEMBER_COLOR_PALETTE.filter((c) => !used.has(c));
+  const source = available.length ? available : MEMBER_COLOR_PALETTE;
+  return source[Math.floor(Math.random() * source.length)] ?? '#3b82f6';
+}
+
+async function pickMissionMemberColor(missionId: mongoose.Types.ObjectId) {
+  const existing = await MissionMemberModel.find({ missionId, removedAt: null }).select({ color: 1 }).lean();
+  const used = new Set(existing.map((m) => String((m as any).color ?? '').trim()).filter(Boolean));
+  return pickColor(used);
 }
 
 export async function missionsRoutes(app: FastifyInstance) {
@@ -83,11 +123,13 @@ export async function missionsRoutes(app: FastifyInstance) {
       updatedAt: now,
     });
 
+    const memberColor = await pickMissionMemberColor(mission._id);
+
     await MissionMemberModel.create({
       missionId: mission._id,
       userId: new mongoose.Types.ObjectId(req.userId),
       role: 'admin',
-      color: randomColor(),
+      color: memberColor,
       joinedAt: now,
       removedAt: null,
       isActive: true,

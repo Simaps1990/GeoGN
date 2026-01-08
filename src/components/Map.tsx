@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase, UserLocation, LocationTrail, Zone } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { MapPin, Navigation, Square, LogOut, Trash2 } from 'lucide-react';
+import { Navigation, Square, LogOut, Trash2 } from 'lucide-react';
 
 const USER_COLORS = [
   '#3B82F6',
@@ -17,9 +17,9 @@ const USER_COLORS = [
 export default function Map() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<Map<string, L.Marker>>(new Map());
-  const trailsRef = useRef<Map<string, L.Polyline>>(new Map());
-  const zonesRef = useRef<Map<string, L.Polygon>>(new Map());
+  const markersRef = useRef<globalThis.Map<string, L.Marker>>(new globalThis.Map());
+  const trailsRef = useRef<globalThis.Map<string, L.Polyline>>(new globalThis.Map());
+  const zonesRef = useRef<globalThis.Map<string, L.Polygon>>(new globalThis.Map());
 
   const [isTracking, setIsTracking] = useState(false);
   const [isCreatingZone, setIsCreatingZone] = useState(false);

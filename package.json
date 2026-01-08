@@ -14,7 +14,7 @@
     "@supabase/supabase-js": "^2.57.4",
     "@types/leaflet": "^1.9.21",
     "leaflet": "^1.9.4",
-    "lucide-react": "^0.344.0",
+    "lucide-react": "^0.476.0",
     "maplibre-gl": "^4.7.1",
     "mongodb": "^7.0.0",
     "react": "^18.3.1",

@@ -93,6 +93,9 @@ export async function zonesRoutes(app: FastifyInstance) {
       if (!mem) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
+      if ((mem as any).role === 'viewer') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
 
       const body = req.body as any;
       const type = body?.type as ZoneType;
@@ -160,7 +163,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       }
 
       const mem = await getMembership(req.userId, missionId);
-      if (!mem || mem.role !== 'admin') {
+      if (!mem || (mem as any).role !== 'admin') {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
@@ -224,7 +227,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       }
 
       const mem = await getMembership(req.userId, missionId);
-      if (!mem || mem.role !== 'admin') {
+      if (!mem || (mem as any).role !== 'admin') {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 

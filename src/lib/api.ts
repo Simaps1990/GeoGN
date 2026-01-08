@@ -14,7 +14,7 @@ export type ApiMission = {
   createdAt: string;
   updatedAt: string;
   membership?: {
-    role: 'admin' | 'member';
+    role: 'admin' | 'member' | 'viewer';
     color: string;
     isActive: boolean;
     joinedAt: string | null;
@@ -74,7 +74,7 @@ export type ApiZone = {
 
 export type ApiMissionMember = {
   user: { id: string; appUserId: string; displayName: string } | null;
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'viewer';
   color: string;
   isActive: boolean;
   joinedAt: string | null;
@@ -382,6 +382,41 @@ export async function acceptMissionJoinRequest(missionId: string, requestId: str
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? 'ACCEPT_JOIN_REQUEST_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function acceptMissionJoinRequestWithRole(
+  missionId: string,
+  requestId: string,
+  role: 'admin' | 'member' | 'viewer'
+) {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/accept`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ACCEPT_JOIN_REQUEST_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function updateMissionMember(
+  missionId: string,
+  memberUserId: string,
+  input: { role?: 'admin' | 'member' | 'viewer'; color?: string }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/members/${encodeURIComponent(memberUserId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_MEMBER_FAILED');
   }
   return (await res.json()) as { ok: true };
 }

@@ -7,9 +7,54 @@ import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
 import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
 
-function randomColor() {
-  const palette = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ef4444', '#14b8a6', '#eab308'];
-  return palette[Math.floor(Math.random() * palette.length)] ?? '#3b82f6';
+const MEMBER_COLOR_PALETTE = [
+  // Vives
+  '#3b82f6',
+  '#22c55e',
+  '#f97316',
+  '#a855f7',
+  '#ef4444',
+  '#14b8a6',
+  '#eab308',
+  '#6366f1',
+  '#ec4899',
+  '#0ea5e9',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#f43f5e',
+  // Pastels
+  '#93c5fd',
+  '#86efac',
+  '#fdba74',
+  '#d8b4fe',
+  '#fca5a5',
+  '#99f6e4',
+  '#fde68a',
+  '#a5b4fc',
+  '#f9a8d4',
+  '#7dd3fc',
+  '#6ee7b7',
+  '#fcd34d',
+  '#c4b5fd',
+  '#fda4af',
+];
+
+function pickColor(used: Set<string>) {
+  const available = MEMBER_COLOR_PALETTE.filter((c) => !used.has(c));
+  const source = available.length ? available : MEMBER_COLOR_PALETTE;
+  return source[Math.floor(Math.random() * source.length)] ?? '#3b82f6';
+}
+
+async function pickMissionMemberColor(missionId: mongoose.Types.ObjectId) {
+  const existing = await MissionMemberModel.find({ missionId, removedAt: null }).select({ color: 1 }).lean();
+  const used = new Set(existing.map((m) => String((m as any).color ?? '').trim()).filter(Boolean));
+  return pickColor(used);
+}
+
+function normalizeRole(role: any) {
+  if (role === 'admin' || role === 'member' || role === 'viewer') return role;
+  return null;
 }
 
 async function ensureContact(ownerUserId: mongoose.Types.ObjectId, contactUserId: mongoose.Types.ObjectId) {
@@ -149,9 +194,12 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
     );
   });
 
-  app.post<{ Params: { missionId: string; requestId: string } }>(
+  app.post<{ Params: { missionId: string; requestId: string }; Body: { role?: 'admin' | 'member' | 'viewer' } }>(
     '/missions/:missionId/join-requests/:requestId/accept',
-    async (req: FastifyRequest<{ Params: { missionId: string; requestId: string } }>, reply: FastifyReply) => {
+    async (
+      req: FastifyRequest<{ Params: { missionId: string; requestId: string }; Body: { role?: 'admin' | 'member' | 'viewer' } }>,
+      reply: FastifyReply
+    ) => {
       try {
         requireAuth(req);
       } catch (e: any) {
@@ -176,6 +224,11 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: 'NOT_PENDING' });
       }
 
+      const desiredRole = normalizeRole((req.body as any)?.role ?? 'member') ?? null;
+      if (!desiredRole) {
+        return reply.code(400).send({ error: 'INVALID_ROLE' });
+      }
+
       const now = new Date();
 
       await MissionJoinRequestModel.updateOne(
@@ -183,29 +236,97 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         { $set: { status: 'accepted', handledBy: new mongoose.Types.ObjectId(req.userId), handledAt: now } }
       );
 
+      const existingMember = await MissionMemberModel.findOne({ missionId: joinReq.missionId, userId: joinReq.requestedBy }).lean();
+      const memberColor = existingMember?.color ? String(existingMember.color).trim() : await pickMissionMemberColor(joinReq.missionId);
+
       await MissionMemberModel.updateOne(
         { missionId: joinReq.missionId, userId: joinReq.requestedBy },
         {
           $setOnInsert: {
             missionId: joinReq.missionId,
             userId: joinReq.requestedBy,
-            role: 'member',
-            color: randomColor(),
+            role: desiredRole,
+            color: memberColor,
           },
           $set: {
             removedAt: null,
             joinedAt: now,
             isActive: true,
+            role: desiredRole,
           },
         },
         { upsert: true }
       );
+
+      app.io?.to(`mission:${missionId}`).emit('member:updated', {
+        missionId,
+        member: { userId: joinReq.requestedBy.toString(), role: desiredRole, color: memberColor },
+      });
 
       // Add to global contacts in both directions (admin <-> requester)
       await Promise.all([
         ensureContact(new mongoose.Types.ObjectId(req.userId), joinReq.requestedBy),
         ensureContact(joinReq.requestedBy, new mongoose.Types.ObjectId(req.userId)),
       ]);
+
+      return reply.send({ ok: true });
+    }
+  );
+
+  app.patch<{ Params: { missionId: string; memberUserId: string }; Body: { role?: 'admin' | 'member' | 'viewer'; color?: string } }>(
+    '/missions/:missionId/members/:memberUserId',
+    async (
+      req: FastifyRequest<{ Params: { missionId: string; memberUserId: string }; Body: { role?: 'admin' | 'member' | 'viewer'; color?: string } }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { missionId, memberUserId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(memberUserId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
+
+      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+      if (!membership || membership.role !== 'admin') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      const update: any = {};
+      if (typeof (req.body as any)?.color === 'string') {
+        const c = (req.body as any).color.trim();
+        if (c) update.color = c;
+      }
+
+      if (typeof (req.body as any)?.role !== 'undefined') {
+        const r = normalizeRole((req.body as any).role);
+        if (!r) {
+          return reply.code(400).send({ error: 'INVALID_ROLE' });
+        }
+        update.role = r;
+      }
+
+      if (!Object.keys(update).length) {
+        return reply.code(400).send({ error: 'NO_CHANGES' });
+      }
+
+      const updated = await MissionMemberModel.findOneAndUpdate(
+        { missionId, userId: new mongoose.Types.ObjectId(memberUserId), removedAt: null },
+        { $set: update },
+        { new: true }
+      ).lean();
+
+      if (!updated) {
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
+      app.io?.to(`mission:${missionId}`).emit('member:updated', {
+        missionId,
+        member: { userId: memberUserId, role: (updated as any).role, color: (updated as any).color },
+      });
 
       return reply.send({ ok: true });
     }

@@ -1,11 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, Flag, HelpCircle, Map as MapIcon, Skull, Target } from 'lucide-react';
-import { deletePoi, listPois, updatePoi, type ApiPoi } from '../lib/api';
+import {
+  AlertTriangle,
+  Binoculars,
+  Bomb,
+  Bike,
+  Car,
+  Cctv,
+  Church,
+  Coffee,
+  Flag,
+  Flame,
+  HelpCircle,
+  House,
+  Map as MapIcon,
+  Mic,
+  PawPrint,
+  Plane,
+  Radiation,
+  Shield,
+  Skull,
+  Target,
+  Tent,
+  Truck,
+  Warehouse,
+} from 'lucide-react';
+import { deletePoi, getMission, listPois, updatePoi, type ApiMission, type ApiPoi } from '../lib/api';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
+  const [mission, setMission] = useState<ApiMission | null>(null);
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,6 +57,23 @@ export default function MissionPoisPage() {
       { id: 'help', Icon: HelpCircle },
       { id: 'alert', Icon: AlertTriangle },
       { id: 'flag', Icon: Flag },
+      { id: 'binoculars', Icon: Binoculars },
+      { id: 'bomb', Icon: Bomb },
+      { id: 'car', Icon: Car },
+      { id: 'cctv', Icon: Cctv },
+      { id: 'church', Icon: Church },
+      { id: 'coffee', Icon: Coffee },
+      { id: 'flame', Icon: Flame },
+      { id: 'helicopter', Icon: Plane },
+      { id: 'mic', Icon: Mic },
+      { id: 'paw', Icon: PawPrint },
+      { id: 'radiation', Icon: Radiation },
+      { id: 'warehouse', Icon: Warehouse },
+      { id: 'truck', Icon: Truck },
+      { id: 'motorcycle', Icon: Bike },
+      { id: 'shield', Icon: Shield },
+      { id: 'tent', Icon: Tent },
+      { id: 'house', Icon: House },
     ],
     []
   );
@@ -55,6 +97,8 @@ export default function MissionPoisPage() {
     (async () => {
       setLoading(true);
       try {
+        const m = await getMission(missionId);
+        if (!cancelled) setMission(m);
         const p = await listPois(missionId);
         if (cancelled) return;
         setPois(p);
@@ -66,6 +110,8 @@ export default function MissionPoisPage() {
       cancelled = true;
     };
   }, [missionId]);
+
+  const canEdit = mission?.membership?.role !== 'viewer';
 
   return (
     <div className="p-4 pb-24">
@@ -230,7 +276,7 @@ export default function MissionPoisPage() {
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    disabled={!missionId || busyId === p.id}
+                    disabled={!missionId || !canEdit || busyId === p.id}
                     onClick={async () => {
                       if (!missionId) return;
                       setEditingId(p.id);
@@ -248,7 +294,7 @@ export default function MissionPoisPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!missionId || busyId === p.id}
+                    disabled={!missionId || !canEdit || busyId === p.id}
                     onClick={async () => {
                       if (!missionId) return;
                       const ok = window.confirm('Supprimer ce POI ?');

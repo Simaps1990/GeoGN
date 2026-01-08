@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Copy, MessageCircle, RefreshCcw, Send, X } from 'lucide-react';
+import { Check, Copy, MessageCircle, Pencil, Send, X } from 'lucide-react';
 import {
-  acceptMissionJoinRequest,
+  acceptMissionJoinRequestWithRole,
   declineMissionJoinRequest,
   getMission,
   listMissionJoinRequests,
   listMissionMembers,
+  updateMissionMember,
   type ApiMission,
   type ApiMissionJoinRequest,
   type ApiMissionMember,
@@ -14,6 +15,49 @@ import {
 
 export default function MissionContactsPage() {
   const { missionId } = useParams();
+
+  const roleDescriptions = useMemo(
+    () => ({
+      admin: "Accès complet à la mission + gestion de l'équipe.",
+      member: 'Peut créer, modifier et supprimer POI, zones et traces.',
+      viewer: 'Peut uniquement voir POI, zones et traces (lecture seule).',
+    }),
+    []
+  );
+
+  const colorPalette = useMemo(
+    () => [
+      '#3b82f6',
+      '#22c55e',
+      '#f97316',
+      '#a855f7',
+      '#ef4444',
+      '#14b8a6',
+      '#eab308',
+      '#6366f1',
+      '#ec4899',
+      '#0ea5e9',
+      '#10b981',
+      '#f59e0b',
+      '#8b5cf6',
+      '#f43f5e',
+      '#93c5fd',
+      '#86efac',
+      '#fdba74',
+      '#d8b4fe',
+      '#fca5a5',
+      '#99f6e4',
+      '#fde68a',
+      '#a5b4fc',
+      '#f9a8d4',
+      '#7dd3fc',
+      '#6ee7b7',
+      '#fcd34d',
+      '#c4b5fd',
+      '#fda4af',
+    ],
+    []
+  );
 
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [members, setMembers] = useState<ApiMissionMember[]>([]);
@@ -23,6 +67,13 @@ export default function MissionContactsPage() {
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const [acceptingRequest, setAcceptingRequest] = useState<ApiMissionJoinRequest | null>(null);
+  const [acceptRole, setAcceptRole] = useState<'admin' | 'member' | 'viewer'>('member');
+
+  const [editingMember, setEditingMember] = useState<ApiMissionMember | null>(null);
+  const [editRole, setEditRole] = useState<'admin' | 'member' | 'viewer'>('member');
+  const [editColor, setEditColor] = useState<string>('');
 
   async function refresh() {
     if (!missionId) return;
@@ -77,12 +128,50 @@ export default function MissionContactsPage() {
     });
   }, [members]);
 
+  const usedColorsByOtherMembers = useMemo(() => {
+    const currentEditingUserId = editingMember?.user?.id ?? '';
+    const used = new Set<string>();
+    for (const m of members) {
+      if (!m?.user?.id) continue;
+      if (currentEditingUserId && m.user.id === currentEditingUserId) continue;
+      if (m.color) used.add(m.color);
+    }
+    return used;
+  }, [members, editingMember?.user?.id]);
+
   async function onAcceptRequest(requestId: string) {
     if (!missionId) return;
-    setBusyKey(`accept:${requestId}`);
+    const req = joinRequests.find((r) => r.id === requestId) ?? null;
+    if (!req) return;
+    setAcceptRole('member');
+    setAcceptingRequest(req);
+  }
+
+  async function submitAcceptRequest() {
+    if (!missionId || !acceptingRequest) return;
+    setBusyKey(`accept:${acceptingRequest.id}`);
     setError(null);
     try {
-      await acceptMissionJoinRequest(missionId, requestId);
+      await acceptMissionJoinRequestWithRole(missionId, acceptingRequest.id, acceptRole);
+      setAcceptingRequest(null);
+      await refresh();
+    } catch (e: any) {
+      setError(e?.message ?? 'Erreur');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function submitMemberEdit() {
+    if (!missionId || !editingMember?.user?.id) return;
+    setBusyKey(`memberEdit:${editingMember.user.id}`);
+    setError(null);
+    try {
+      await updateMissionMember(missionId, editingMember.user.id, { role: editRole, color: editColor });
+      setMembers((prev) =>
+        prev.map((m) => (m.user?.id === editingMember.user?.id ? { ...m, role: editRole, color: editColor } : m))
+      );
+      setEditingMember(null);
       await refresh();
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
@@ -216,15 +305,156 @@ export default function MissionContactsPage() {
                   <div>
                     <div className="text-base font-semibold text-gray-900">{m.user?.displayName ?? 'Membre'}</div>
                     <div className="mt-1 text-xs text-gray-500">{m.user?.appUserId ?? '-'}</div>
-                    <div className="mt-1 text-xs text-gray-500">{m.role === 'admin' ? 'Admin' : 'Membre'}</div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {m.role === 'admin' ? 'Admin' : m.role === 'viewer' ? 'Visualisateur' : 'Utilisateur'}
+                    </div>
                   </div>
-                  <div className="mt-1 h-8 w-8 rounded-full border-2 border-white shadow" style={{ backgroundColor: m.color }} />
+                  <div className="flex items-center gap-2">
+                    <div className="mt-1 h-8 w-8 rounded-full border-2 border-white shadow" style={{ backgroundColor: m.color }} />
+                    {mission?.membership?.role === 'admin' && m.user?.id ? (
+                      <button
+                        type="button"
+                        disabled={busyKey === `memberEdit:${m.user.id}`}
+                        onClick={() => {
+                          setEditingMember(m);
+                          setEditRole(m.role);
+                          setEditColor(m.color);
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        title="Modifier"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {acceptingRequest ? (
+        <div className="fixed inset-0 z-[2000] flex items-end justify-center bg-black/40 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+            <div className="text-base font-semibold text-gray-900">Choisir un rôle</div>
+            <div className="mt-1 text-sm text-gray-600">
+              Pour {acceptingRequest.requestedBy?.displayName ?? 'cet utilisateur'}
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              {(['admin', 'member', 'viewer'] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setAcceptRole(r)}
+                  className={`rounded-2xl border p-3 text-left ${acceptRole === r ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="text-sm font-semibold text-gray-900">
+                    {r === 'admin' ? 'Admin' : r === 'viewer' ? 'Visualisateur' : 'Utilisateur'}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600">{(roleDescriptions as any)[r]}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAcceptingRequest(null)}
+                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={busyKey === `accept:${acceptingRequest.id}`}
+                onClick={() => void submitAcceptRequest()}
+                className="h-11 flex-1 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingMember && mission?.membership?.role === 'admin' ? (
+        <div className="fixed inset-0 z-[2000] flex items-end justify-center bg-black/40 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+            <div className="text-base font-semibold text-gray-900">Modifier le membre</div>
+            <div className="mt-1 text-sm text-gray-600">{editingMember.user?.displayName ?? 'Membre'}</div>
+
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-700">Rôle</div>
+              <div className="mt-2 grid gap-2">
+                {(['admin', 'member', 'viewer'] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setEditRole(r)}
+                    className={`rounded-2xl border p-3 text-left ${editRole === r ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
+                  >
+                    <div className="text-sm font-semibold text-gray-900">
+                      {r === 'admin' ? 'Admin' : r === 'viewer' ? 'Visualisateur' : 'Utilisateur'}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600">{(roleDescriptions as any)[r]}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-700">Couleur</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {colorPalette.map((c) => {
+                  const usedByOther = usedColorsByOtherMembers.has(c);
+                  const selected = editColor === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setEditColor(c)}
+                      className={`relative h-10 w-10 rounded-xl border ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                      style={{ backgroundColor: c }}
+                      aria-label={c}
+                    >
+                      {usedByOther ? (
+                        <span
+                          className="pointer-events-none absolute inset-0"
+                          style={{
+                            background:
+                              'linear-gradient(135deg, rgba(0,0,0,0) 47%, rgba(0,0,0,0.55) 49%, rgba(0,0,0,0.55) 51%, rgba(0,0,0,0) 53%)',
+                          }}
+                        />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-xs font-mono text-gray-600">{editColor}</div>
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingMember(null)}
+                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={busyKey === `memberEdit:${editingMember.user?.id ?? ''}` || !editColor}
+                onClick={() => void submitMemberEdit()}
+                className="h-11 flex-1 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

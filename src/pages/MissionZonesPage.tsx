@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Map as MapIcon } from 'lucide-react';
-import { deleteZone, listZones, updateZone, type ApiZone } from '../lib/api';
+import { deleteZone, getMission, listZones, updateZone, type ApiMission, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
+  const [mission, setMission] = useState<ApiMission | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,6 +30,8 @@ export default function MissionZonesPage() {
     (async () => {
       setLoading(true);
       try {
+        const m = await getMission(missionId);
+        if (!cancelled) setMission(m);
         const z = await listZones(missionId);
         if (cancelled) return;
         setZones(z);
@@ -40,6 +43,8 @@ export default function MissionZonesPage() {
       cancelled = true;
     };
   }, [missionId]);
+
+  const canEdit = mission?.membership?.role !== 'viewer';
 
   return (
     <div className="p-4 pb-24">
@@ -179,7 +184,7 @@ export default function MissionZonesPage() {
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    disabled={!missionId || busyId === z.id}
+                    disabled={!missionId || !canEdit || busyId === z.id}
                     onClick={async () => {
                       if (!missionId) return;
                       setEditingId(z.id);
@@ -195,7 +200,7 @@ export default function MissionZonesPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!missionId || busyId === z.id}
+                    disabled={!missionId || !canEdit || busyId === z.id}
                     onClick={async () => {
                       if (!missionId) return;
                       const ok = window.confirm('Supprimer cette zone ?');

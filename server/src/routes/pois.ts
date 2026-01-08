@@ -47,7 +47,6 @@ export async function poisRoutes(app: FastifyInstance) {
       if (!mem) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
-
       const pois = await PoiModel.find({ missionId, deletedAt: { $exists: false } }).sort({ createdAt: -1 }).lean();
       return reply.send(
         pois.map((p) => ({
@@ -82,6 +81,9 @@ export async function poisRoutes(app: FastifyInstance) {
 
       const mem = await getMembership(req.userId, missionId);
       if (!mem) {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+      if ((mem as any).role === 'viewer') {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
@@ -142,6 +144,9 @@ export async function poisRoutes(app: FastifyInstance) {
       if (!mem) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
+      if ((mem as any).role === 'viewer') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
 
       const update: any = {};
       if (req.body.type) update.type = req.body.type;
@@ -198,7 +203,7 @@ export async function poisRoutes(app: FastifyInstance) {
       }
 
       const mem = await getMembership(req.userId, missionId);
-      if (!mem || mem.role !== 'admin') {
+      if (!mem || (mem as any).role !== 'admin') {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 

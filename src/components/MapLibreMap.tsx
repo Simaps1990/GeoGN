@@ -3,21 +3,38 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type S
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   AlertTriangle,
+  Binoculars,
+  Bomb,
+  Bike,
+  Car,
   Check,
+  Cctv,
+  Church,
   CircleDot,
   CircleDotDashed,
+  Coffee,
   Compass,
   Crosshair,
+  Flame,
   Flag,
   HelpCircle,
+  House,
   Layers,
   MapPin,
+  Mic,
   Navigation,
   NavigationOff,
+  PawPrint,
+  Plane,
+  Radiation,
+  Shield,
   Skull,
   Tag,
+  Tent,
   Target,
+  Truck,
   Undo2,
+  Warehouse,
   Waypoints,
   X,
 } from 'lucide-react';
@@ -25,7 +42,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
 import { getSocket } from '../lib/socket';
-import { createPoi, createZone, listMissionMembers, listPois, listZones, type ApiMissionMember, type ApiPoi, type ApiZone } from '../lib/api';
+import {
+  createPoi,
+  createZone,
+  getMission,
+  listPois,
+  listZones,
+  type ApiMission,
+  type ApiPoi,
+  type ApiZone,
+} from '../lib/api';
 
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
@@ -84,7 +110,6 @@ export default function MapLibreMap() {
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
 
   const [memberColors, setMemberColors] = useState<Record<string, string>>({});
-  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
@@ -110,6 +135,9 @@ export default function MapLibreMap() {
   const [draftColor, setDraftColor] = useState('#f97316');
   const [draftIcon, setDraftIcon] = useState('target');
 
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const [labelsEnabled, setLabelsEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
@@ -124,6 +152,23 @@ export default function MapLibreMap() {
       { id: 'alert', Icon: AlertTriangle, label: 'Alert' },
       { id: 'help', Icon: HelpCircle, label: 'Help' },
       { id: 'skull', Icon: Skull, label: 'Skull' },
+      { id: 'binoculars', Icon: Binoculars, label: 'Binoculars' },
+      { id: 'bomb', Icon: Bomb, label: 'Bomb' },
+      { id: 'car', Icon: Car, label: 'Car' },
+      { id: 'cctv', Icon: Cctv, label: 'CCTV' },
+      { id: 'church', Icon: Church, label: 'Church' },
+      { id: 'coffee', Icon: Coffee, label: 'Coffee' },
+      { id: 'flame', Icon: Flame, label: 'Flame' },
+      { id: 'helicopter', Icon: Plane, label: 'Helicopter' },
+      { id: 'mic', Icon: Mic, label: 'Mic' },
+      { id: 'paw', Icon: PawPrint, label: 'Paw' },
+      { id: 'radiation', Icon: Radiation, label: 'Radiation' },
+      { id: 'warehouse', Icon: Warehouse, label: 'Warehouse' },
+      { id: 'truck', Icon: Truck, label: 'Truck' },
+      { id: 'motorcycle', Icon: Bike, label: 'Motorbike' },
+      { id: 'shield', Icon: Shield, label: 'Shield' },
+      { id: 'tent', Icon: Tent, label: 'Tent' },
+      { id: 'house', Icon: House, label: 'House' },
     ],
     []
   );
@@ -131,10 +176,6 @@ export default function MapLibreMap() {
   function getPoiIconComponent(iconId: string) {
     return poiIconOptions.find((x) => x.id === iconId)?.Icon ?? MapPin;
   }
-
-  const [actionBusy, setActionBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
 
@@ -142,40 +183,46 @@ export default function MapLibreMap() {
 
   const tracesLoadedRef = useRef(false);
 
+  const [mission, setMission] = useState<ApiMission | null>(null);
+
+  const canEdit = mission?.membership?.role !== 'viewer';
+
   useEffect(() => {
-    // Load mission member colors and names so traces can match admin-assigned colors
-    // and we can show labels (pseudos) above other users.
     if (!selectedMissionId) {
-      setMemberColors({});
-      setMemberNames({});
+      setMission(null);
       return;
     }
-
     let cancelled = false;
     (async () => {
       try {
-        const members = await listMissionMembers(selectedMissionId);
-        if (cancelled) return;
-        const colors: Record<string, string> = {};
-        const names: Record<string, string> = {};
-        for (const m of members as ApiMissionMember[]) {
-          if (m.user?.id) {
-            if (m.color) colors[m.user.id] = m.color;
-            if (m.user.displayName) names[m.user.id] = m.user.displayName;
-          }
-        }
-        setMemberColors(colors);
-        setMemberNames(names);
+        const m = await getMission(selectedMissionId);
+        if (!cancelled) setMission(m);
       } catch {
-        if (!cancelled) {
-          setMemberColors({});
-          setMemberNames({});
-        }
+        if (!cancelled) setMission(null);
       }
     })();
-
     return () => {
       cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const socket = getSocket();
+
+    const onMemberUpdated = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const userId = msg?.member?.userId;
+      if (!userId) return;
+      const color = msg?.member?.color;
+      if (typeof color === 'string' && color.trim()) {
+        setMemberColors((prev) => ({ ...prev, [userId]: color.trim() }));
+      }
+    };
+
+    socket.on('member:updated', onMemberUpdated);
+    return () => {
+      socket.off('member:updated', onMemberUpdated);
     };
   }, [selectedMissionId]);
 
@@ -358,6 +405,7 @@ export default function MapLibreMap() {
 
     const othersLabels = map.getLayer('others-labels');
     const poisLabels = map.getLayer('pois-labels');
+    const zonesLabels = map.getLayer('zones-labels');
     const visibility = labelsEnabled ? 'visible' : 'none';
 
     if (othersLabels) {
@@ -366,23 +414,21 @@ export default function MapLibreMap() {
     if (poisLabels) {
       map.setLayoutProperty('pois-labels', 'visibility', visibility);
     }
+    if (zonesLabels) {
+      map.setLayoutProperty('zones-labels', 'visibility', visibility);
+    }
   }, [labelsEnabled, mapReady]);
 
-  // S'assurer que les labels (users + POI) sont au-dessus des tracés et des zones.
+  // S'assurer que les labels (users + POI + zones) sont au-dessus des tracés et des zones.
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
 
-    const labelLayers = ['others-labels', 'pois-labels'];
+    const labelLayers = ['others-labels', 'pois-labels', 'zones-labels'];
     for (const id of labelLayers) {
       if (map.getLayer(id)) {
-        // Appeler moveLayer sans beforeId place la couche tout en haut.
-        try {
-          map.moveLayer(id as any);
-        } catch {
-          // ignore move errors
-        }
+        map.moveLayer(id);
       }
     }
   }, [mapReady]);
@@ -622,6 +668,26 @@ export default function MapLibreMap() {
       });
     }
 
+    if (!map.getLayer('zones-labels')) {
+      map.addLayer({
+        id: 'zones-labels',
+        type: 'symbol',
+        source: 'zones',
+        layout: {
+          'text-field': ['coalesce', ['get', 'title'], ''],
+          'text-size': 13,
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
+          'text-optional': true,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 2,
+        },
+      });
+    }
+
     if (!map.getSource('draft-zone')) {
       map.addSource('draft-zone', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
@@ -728,7 +794,7 @@ export default function MapLibreMap() {
             userId,
             t: p.t,
             color,
-            name: memberNames[userId] ?? '',
+            name: '',
           },
           geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
         };
@@ -1538,7 +1604,7 @@ export default function MapLibreMap() {
           userId,
           t: p.t,
           color,
-          name: memberNames[userId] ?? '',
+          name: '',
         },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       };
@@ -1548,7 +1614,7 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberNames, memberColors, mapReady]);
+  }, [otherPositions, memberColors, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1695,7 +1761,7 @@ export default function MapLibreMap() {
           type="button"
           onClick={() => setLabelsEnabled((v) => !v)}
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
-          title="Afficher les noms (POI + utilisateurs)"
+          title="Afficher les noms (POI + zones + utilisateurs)"
         >
           <Tag
             className={`mx-auto ${labelsEnabled ? 'text-green-600' : 'text-gray-600'}`}
@@ -1706,6 +1772,7 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={() => {
+            if (!canEdit) return;
             if (activeTool === 'poi') {
               cancelDraft();
               return;
@@ -1718,6 +1785,7 @@ export default function MapLibreMap() {
             activeTool === 'poi' ? 'bg-blue-600 text-white' : 'bg-white/90 hover:bg-white'
           }`}
           title="Ajouter un POI"
+          disabled={!canEdit}
         >
           <MapPin
             className={
@@ -1731,6 +1799,7 @@ export default function MapLibreMap() {
           <button
             type="button"
             onClick={() => {
+              if (!canEdit) return;
               setActionError(null);
               setZoneMenuOpen((v) => !v);
             }}
@@ -1740,6 +1809,7 @@ export default function MapLibreMap() {
                 : 'bg-white/90 hover:bg-white text-gray-600'
             }`}
             title="Zones"
+            disabled={!canEdit}
           >
             <CircleDotDashed
               className={
