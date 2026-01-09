@@ -10,6 +10,7 @@ export default function MissionLayout() {
   const { selectedMissionId, selectMission } = useMission();
   const { user } = useAuth();
   const location = useLocation();
+  const isMapRoute = !!missionId && location.pathname.endsWith(`/mission/${missionId}/map`);
   const watchIdRef = useRef<number | null>(null);
   const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
 
@@ -111,7 +112,6 @@ export default function MissionLayout() {
     window.addEventListener('focus', onVisibilityOrFocus);
     document.addEventListener('visibilitychange', onVisibilityOrFocus);
 
-    const isMapRoute = location.pathname.endsWith(`/mission/${missionId}/map`);
     if (navigator.geolocation && !isMapRoute) {
       // Clear any previous watcher.
       if (watchIdRef.current !== null) {
@@ -161,7 +161,7 @@ export default function MissionLayout() {
   }, [missionId, user?.id, location.pathname]);
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-[max(env(safe-area-inset-bottom),10px)]">
+    <div className={isMapRoute ? 'min-h-screen bg-gray-50' : 'min-h-screen bg-gray-50 pb-[max(env(safe-area-inset-bottom),10px)]'}>
       <div className="w-full">
         <Outlet />
       </div>

@@ -2747,7 +2747,7 @@ export default function MapLibreMap() {
         </div>
       )}
 
-      <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-3">
+      <div className="absolute right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-3">
         <button
           type="button"
           onClick={() => {
