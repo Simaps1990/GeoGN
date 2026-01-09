@@ -249,6 +249,7 @@ export default function MapLibreMap() {
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
 
   const [memberColors, setMemberColors] = useState<Record<string, string>>({});
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
@@ -420,6 +421,7 @@ export default function MapLibreMap() {
   useEffect(() => {
     if (!selectedMissionId) {
       setMemberColors({});
+      setMemberNames({});
       return;
     }
     let cancelled = false;
@@ -428,13 +430,17 @@ export default function MapLibreMap() {
         const members = await listMissionMembers(selectedMissionId);
         if (cancelled) return;
         const next: Record<string, string> = {};
+        const nextNames: Record<string, string> = {};
         for (const m of members) {
           const id = m.user?.id;
           if (!id) continue;
           const c = typeof m.color === 'string' ? m.color.trim() : '';
           if (c) next[id] = c;
+          const name = typeof m.user?.displayName === 'string' ? m.user.displayName.trim() : '';
+          if (name) nextNames[id] = name;
         }
         setMemberColors(next);
+        setMemberNames(nextNames);
       } catch {
         // non bloquant
       }
@@ -723,6 +729,23 @@ export default function MapLibreMap() {
     }
   }, [labelsEnabled, mapReady]);
 
+  // Rendre les labels utilisateurs robustes: si la couche existait déjà (cache/style reload),
+  // on force les propriétés nécessaires pour qu'ils soient effectivement rendus.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!map.getLayer('others-labels')) return;
+
+    try {
+      map.setLayoutProperty('others-labels', 'text-allow-overlap', true);
+      map.setLayoutProperty('others-labels', 'text-ignore-placement', true);
+      map.setPaintProperty('others-labels', 'text-color', ['coalesce', ['get', 'color'], '#111827']);
+    } catch {
+      // ignore
+    }
+  }, [mapReady, labelsEnabled]);
+
   // S'assurer que les labels (users + POI + zones) sont au-dessus des tracés et des zones.
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -734,6 +757,19 @@ export default function MapLibreMap() {
       if (map.getLayer(id)) {
         map.moveLayer(id);
       }
+    }
+  }, [mapReady]);
+
+  // Ajuster la hauteur du label des zones (plus haut).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!map.getLayer('zones-labels')) return;
+    try {
+      map.setLayoutProperty('zones-labels', 'text-offset', [0, 0.1]);
+    } catch {
+      // ignore
     }
   }, [mapReady]);
 
@@ -984,7 +1020,7 @@ export default function MapLibreMap() {
           paint: {
             'line-color': '#00ff00',
             'line-width': 8,
-            'line-opacity': ['coalesce', ['get', 'opacity'], 0.5],
+            'line-opacity': 0.9,
           },
         },
         'me-dot'
@@ -1005,7 +1041,7 @@ export default function MapLibreMap() {
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
           'line-width': 8,
-          'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
+          'line-opacity': 0.9,
         },
       });
     }
@@ -1035,16 +1071,19 @@ export default function MapLibreMap() {
         type: 'symbol',
         source: 'others',
         layout: {
-          'text-field': ['coalesce', ['get', 'name'], ''],
+          visibility: labelsEnabled ? 'visible' : 'none',
+          'text-field': ['coalesce', ['get', 'name'], ['get', 'userId'], ''],
           'text-size': 13,
           'text-offset': [0, -1.2],
           'text-anchor': 'bottom',
           'text-optional': true,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
         },
         paint: {
-          'text-color': '#111827',
+          'text-color': ['coalesce', ['get', 'color'], '#111827'],
           'text-halo-color': '#ffffff',
-          'text-halo-width': 2,
+          'text-halo-width': 1.5,
         },
       });
     }
@@ -1073,6 +1112,7 @@ export default function MapLibreMap() {
         type: 'symbol',
         source: 'pois',
         layout: {
+          visibility: labelsEnabled ? 'visible' : 'none',
           'text-field': ['coalesce', ['get', 'title'], ''],
           'text-size': 13,
           'text-offset': [0, 1.2],
@@ -1120,9 +1160,10 @@ export default function MapLibreMap() {
         type: 'symbol',
         source: 'zones-labels',
         layout: {
+          visibility: labelsEnabled ? 'visible' : 'none',
           'text-field': ['coalesce', ['get', 'title'], ''],
           'text-size': 13,
-          'text-offset': [0, 0.8],
+          'text-offset': [0, 0.1],
           'text-anchor': 'top',
           'text-optional': true,
         },
@@ -1235,6 +1276,7 @@ export default function MapLibreMap() {
       const features = Object.entries(otherPositions).map(([userId, p]) => {
         const memberColor = memberColors[userId];
         const color = memberColor ?? '#4b5563';
+        const name = memberNames[userId] ?? '';
 
         return {
           type: 'Feature',
@@ -1242,7 +1284,7 @@ export default function MapLibreMap() {
             userId,
             t: p.t,
             color,
-            name: '',
+            name,
           },
           geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
         };
@@ -2301,6 +2343,7 @@ export default function MapLibreMap() {
       const isInactive = now - p.t > inactiveAfterMs;
       // Inactif: gris foncé. Sinon, couleur de mission.
       const color = isInactive ? '#374151' : (memberColor ?? '#374151');
+      const name = memberNames[userId] ?? '';
 
       return {
         type: 'Feature',
@@ -2308,7 +2351,7 @@ export default function MapLibreMap() {
           userId,
           t: p.t,
           color,
-          name: '',
+          name,
         },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       };
@@ -2318,7 +2361,7 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberColors, mapReady]);
+  }, [otherPositions, memberColors, memberNames, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2336,25 +2379,11 @@ export default function MapLibreMap() {
       const isInactive = now - lastT > inactiveAfterMs;
       const color = isInactive ? '#374151' : (memberColor ?? '#374151');
 
-      const tA = now - traceRetentionMs * (2 / 3);
-      const tB = now - traceRetentionMs * (1 / 3);
-
-      const oldest = pts.filter((p) => p.t < tA);
-      const middle = pts.filter((p) => p.t >= tA && p.t < tB);
-      const newest = pts.filter((p) => p.t >= tB);
-
-      const pushSeg = (segPts: typeof pts, opacity: number) => {
-        if (segPts.length < 2) return;
-        features.push({
-          type: 'Feature',
-          properties: { userId, color, opacity },
-          geometry: { type: 'LineString', coordinates: segPts.map((p) => [p.lng, p.lat]) },
-        });
-      };
-
-      pushSeg(oldest, 0.3);
-      pushSeg(middle, 0.6);
-      pushSeg(newest, 0.9);
+      features.push({
+        type: 'Feature',
+        properties: { userId, color },
+        geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
+      });
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
@@ -2370,13 +2399,18 @@ export default function MapLibreMap() {
       if (!meSource || !traceSource) return;
 
       if (lastPos) {
+        const myColor = user?.id ? memberColors[user.id] : undefined;
+        const myName = user?.id ? memberNames[user.id] : undefined;
         meSource.setData({
           type: 'FeatureCollection',
           features: [
             {
               type: 'Feature',
               geometry: { type: 'Point', coordinates: [lastPos.lng, lastPos.lat] },
-              properties: {},
+              properties: {
+                color: myColor,
+                name: myName,
+              },
             },
           ],
         });
@@ -2392,30 +2426,15 @@ export default function MapLibreMap() {
       if (filtered.length !== tracePoints.length) setTracePoints(filtered);
 
       if (filtered.length >= 2) {
-        const tA = now - retentionMs * (2 / 3);
-        const tB = now - retentionMs * (1 / 3);
-
-        const oldest = filtered.filter((p) => p.t < tA);
-        const middle = filtered.filter((p) => p.t >= tA && p.t < tB);
-        const newest = filtered.filter((p) => p.t >= tB);
-
-        const features: any[] = [];
-        const pushSeg = (segPts: typeof filtered, opacity: number) => {
-          if (segPts.length < 2) return;
-          features.push({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: segPts.map((p) => [p.lng, p.lat]) },
-            properties: { opacity },
-          });
-        };
-
-        pushSeg(oldest, 0.3);
-        pushSeg(middle, 0.6);
-        pushSeg(newest, 0.9);
-
         traceSource.setData({
           type: 'FeatureCollection',
-          features,
+          features: [
+            {
+              type: 'Feature',
+              geometry: { type: 'LineString', coordinates: filtered.map((p) => [p.lng, p.lat]) },
+              properties: {},
+            },
+          ],
         });
       } else {
         traceSource.setData({ type: 'FeatureCollection', features: [] });
@@ -2423,7 +2442,7 @@ export default function MapLibreMap() {
     };
 
     update();
-  }, [lastPos, tracePoints, mapReady, traceRetentionMs]);
+  }, [lastPos, tracePoints, mapReady, traceRetentionMs, memberColors, memberNames, user?.id]);
 
   return (
     <div className="relative w-full h-screen">
