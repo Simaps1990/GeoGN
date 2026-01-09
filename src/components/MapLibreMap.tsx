@@ -240,6 +240,7 @@ export default function MapLibreMap() {
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
+  const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
 
   const poiMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
 
@@ -810,7 +811,18 @@ export default function MapLibreMap() {
             'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
             'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
-          ' OpenStreetMap contributors'
+          '© OpenStreetMap contributors'
+        ),
+      },
+      {
+        id: 'topo',
+        style: getRasterStyle(
+          [
+            'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
+          ],
+          '© OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
         ),
       },
       {
@@ -822,7 +834,7 @@ export default function MapLibreMap() {
             'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
             'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
           ],
-          ' OpenStreetMap contributors CARTO'
+          '© OpenStreetMap contributors © CARTO'
         ),
       },
       {
@@ -830,6 +842,18 @@ export default function MapLibreMap() {
         style: getRasterStyle(
           ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           'Tiles Esri'
+        ),
+      },
+      {
+        id: 'voyager',
+        style: getRasterStyle(
+          [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+          ],
+          '© OpenStreetMap contributors © CARTO'
         ),
       },
     ],
@@ -1985,7 +2009,52 @@ export default function MapLibreMap() {
     const socket = getSocket();
     socketRef.current = socket;
 
+    const pendingKey = user?.id ? `geogn.pendingPos.${selectedMissionId}.${user.id}` : null;
+    if (pendingKey) {
+      try {
+        const raw = localStorage.getItem(pendingKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            pendingBulkRef.current = parsed
+              .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
+              .slice(-5000);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const persistPending = () => {
+      if (!pendingKey) return;
+      try {
+        localStorage.setItem(pendingKey, JSON.stringify(pendingBulkRef.current.slice(-5000)));
+      } catch {
+        // ignore
+      }
+    };
+
+    const flushPending = () => {
+      const pts = pendingBulkRef.current;
+      if (!pendingKey) return;
+      if (!pts || pts.length === 0) return;
+      if (!socket.connected) return;
+      socket.emit('position:bulk', { points: pts }, (res: any) => {
+        if (res && res.ok) {
+          pendingBulkRef.current = [];
+          persistPending();
+        }
+      });
+    };
+
     socket.emit('mission:join', { missionId: selectedMissionId });
+
+    // Best effort: flush buffered points on connect/reconnect.
+    socket.on('connect', flushPending);
+    socket.on('reconnect', flushPending as any);
+    // Also attempt flush shortly after join.
+    setTimeout(flushPending, 300);
 
     const onSnapshot = (msg: any) => {
       if (!msg || msg.missionId !== selectedMissionId) return;
@@ -2000,7 +2069,14 @@ export default function MapLibreMap() {
         { lng: number; lat: number; t: number }[]
       >;
 
-      const cutoff = now - traceRetentionMs;
+      const retentionSecondsFromSnapshot =
+        typeof msg.retentionSeconds === 'number' && Number.isFinite(msg.retentionSeconds) ? msg.retentionSeconds : null;
+      const retentionMsFromSnapshot = Math.max(
+        0,
+        (retentionSecondsFromSnapshot !== null ? retentionSecondsFromSnapshot * 1000 : traceRetentionMs)
+      );
+      const maxTracePointsFromSnapshot = Math.max(1, Math.ceil(retentionMsFromSnapshot / 1000) + 2);
+      const cutoff = now - retentionMsFromSnapshot;
 
       const nextOthers: Record<string, { lng: number; lat: number; t: number }> = {};
       for (const [userId, p] of Object.entries(positions)) {
@@ -2021,7 +2097,7 @@ export default function MapLibreMap() {
           .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number')
           .map((p) => ({ lng: p.lng, lat: p.lat, t: typeof p.t === 'number' ? p.t : now }))
           .filter((p) => p.t >= cutoff)
-          .slice(-maxTracePoints);
+          .slice(-maxTracePointsFromSnapshot);
         if (filtered.length) {
           nextOthersTraces[userId] = filtered;
         }
@@ -2031,7 +2107,7 @@ export default function MapLibreMap() {
       setOtherPositions(nextOthers);
     };
 
-    const onPos = (msg: any) => {
+    const applyRemotePosition = (msg: any) => {
       if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
       if (user?.id && msg.userId === user.id) return;
 
@@ -2054,8 +2130,22 @@ export default function MapLibreMap() {
       }));
     };
 
+    const onPos = (msg: any) => {
+      applyRemotePosition(msg);
+    };
+
+    const onPosBulk = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      if (!msg.userId) return;
+      const pts = Array.isArray(msg.points) ? msg.points : [];
+      for (const p of pts) {
+        applyRemotePosition({ ...p, userId: msg.userId });
+      }
+    };
+
     socket.on('mission:snapshot', onSnapshot);
     socket.on('position:update', onPos);
+    socket.on('position:bulk', onPosBulk);
 
     const onPosClear = (msg: any) => {
       if (!msg?.userId) return;
@@ -2119,6 +2209,7 @@ export default function MapLibreMap() {
     return () => {
       socket.off('mission:snapshot', onSnapshot);
       socket.off('position:update', onPos);
+      socket.off('position:bulk', onPosBulk);
       socket.off('position:clear', onPosClear);
       socket.off('poi:created', onPoiCreated);
       socket.off('poi:updated', onPoiUpdated);
@@ -2126,6 +2217,9 @@ export default function MapLibreMap() {
       socket.off('zone:created', onZoneCreated);
       socket.off('zone:updated', onZoneUpdated);
       socket.off('zone:deleted', onZoneDeleted);
+      socket.off('connect', flushPending);
+      socket.off('reconnect', flushPending as any);
+      persistPending();
       socket.emit('mission:leave', {});
     };
   }, [selectedMissionId, user?.id, memberColors, traceRetentionMs, maxTracePoints]);
@@ -2203,14 +2297,28 @@ export default function MapLibreMap() {
 
         const socket = socketRef.current;
         if (socket && selectedMissionId) {
-          socket.emit('position:update', {
+          const payload = {
             lng,
             lat,
             speed: pos.coords.speed ?? undefined,
             heading: pos.coords.heading ?? undefined,
             accuracy: pos.coords.accuracy ?? undefined,
             t,
-          });
+          };
+
+          if (socket.connected) {
+            socket.emit('position:update', payload);
+          } else {
+            pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
+            if (selectedMissionId && user?.id) {
+              const key = `geogn.pendingPos.${selectedMissionId}.${user.id}`;
+              try {
+                localStorage.setItem(key, JSON.stringify(pendingBulkRef.current));
+              } catch {
+                // ignore
+              }
+            }
+          }
         }
       },
       () => {},
@@ -2500,14 +2608,25 @@ export default function MapLibreMap() {
 
                     const socket = socketRef.current;
                     if (socket) {
-                      socket.emit('position:update', {
+                      const payload = {
                         lng,
                         lat,
                         speed: pos.coords.speed ?? undefined,
                         heading: pos.coords.heading ?? undefined,
                         accuracy: pos.coords.accuracy ?? undefined,
                         t,
-                      });
+                      };
+                      if (socket.connected) {
+                        socket.emit('position:update', payload);
+                      } else {
+                        pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
+                        const key = `geogn.pendingPos.${selectedMissionId}.${user.id}`;
+                        try {
+                          localStorage.setItem(key, JSON.stringify(pendingBulkRef.current));
+                        } catch {
+                          // ignore
+                        }
+                      }
                     }
                   },
                   () => {

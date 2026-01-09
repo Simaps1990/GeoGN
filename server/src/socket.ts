@@ -23,6 +23,10 @@ type PositionUpdatePayload = {
   t?: number;
 };
 
+type PositionBulkPayload = {
+  points: PositionUpdatePayload[];
+};
+
 async function emitMissionSnapshot(socket: any, missionId: string) {
   if (!mongoose.Types.ObjectId.isValid(missionId)) return;
 
@@ -47,7 +51,7 @@ async function emitMissionSnapshot(socket: any, missionId: string) {
     TraceModel.find({ missionId: new mongoose.Types.ObjectId(missionId), createdAt: { $gte: cutoff } })
       .select({ userId: 1, loc: 1, createdAt: 1 })
       .sort({ userId: 1, createdAt: 1 })
-      .limit(Math.max(500, retentionSeconds * 2))
+      .limit(Math.max(5000, retentionSeconds * 10))
       .lean(),
   ]);
 
@@ -241,6 +245,103 @@ export function setupSocket(app: FastifyInstance) {
         ack?.({ ok: true });
       } catch {
         ack?.({ ok: false, error: 'POSITION_UPDATE_FAILED' });
+      }
+    });
+
+    socket.on('position:bulk', async (payload: PositionBulkPayload, ack?: (res: any) => void) => {
+      try {
+        const missionId = (socket as any as AuthedSocket).data.missionId;
+        if (!missionId) {
+          ack?.({ ok: false, error: 'NOT_IN_MISSION' });
+          return;
+        }
+
+        const ok = await requireMissionMember(userId, missionId);
+        if (!ok) {
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        const points = Array.isArray(payload?.points) ? payload.points : [];
+        if (points.length === 0) {
+          ack?.({ ok: true, inserted: 0 });
+          return;
+        }
+
+        // Hard safety cap to avoid abuse / OOM.
+        const capped = points.slice(0, 5000);
+
+        const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+        const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+        const nowMs = Date.now();
+        const cutoffMs = nowMs - Math.max(0, retentionSeconds) * 1000;
+
+        const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null }).select({ color: 1 }).lean();
+        const color = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
+
+        const positionDocs: any[] = [];
+        const traceDocs: any[] = [];
+        const broadcastPoints: any[] = [];
+
+        for (const p of capped) {
+          if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
+          const tMs = typeof p.t === 'number' && Number.isFinite(p.t) ? p.t : nowMs;
+          if (tMs < cutoffMs) continue;
+          // guard against far future points
+          if (tMs > nowMs + 60_000) continue;
+
+          const t = new Date(tMs);
+          const expiresAt = new Date(tMs + Math.max(0, retentionSeconds) * 1000);
+
+          positionDocs.push({
+            missionId: new mongoose.Types.ObjectId(missionId),
+            userId: new mongoose.Types.ObjectId(userId),
+            loc: { type: 'Point', coordinates: [p.lng, p.lat] },
+            speed: p.speed,
+            heading: p.heading,
+            accuracy: p.accuracy,
+            createdAt: t,
+          });
+
+          traceDocs.push({
+            missionId: new mongoose.Types.ObjectId(missionId),
+            userId: new mongoose.Types.ObjectId(userId),
+            color,
+            loc: { type: 'Point', coordinates: [p.lng, p.lat] },
+            createdAt: t,
+            expiresAt,
+          });
+
+          broadcastPoints.push({
+            lng: p.lng,
+            lat: p.lat,
+            speed: p.speed ?? null,
+            heading: p.heading ?? null,
+            accuracy: p.accuracy ?? null,
+            t: tMs,
+          });
+        }
+
+        if (positionDocs.length === 0) {
+          ack?.({ ok: true, inserted: 0 });
+          return;
+        }
+
+        // Persist best-effort; ordered:false keeps inserting even if a doc fails.
+        await Promise.all([
+          PositionModel.insertMany(positionDocs, { ordered: false }),
+          TraceModel.insertMany(traceDocs, { ordered: false }),
+        ]);
+
+        io.to(`mission:${missionId}`).emit('position:bulk', {
+          missionId,
+          userId,
+          points: broadcastPoints,
+        });
+
+        ack?.({ ok: true, inserted: positionDocs.length });
+      } catch {
+        ack?.({ ok: false, error: 'POSITION_BULK_FAILED' });
       }
     });
   });
