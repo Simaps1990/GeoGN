@@ -87,6 +87,81 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
     );
   });
 
+  app.post<{ Params: { missionId: string }; Body: { appUserId: string; role?: 'admin' | 'member' | 'viewer' } }>(
+    '/missions/:missionId/members',
+    async (
+      req: FastifyRequest<{ Params: { missionId: string }; Body: { appUserId: string; role?: 'admin' | 'member' | 'viewer' } }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { missionId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId)) {
+        return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
+      }
+
+      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+      if (!membership || membership.role !== 'admin') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      const appUserId = String((req.body as any)?.appUserId ?? '').trim();
+      if (!appUserId) {
+        return reply.code(400).send({ error: 'INVALID_APP_USER_ID' });
+      }
+
+      const desiredRole = normalizeRole((req.body as any)?.role ?? 'member') ?? null;
+      if (!desiredRole) {
+        return reply.code(400).send({ error: 'INVALID_ROLE' });
+      }
+
+      const user = await UserModel.findOne({ appUserId }).lean();
+      if (!user) {
+        return reply.code(404).send({ error: 'USER_NOT_FOUND' });
+      }
+
+      const now = new Date();
+      const existingMember = await MissionMemberModel.findOne({ missionId, userId: user._id }).lean();
+      if (existingMember && (existingMember as any).removedAt === null) {
+        return reply.code(409).send({ error: 'ALREADY_MEMBER' });
+      }
+
+      const existingColor = existingMember?.color ? String((existingMember as any).color).trim() : '';
+      const memberColor = existingColor || (await pickMissionMemberColor(new mongoose.Types.ObjectId(missionId)));
+
+      await MissionMemberModel.updateOne(
+        { missionId: new mongoose.Types.ObjectId(missionId), userId: user._id },
+        {
+          $setOnInsert: {
+            missionId: new mongoose.Types.ObjectId(missionId),
+            userId: user._id,
+            role: desiredRole,
+            color: memberColor,
+          },
+          $set: {
+            removedAt: null,
+            joinedAt: now,
+            isActive: true,
+            role: desiredRole,
+            color: memberColor,
+          },
+        },
+        { upsert: true }
+      );
+
+      app.io?.to(`mission:${missionId}`).emit('member:updated', {
+        missionId,
+        member: { userId: user._id.toString(), role: desiredRole, color: memberColor },
+      });
+
+      return reply.code(201).send({ ok: true });
+    }
+  );
+
   // User requests to join a mission by ID
   app.post<{ Params: { missionId: string } }>('/missions/:missionId/join-requests', async (req: FastifyRequest<{ Params: { missionId: string } }>, reply: FastifyReply) => {
     try {
@@ -183,78 +258,93 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
     ) => {
       try {
         requireAuth(req);
-      } catch (e: any) {
-        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
-      }
 
-      const { missionId, requestId } = req.params;
-      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(requestId)) {
-        return reply.code(400).send({ error: 'INVALID_ID' });
-      }
+        const { missionId, requestId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(requestId)) {
+          return reply.code(400).send({ error: 'INVALID_ID' });
+        }
 
-      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
-      if (!membership || membership.role !== 'admin') {
-        return reply.code(403).send({ error: 'FORBIDDEN' });
-      }
+        if (!mongoose.Types.ObjectId.isValid(req.userId)) {
+          return reply.code(401).send({ error: 'UNAUTHORIZED' });
+        }
 
-      const joinReq = await MissionJoinRequestModel.findOne({ _id: requestId, missionId }).lean();
-      if (!joinReq) {
-        return reply.code(404).send({ error: 'NOT_FOUND' });
-      }
-      if (joinReq.status !== 'pending' && joinReq.status !== 'accepted') {
-        return reply.code(409).send({ error: 'NOT_PENDING' });
-      }
+        const missionObjectId = new mongoose.Types.ObjectId(missionId);
+        const requestObjectId = new mongoose.Types.ObjectId(requestId);
+        const adminUserObjectId = new mongoose.Types.ObjectId(req.userId);
 
-      const desiredRole = normalizeRole((req.body as any)?.role ?? 'member') ?? null;
-      if (!desiredRole) {
-        return reply.code(400).send({ error: 'INVALID_ROLE' });
-      }
+        const membership = await MissionMemberModel.findOne({ missionId: missionObjectId, userId: adminUserObjectId, removedAt: null }).lean();
+        if (!membership || membership.role !== 'admin') {
+          return reply.code(403).send({ error: 'FORBIDDEN' });
+        }
 
-      const now = new Date();
+        const joinReq = await MissionJoinRequestModel.findOne({ _id: requestObjectId, missionId: missionObjectId }).lean();
+        if (!joinReq) {
+          return reply.code(404).send({ error: 'NOT_FOUND' });
+        }
 
-      if (joinReq.status === 'pending') {
-        await MissionJoinRequestModel.updateOne(
-          { _id: joinReq._id },
-          { $set: { status: 'accepted', handledBy: new mongoose.Types.ObjectId(req.userId), handledAt: now } }
+        if (joinReq.status !== 'pending' && joinReq.status !== 'accepted') {
+          return reply.code(409).send({ error: 'NOT_PENDING' });
+        }
+
+        const desiredRole = normalizeRole((req.body as any)?.role ?? 'member') ?? null;
+        if (!desiredRole) {
+          return reply.code(400).send({ error: 'INVALID_ROLE' });
+        }
+
+        const now = new Date();
+
+        if (joinReq.status === 'pending') {
+          await MissionJoinRequestModel.updateOne(
+            { _id: joinReq._id },
+            { $set: { status: 'accepted', handledBy: adminUserObjectId, handledAt: now } }
+          );
+        }
+
+        const existingMember = await MissionMemberModel.findOne({ missionId: joinReq.missionId, userId: joinReq.requestedBy }).lean();
+        const existingColor = existingMember?.color ? String(existingMember.color).trim() : '';
+        const memberColor = existingColor || (await pickMissionMemberColor(joinReq.missionId));
+
+        await MissionMemberModel.updateOne(
+          { missionId: joinReq.missionId, userId: joinReq.requestedBy },
+          {
+            $setOnInsert: {
+              missionId: joinReq.missionId,
+              userId: joinReq.requestedBy,
+              role: desiredRole,
+              color: memberColor,
+            },
+            $set: {
+              removedAt: null,
+              joinedAt: now,
+              isActive: true,
+              role: desiredRole,
+              color: memberColor,
+            },
+          },
+          { upsert: true }
         );
+
+        app.io?.to(`mission:${missionId}`).emit('member:updated', {
+          missionId,
+          member: { userId: joinReq.requestedBy.toString(), role: desiredRole, color: memberColor },
+        });
+
+        // Add to global contacts in both directions (admin <-> requester)
+        await Promise.all([
+          ensureContact(adminUserObjectId, joinReq.requestedBy),
+          ensureContact(joinReq.requestedBy, adminUserObjectId),
+        ]);
+
+        return reply.send({ ok: true });
+      } catch (e: any) {
+        try {
+          (req as any)?.log?.error?.(e);
+        } catch {
+          // ignore
+        }
+        console.error('[join-requests.accept] failed', e);
+        return reply.code(500).send({ error: 'ACCEPT_JOIN_REQUEST_FAILED' });
       }
-
-      const existingMember = await MissionMemberModel.findOne({ missionId: joinReq.missionId, userId: joinReq.requestedBy }).lean();
-      const existingColor = existingMember?.color ? String(existingMember.color).trim() : '';
-      const memberColor = existingColor || (await pickMissionMemberColor(joinReq.missionId));
-
-      await MissionMemberModel.updateOne(
-        { missionId: joinReq.missionId, userId: joinReq.requestedBy },
-        {
-          $setOnInsert: {
-            missionId: joinReq.missionId,
-            userId: joinReq.requestedBy,
-            role: desiredRole,
-            color: memberColor,
-          },
-          $set: {
-            removedAt: null,
-            joinedAt: now,
-            isActive: true,
-            role: desiredRole,
-            color: memberColor,
-          },
-        },
-        { upsert: true }
-      );
-
-      app.io?.to(`mission:${missionId}`).emit('member:updated', {
-        missionId,
-        member: { userId: joinReq.requestedBy.toString(), role: desiredRole, color: memberColor },
-      });
-
-      // Add to global contacts in both directions (admin <-> requester)
-      await Promise.all([
-        ensureContact(new mongoose.Types.ObjectId(req.userId), joinReq.requestedBy),
-        ensureContact(joinReq.requestedBy, new mongoose.Types.ObjectId(req.userId)),
-      ]);
-
-      return reply.send({ ok: true });
     }
   );
 
@@ -312,6 +402,51 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         missionId,
         member: { userId: memberUserId, role: (updated as any).role, color: (updated as any).color },
       });
+
+      return reply.send({ ok: true });
+    }
+  );
+
+  app.delete<{ Params: { missionId: string; memberUserId: string } }>(
+    '/missions/:missionId/members/:memberUserId',
+    async (req: FastifyRequest<{ Params: { missionId: string; memberUserId: string } }>, reply: FastifyReply) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { missionId, memberUserId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(memberUserId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
+
+      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+      if (!membership || membership.role !== 'admin') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      if (String(req.userId) === String(memberUserId)) {
+        return reply.code(400).send({ error: 'CANNOT_REMOVE_SELF' });
+      }
+
+      const now = new Date();
+      const updated = await MissionMemberModel.findOneAndUpdate(
+        { missionId, userId: new mongoose.Types.ObjectId(memberUserId), removedAt: null },
+        { $set: { removedAt: now, isActive: false } },
+        { new: true }
+      ).lean();
+
+      if (!updated) {
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
+      app.io?.to(`mission:${missionId}`).emit('member:updated', {
+        missionId,
+        member: { userId: memberUserId, role: (updated as any).role, color: (updated as any).color },
+      });
+
+      app.io?.to(`mission:${missionId}`).emit('position:clear', { missionId, userId: memberUserId });
 
       return reply.send({ ok: true });
     }

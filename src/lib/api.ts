@@ -422,6 +422,33 @@ export async function updateMissionMember(
   return (await res.json()) as { ok: true };
 }
 
+export async function addMissionMemberByAppUserId(
+  missionId: string,
+  appUserId: string,
+  role: 'admin' | 'member' | 'viewer'
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ appUserId, role }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ADD_MEMBER_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function removeMissionMember(missionId: string, memberUserId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/members/${encodeURIComponent(memberUserId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'REMOVE_MEMBER_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
 export async function declineMissionJoinRequest(missionId: string, requestId: string) {
   const res = await apiFetch(
     `/missions/${encodeURIComponent(missionId)}/join-requests/${encodeURIComponent(requestId)}/decline`,
