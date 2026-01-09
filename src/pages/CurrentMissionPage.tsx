@@ -148,6 +148,12 @@ export default function CurrentMissionPage() {
       const updated = await updateMission(selectedMissionId, payload);
       setMission(updated);
 
+      try {
+        window.dispatchEvent(new CustomEvent('geotacops:mission:updated', { detail: { mission: updated } }));
+      } catch {
+        // ignore
+      }
+
       // Mettre à jour la liste des missions pour refléter immédiatement
       // le nouveau nom et la nouvelle durée de traînée sans rechargement.
       setMissions((prev) =>

@@ -329,6 +329,12 @@ export default function MapLibreMap() {
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
+  const traceRetentionMs = useMemo(() => {
+    const s = mission?.traceRetentionSeconds;
+    const seconds = typeof s === 'number' && Number.isFinite(s) ? s : 3600;
+    return Math.max(0, seconds) * 1000;
+  }, [mission?.traceRetentionSeconds]);
+
   // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
   // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
@@ -349,6 +355,21 @@ export default function MapLibreMap() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    const onMissionUpdated = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      const updated = ce?.detail?.mission;
+      if (!updated?.id) return;
+      if (!selectedMissionId) return;
+      if (updated.id !== selectedMissionId) return;
+      setMission((prev) => ({ ...(prev ?? updated), ...updated }));
+    };
+    window.addEventListener('geotacops:mission:updated', onMissionUpdated as any);
+    return () => {
+      window.removeEventListener('geotacops:mission:updated', onMissionUpdated as any);
     };
   }, [selectedMissionId]);
 
@@ -496,6 +517,33 @@ export default function MapLibreMap() {
 
     tracesLoadedRef.current = true;
   }, [selectedMissionId, user?.id]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const now = Date.now();
+    const cutoff = now - traceRetentionMs;
+
+    setTracePoints((prev) => prev.filter((p) => p.t >= cutoff));
+
+    const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
+    for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+      const filtered = pts.filter((p) => p.t >= cutoff);
+      if (filtered.length) nextOthers[userId] = filtered;
+    }
+    otherTracesRef.current = nextOthers;
+
+    setOtherPositions((prev) => {
+      const next: Record<string, { lng: number; lat: number; t: string }> = {};
+      for (const [userId, p] of Object.entries(prev)) {
+        const tNum = Number(p.t);
+        if (Number.isFinite(tNum) && tNum >= cutoff) {
+          next[userId] = p;
+        }
+      }
+      return next;
+    });
+
+  }, [traceRetentionMs, selectedMissionId]);
 
   // Keep the current user's dot and personal trace in sync with their mission color.
   useEffect(() => {
@@ -1094,9 +1142,8 @@ export default function MapLibreMap() {
     }
 
     if (traceSource) {
-      const retentionMs = 60 * 60 * 1000;
       const now = Date.now();
-      const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
+      const filtered = tracePoints.filter((p) => now - p.t <= traceRetentionMs);
 
       if (filtered.length >= 2) {
         traceSource.setData({
@@ -1142,14 +1189,16 @@ export default function MapLibreMap() {
 
     if (othersTracesSource) {
       const features: any[] = [];
+      const now = Date.now();
       for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
-        if (pts.length < 2) continue;
+        const filtered = pts.filter((p) => now - p.t <= traceRetentionMs);
+        if (filtered.length < 2) continue;
         const memberColor = memberColors[userId];
         const color = memberColor ?? '#4b5563';
         features.push({
           type: 'Feature',
           properties: { userId, color },
-          geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
+          geometry: { type: 'LineString', coordinates: filtered.map((p) => [p.lng, p.lat]) },
         });
       }
 
@@ -1842,7 +1891,8 @@ export default function MapLibreMap() {
       }
       const now = typeof msg.t === 'number' ? msg.t : Date.now();
       const traces = otherTracesRef.current[msg.userId] ?? [];
-      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }].slice(-200);
+      const cutoff = Date.now() - traceRetentionMs;
+      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }].filter((p) => p.t >= cutoff).slice(-200);
       otherTracesRef.current[msg.userId] = nextTraces;
 
       setOtherPositions((prev) => ({
