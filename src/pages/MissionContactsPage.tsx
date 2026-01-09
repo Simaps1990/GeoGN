@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, ChevronDown, Copy, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { BookPlus, Check, ChevronDown, Copy, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   acceptMissionJoinRequestWithRole,
+  addContact,
   addMissionMemberByAppUserId,
   declineMissionJoinRequest,
   getMission,
@@ -19,6 +21,8 @@ import {
 
 export default function MissionContactsPage() {
   const { missionId } = useParams();
+
+  const { user } = useAuth();
 
   const roleDescriptions = useMemo(
     () => ({
@@ -68,6 +72,15 @@ export default function MissionContactsPage() {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const addContactMenuRef = useRef<HTMLDivElement | null>(null);
 
+  const contactsByUserId = useMemo(() => {
+    const map = new Map<string, ApiContact>();
+    for (const c of contacts) {
+      const uid = c.contact?.id;
+      if (uid) map.set(uid, c);
+    }
+    return map;
+  }, [contacts]);
+
   async function refresh() {
     if (!missionId) return;
     setLoading(true);
@@ -79,14 +92,10 @@ export default function MissionContactsPage() {
       const mem = await listMissionMembers(missionId);
       setMembers(mem);
 
-      if (m.membership?.role === 'admin') {
-        try {
-          const c = await listContacts();
-          setContacts(c);
-        } catch {
-          setContacts([]);
-        }
-      } else {
+      try {
+        const c = await listContacts();
+        setContacts(c);
+      } catch {
         setContacts([]);
       }
 
@@ -103,6 +112,31 @@ export default function MissionContactsPage() {
     }
   }
 
+  async function onAddContactFromMember(member: ApiMissionMember) {
+    const appUserId = member.user?.appUserId;
+    const userId = member.user?.id;
+    if (!appUserId || !userId) return;
+
+    // Éviter les doublons côté UI si déjà dans les contacts.
+    if (contactsByUserId.has(userId)) return;
+
+    setBusyKey(`addContact:${userId}`);
+    setError(null);
+    try {
+      await addContact(appUserId);
+      try {
+        const c = await listContacts();
+        setContacts(c);
+      } catch {
+        // non bloquant, les contacts seront rechargés plus tard si besoin
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Erreur');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   const sortedContacts = useMemo(() => {
     return [...contacts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }, [contacts]);
@@ -116,7 +150,7 @@ export default function MissionContactsPage() {
     });
   }, [members, sortedContacts]);
 
-  const addContact = useMemo(() => {
+  const selectedAddContact = useMemo(() => {
     return availableContacts.find((c) => c.id === addContactId) ?? null;
   }, [addContactId, availableContacts]);
 
@@ -256,6 +290,46 @@ export default function MissionContactsPage() {
 
       {mission?.membership?.role === 'admin' ? (
         <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="text-sm font-semibold text-gray-900">Demandes en attente</div>
+          {loading ? (
+            <div className="mt-2 text-sm text-gray-600">Chargement…</div>
+          ) : joinRequests.length === 0 ? (
+            <div className="mt-2 text-sm text-gray-600">Aucune demande.</div>
+          ) : (
+            <div className="mt-3 grid gap-2">
+              {joinRequests.map((r) => (
+                <div key={r.id} className="rounded-2xl border p-3">
+                  <div className="text-sm font-semibold text-gray-900">{r.requestedBy?.displayName ?? 'Utilisateur'}</div>
+                  <div className="mt-1 text-xs text-gray-500">{r.requestedBy?.appUserId ?? '-'}</div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busyKey === `accept:${r.id}`}
+                      onClick={() => void onAcceptRequest(r.id)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-green-600 px-3 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      <Check size={16} />
+                      Valider
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyKey === `decline:${r.id}`}
+                      onClick={() => void onDeclineRequest(r.id)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      <X size={16} />
+                      Refuser
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {mission?.membership?.role === 'admin' ? (
+        <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-sm font-semibold text-gray-900">Ajouter un membre</div>
           <div className="mt-1 text-xs text-gray-500">
             Sélectionne un contact depuis ton répertoire "Mon équipe".
@@ -269,8 +343,8 @@ export default function MissionContactsPage() {
                 className="inline-flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-sm text-gray-900 shadow-sm hover:bg-gray-50"
               >
                 <span className="truncate">
-                  {addContact?.contact?.appUserId
-                    ? `${addContact?.alias?.trim() || addContact?.contact?.displayName || 'Contact'} (${addContact.contact.appUserId})`
+                  {selectedAddContact?.contact?.appUserId
+                    ? `${selectedAddContact?.alias?.trim() || selectedAddContact?.contact?.displayName || 'Contact'} (${selectedAddContact.contact.appUserId})`
                     : 'Choisir un contact…'}
                 </span>
                 <ChevronDown size={18} className="ml-2 shrink-0 text-gray-500" />
@@ -310,21 +384,21 @@ export default function MissionContactsPage() {
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => setAddRole('member')}
-                className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
-                  addRole === 'member' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
-                }`}
-              >
-                Utilisateur
-              </button>
-              <button
-                type="button"
                 onClick={() => setAddRole('viewer')}
                 className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
                   addRole === 'viewer' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
-                Voir
+                <span className="block w-full truncate text-center">Visualisateur</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddRole('member')}
+                className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
+                  addRole === 'member' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
+                }`}
+              >
+                <span className="block w-full truncate text-center">Utilisateur</span>
               </button>
               <button
                 type="button"
@@ -333,16 +407,16 @@ export default function MissionContactsPage() {
                   addRole === 'admin' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
-                Admin
+                <span className="block w-full truncate text-center">Admin</span>
               </button>
             </div>
 
             <button
               type="button"
-              disabled={busyKey === 'addMember' || !addContact?.contact?.appUserId}
+              disabled={busyKey === 'addMember' || !selectedAddContact?.contact?.appUserId}
               onClick={async () => {
                 if (!missionId) return;
-                const appUserId = addContact?.contact?.appUserId;
+                const appUserId = selectedAddContact?.contact?.appUserId;
                 if (!appUserId) return;
                 setBusyKey('addMember');
                 setError(null);
@@ -415,46 +489,6 @@ export default function MissionContactsPage() {
         </div>
       </div>
 
-      {mission?.membership?.role === 'admin' ? (
-        <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-sm font-semibold text-gray-900">Demandes en attente</div>
-          {loading ? (
-            <div className="mt-2 text-sm text-gray-600">Chargement…</div>
-          ) : joinRequests.length === 0 ? (
-            <div className="mt-2 text-sm text-gray-600">Aucune demande.</div>
-          ) : (
-            <div className="mt-3 grid gap-2">
-              {joinRequests.map((r) => (
-                <div key={r.id} className="rounded-2xl border p-3">
-                  <div className="text-sm font-semibold text-gray-900">{r.requestedBy?.displayName ?? 'Utilisateur'}</div>
-                  <div className="mt-1 text-xs text-gray-500">{r.requestedBy?.appUserId ?? '-'}</div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      disabled={busyKey === `accept:${r.id}`}
-                      onClick={() => void onAcceptRequest(r.id)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-green-600 px-3 text-sm font-semibold text-white disabled:opacity-50"
-                    >
-                      <Check size={16} />
-                      Valider
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyKey === `decline:${r.id}`}
-                      onClick={() => void onDeclineRequest(r.id)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      <X size={16} />
-                      Refuser
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : null}
-
       <div className="mt-4">
         <div className="text-sm font-semibold text-gray-900">Membres actifs</div>
 
@@ -464,63 +498,96 @@ export default function MissionContactsPage() {
           <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Aucun membre.</div>
         ) : (
           <div className="mt-3 grid gap-3">
-            {sortedMembers.map((m) => (
-              <div key={m.user?.id ?? Math.random()} className="rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-base font-semibold text-gray-900">{m.user?.displayName ?? 'Membre'}</div>
-                    <div className="mt-1 text-xs text-gray-500">{m.user?.appUserId ?? '-'}</div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {m.role === 'admin' ? 'Admin' : m.role === 'viewer' ? 'Visualisateur' : 'Utilisateur'}
+            {sortedMembers.map((m, index) => {
+              const userId = m.user?.id ?? '';
+              const memberAppUserId = m.user?.appUserId ?? '';
+              const isSelf = Boolean(
+                user &&
+                  ((userId && user.id === userId) ||
+                    (memberAppUserId && user.appUserId && user.appUserId === memberAppUserId))
+              );
+              const isSingleMember = sortedMembers.length === 1 && index === 0;
+              const hideBook = isSelf || isSingleMember;
+              const isInContacts = userId ? contactsByUserId.has(userId) : false;
+              const addBusy = busyKey === (userId ? `addContact:${userId}` : '');
+
+              return (
+                <div
+                  key={userId || Math.random()}
+                  className="rounded-2xl border-4 bg-white p-4 shadow-sm"
+                  style={{ borderColor: m.color || undefined }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-base font-semibold text-gray-900">{m.user?.displayName ?? 'Membre'}</div>
+                      <div className="mt-1 text-xs text-gray-500">{m.user?.appUserId ?? '-'}</div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {m.role === 'admin' ? 'Admin' : m.role === 'viewer' ? 'Visualisateur' : 'Utilisateur'}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="mt-1 h-8 w-8 rounded-full border-2 border-white shadow" style={{ backgroundColor: m.color }} />
-                    {mission?.membership?.role === 'admin' && m.user?.id ? (
-                      <>
+                    <div className="flex items-center gap-2">
+                      {!hideBook && !isInContacts ? (
                         <button
                           type="button"
-                          disabled={busyKey === `memberEdit:${m.user.id}`}
+                          disabled={addBusy || !m.user?.appUserId || !userId}
                           onClick={() => {
-                            setEditingMember(m);
-                            setEditRole(m.role);
-                            setEditColor(m.color);
-                          }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                          title="Modifier"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyKey === `memberRemove:${m.user.id}`}
-                          onClick={async () => {
-                            if (!missionId || !m.user?.id) return;
-                            const ok = window.confirm(`Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`);
-                            if (!ok) return;
-                            setBusyKey(`memberRemove:${m.user.id}`);
-                            setError(null);
-                            try {
-                              await removeMissionMember(missionId, m.user.id);
-                              setMembers((prev) => prev.filter((x) => x.user?.id !== m.user?.id));
-                              await refresh();
-                            } catch (e: any) {
-                              setError(e?.message ?? 'Erreur');
-                            } finally {
-                              setBusyKey(null);
+                            if (!addBusy && m.user?.appUserId && userId) {
+                              void onAddContactFromMember(m);
                             }
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                          title="Retirer"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          title={"Ajouter à mes contacts 'Mon équipe'"}
                         >
-                          <Trash2 size={16} />
+                          <BookPlus size={16} />
                         </button>
-                      </>
-                    ) : null}
+                      ) : null}
+
+                      {mission?.membership?.role === 'admin' && m.user?.id ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busyKey === `memberEdit:${m.user.id}`}
+                            onClick={() => {
+                              setEditingMember(m);
+                              setEditRole(m.role);
+                              setEditColor(m.color);
+                            }}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            title="Modifier"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyKey === `memberRemove:${m.user.id}`}
+                            onClick={async () => {
+                              if (!missionId || !m.user?.id) return;
+                              const ok = window.confirm(`Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`);
+                              if (!ok) return;
+                              setBusyKey(`memberRemove:${m.user.id}`);
+                              setError(null);
+                              try {
+                                await removeMissionMember(missionId, m.user.id);
+                                setMembers((prev) => prev.filter((x) => x.user?.id !== m.user?.id));
+                                await refresh();
+                              } catch (e: any) {
+                                setError(e?.message ?? 'Erreur');
+                              } finally {
+                                setBusyKey(null);
+                              }
+                            }}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                            title="Retirer"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

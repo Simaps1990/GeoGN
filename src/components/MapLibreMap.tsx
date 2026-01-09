@@ -559,6 +559,8 @@ export default function MapLibreMap() {
 
     if (map.getLayer('me-dot')) {
       map.setPaintProperty('me-dot', 'circle-color', myColor);
+      const stroke = myColor.toLowerCase() === '#ffffff' ? '#d1d5db' : '#ffffff';
+      map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
     }
 
     if (map.getLayer('trace-line')) {
@@ -767,12 +769,8 @@ export default function MapLibreMap() {
       map.setPaintProperty('zones-grid-labels', 'text-color', '#ffffff');
       map.setPaintProperty('zones-grid-labels', 'text-halo-color', 'rgba(0,0,0,0)');
       map.setPaintProperty('zones-grid-labels', 'text-halo-width', 0);
-      map.setPaintProperty('zones-grid-labels', 'text-opacity', [
-        'case',
-        ['<=', ['*', ['get', 'rows'], ['get', 'cols']], 64],
-        0.7,
-        0,
-      ]);
+      // Toujours visibles, mais un peu atténués pour éviter de dominer le fond satellite.
+      map.setPaintProperty('zones-grid-labels', 'text-opacity', 0.7);
       return;
     }
 
@@ -780,12 +778,7 @@ export default function MapLibreMap() {
     map.setPaintProperty('zones-grid-labels', 'text-color', '#111827');
     map.setPaintProperty('zones-grid-labels', 'text-halo-color', 'rgba(0,0,0,0)');
     map.setPaintProperty('zones-grid-labels', 'text-halo-width', 0);
-    map.setPaintProperty('zones-grid-labels', 'text-opacity', [
-      'case',
-      ['<=', ['*', ['get', 'rows'], ['get', 'cols']], 64],
-      0.55,
-      0,
-    ]);
+    map.setPaintProperty('zones-grid-labels', 'text-opacity', 0.55);
   }
 
   function toggleMapStyle() {
@@ -879,12 +872,34 @@ export default function MapLibreMap() {
         filter: ['==', ['get', 'kind'], 'cell'],
         layout: {
           'text-field': ['coalesce', ['get', 'text'], ''],
+          // Adapter la taille en fonction du zoom ET de la densité (rows*cols).
+          // On utilise un interpolate sur le zoom au niveau racine, comme l'exige MapLibre.
           'text-size': [
-            'case',
-            // Cellules au centre: très discrètes, à peine plus grandes que le texte standard.
-            ['==', ['get', 'kind'], 'cell'],
-            13,
-            12,
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            // Zoom carte faible
+            10,
+            [
+              'step',
+              ['*', ['get', 'rows'], ['get', 'cols']],
+              10, // grilles <= 8x8
+              65,
+              9, // 9x9 à ~12x12
+              145,
+              8, // au-delà
+            ],
+            // Zoom carte élevé
+            16,
+            [
+              'step',
+              ['*', ['get', 'rows'], ['get', 'cols']],
+              16, // grilles <= 8x8
+              65,
+              14, // 9x9 à ~12x12
+              145,
+              12, // au-delà
+            ],
           ],
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
           'text-anchor': [
@@ -956,7 +971,12 @@ export default function MapLibreMap() {
         paint: {
           'circle-radius': 6,
           'circle-color': ['coalesce', ['get', 'color'], '#2563eb'],
-          'circle-stroke-color': '#ffffff',
+          'circle-stroke-color': [
+            'case',
+            ['==', ['downcase', ['get', 'color']], '#ffffff'],
+            '#d1d5db',
+            '#ffffff',
+          ],
           'circle-stroke-width': 2,
         },
       });
@@ -1055,7 +1075,7 @@ export default function MapLibreMap() {
         layout: {
           'text-field': ['coalesce', ['get', 'title'], ''],
           'text-size': 13,
-          'text-offset': [0, 1.2],
+          'text-offset': [0, 0.8],
           'text-anchor': 'top',
           'text-optional': true,
         },
@@ -1392,26 +1412,24 @@ export default function MapLibreMap() {
         }
 
         // cell labels (center): A1, B2, etc.
-        // On ne les génère que si la grille n'est pas trop dense (<= 8x8 env.)
-        // ET uniquement si le centre de la case est dans la zone.
-        if (rows * cols <= 64) {
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const x = bbox.minLng + (c + 0.5) * dx;
-              const y = bbox.minLat + (r + 0.5) * dy;
+        // On les génère toujours; la taille est ensuite adaptée via text-size
+        // en fonction de la densité (rows*cols) et du zoom.
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const x = bbox.minLng + (c + 0.5) * dx;
+            const y = bbox.minLat + (r + 0.5) * dy;
 
-              if (!isPointInZone(x, y, z)) continue;
+            if (!isPointInZone(x, y, z)) continue;
 
-              const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
-              const rowNumber = r + 1;
-              const text = `${colLetter}${rowNumber}`;
+            const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
+            const rowNumber = r + 1;
+            const text = `${colLetter}${rowNumber}`;
 
-              features.push({
-                type: 'Feature',
-                properties: { kind: 'cell', zoneId: z.id, text, rows, cols },
-                geometry: { type: 'Point', coordinates: [x, y] },
-              });
-            }
+            features.push({
+              type: 'Feature',
+              properties: { kind: 'cell', zoneId: z.id, text, rows, cols },
+              geometry: { type: 'Point', coordinates: [x, y] },
+            });
           }
         }
       }

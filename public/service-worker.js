@@ -7,6 +7,14 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   // Take control of existing clients.
   self.clients.claim();
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        client.navigate(client.url);
+      }
+    })
+  );
 });
 
 // No offline caching logic for now; network logic stays in the app.

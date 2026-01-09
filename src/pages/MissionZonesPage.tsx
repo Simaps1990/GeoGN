@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Grid2X2, Map as MapIcon } from 'lucide-react';
+import { CircleDot, Spline, Grid2X2, Map as MapIcon } from 'lucide-react';
 import { deleteZone, getMission, listZones, updateZone, type ApiMission, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
@@ -164,7 +164,13 @@ export default function MissionZonesPage() {
                       className="mt-0.5 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border-2 border-white shadow"
                       style={{ backgroundColor: z.color || '#22c55e' }}
                       title={z.title}
-                    />
+                    >
+                      {z.type === 'circle' ? (
+                        <CircleDot size={18} className="text-white" />
+                      ) : (
+                        <Spline size={18} className="text-white" />
+                      )}
+                    </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-gray-900">{z.title}</div>
                       <div className="mt-1 text-xs text-gray-600">
@@ -211,7 +217,7 @@ export default function MissionZonesPage() {
               {editingId !== z.id && (
                 <div className="mt-3 space-y-3">
                   {isAdmin ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
                         disabled={!missionId || busyId === z.id}
@@ -290,6 +296,54 @@ export default function MissionZonesPage() {
                         <span className="inline-flex items-center gap-2">
                           <Grid2X2 size={16} />
                           <span>6x6</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 8, cols: 8 });
+                        }}
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 8 && z.grid?.cols === 8 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 8x8"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>8x8</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 10, cols: 10 });
+                        }}
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 10 && z.grid?.cols === 10 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 10x10"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>10x10</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!missionId || busyId === z.id}
+                        onClick={async () => {
+                          await setZoneGrid(z.id, { rows: 12, cols: 12 });
+                        }}
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          z.grid?.rows === 12 && z.grid?.cols === 12 ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        title="Carroyage 12x12"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Grid2X2 size={16} />
+                          <span>12x12</span>
                         </span>
                       </button>
                       <button
