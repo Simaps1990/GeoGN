@@ -21,6 +21,20 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-text-fill-color: #ffffff;
+  transition: background-color 9999s ease-in-out 0s;
+  box-shadow: 0 0 0px 1000px #262a31 inset;
+}
+
 .leaflet-container {
   width: 100%;
   height: 100%;

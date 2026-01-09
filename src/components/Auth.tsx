@@ -1,5 +1,32 @@
 import { useState } from 'react';
+import { Lock, Mail, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+
+function formatAuthError(err: unknown) {
+  const raw = (err as any)?.message ? String((err as any).message) : 'Erreur';
+  const msg = raw.toLowerCase();
+
+  if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
+    return 'Email ou mot de passe incorrect.';
+  }
+  if (msg.includes('email not confirmed') || msg.includes('confirm your email')) {
+    return "Email non confirmé. Vérifie ta boîte mail (et les spams).";
+  }
+  if (msg.includes('user already registered') || msg.includes('already registered')) {
+    return 'Un compte existe déjà avec cet email.';
+  }
+  if (msg.includes('password should be at least') || msg.includes('password is too short')) {
+    return 'Mot de passe trop court.';
+  }
+  if (msg.includes('rate limit') || msg.includes('too many requests')) {
+    return 'Trop de tentatives. Réessaie dans quelques minutes.';
+  }
+  if (msg.includes('unable to validate email address') || msg.includes('invalid email')) {
+    return 'Adresse email invalide.';
+  }
+
+  return raw;
+}
 
 export default function Auth() {
   const [email, setEmail] = useState('');
@@ -22,87 +49,98 @@ export default function Auth() {
         await signIn(email, password);
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(formatAuthError(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">GeoGN</h1>
-          <p className="text-gray-600">Partagez votre localisation en temps réel</p>
+    <div
+      className="min-h-screen w-full bg-black bg-cover bg-center bg-no-repeat flex items-center justify-center px-4 py-10"
+      style={{ backgroundImage: "url('/icon/fondgris.png')" }}
+    >
+      <div className="w-full max-w-md rounded-3xl bg-[#1c1f24] px-8 pt-2 pb-8 shadow-[0_30px_90px_rgba(0,0,0,0.65)] ring-1 ring-white/10">
+        <div className="flex flex-col items-center text-center">
+          <img
+            src="/icon/patte.png"
+            alt="GeoGN"
+            className="h-80 w-80 object-contain drop-shadow -mt-12 -mb-16"
+          />
+          <h1 className="-mt-4 text-4xl font-semibold tracking-wide text-white">GeoGN</h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isSignUp && (
-            <div>
-              <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-2">
-                Nom d'affichage
-              </label>
+        <form onSubmit={handleSubmit} className="mt-8 grid gap-4">
+          {isSignUp ? (
+            <div className="relative">
+              <User size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/60" />
               <input
-                id="displayName"
-                type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Ex: Alpha 1"
+                className="h-12 w-full rounded-xl border border-white/10 bg-[#262a31] pl-11 pr-4 text-sm text-white placeholder:text-white/50 outline-none autofill:bg-[#262a31] autofill:text-white autofill:shadow-[inset_0_0_0px_1000px_#262a31]"
+                placeholder="Nom d'affichage"
+                autoComplete="nickname"
               />
             </div>
-          )}
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-              Email
-            </label>
+          ) : null}
+
+          <div className="relative">
+            <Mail size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/60" />
             <input
-              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="votre@email.com"
+              className="h-12 w-full rounded-xl border border-white/10 bg-[#262a31] pl-11 pr-4 text-sm text-white placeholder:text-white/50 outline-none autofill:bg-[#262a31] autofill:text-white autofill:shadow-[inset_0_0_0px_1000px_#262a31]"
+              placeholder="Adresse e-mail"
+              autoComplete="email"
             />
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-              Mot de passe
-            </label>
+          <div className="relative">
+            <Lock size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/60" />
             <input
-              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="••••••••"
+              className="h-12 w-full rounded-xl border border-white/10 bg-[#262a31] pl-11 pr-4 text-sm text-white placeholder:text-white/50 outline-none autofill:bg-[#262a31] autofill:text-white autofill:shadow-[inset_0_0_0px_1000px_#262a31]"
+              placeholder="Mot de passe"
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
             />
+            {!isSignUp ? (
+              <button
+                type="button"
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-white/55 hover:text-white/80"
+              >
+                Mot de passe oublié ?
+              </button>
+            ) : null}
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          {error ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
               {error}
             </div>
-          )}
+          ) : null}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mt-1 inline-flex h-12 w-full items-center justify-center rounded-xl bg-gradient-to-b from-blue-500 to-blue-700 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(37,99,235,0.35)] transition disabled:opacity-50"
           >
             {loading ? 'Chargement...' : isSignUp ? 'Créer un compte' : 'Se connecter'}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center text-sm text-white/70">
+          {isSignUp ? 'Déjà un compte ? ' : 'Pas encore de compte ? '}
           <button
+            type="button"
             onClick={() => setIsSignUp(!isSignUp)}
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+            className="font-semibold text-blue-400 hover:text-blue-300"
           >
-            {isSignUp ? 'Déjà un compte ? Connectez-vous' : 'Pas de compte ? Inscrivez-vous'}
+            {isSignUp ? 'Se connecter' : "S'inscrire"}
           </button>
         </div>
       </div>

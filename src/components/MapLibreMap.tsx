@@ -2003,6 +2003,19 @@ export default function MapLibreMap() {
       center: [2.3522, 48.8566],
       zoom: 13,
       attributionControl: false,
+      // Localisation des messages internes MapLibre (ex: "Utilisez deux doigts…")
+      // pour les modes coopératifs (édition zones / blocage zoom scroll).
+      locale: {
+        // Cooperative gestures: touch (mobile)
+        'CooperativeGesturesHandler.Message': 'Utilisez deux doigts pour déplacer la carte',
+        // Cooperative gestures: wheel (desktop)
+        'CooperativeGesturesHandler.ScrollZoomBlockerMessage': 'Maintenez Ctrl (ou ⌘ sur Mac) et utilisez la molette pour zoomer',
+        // Some versions use ScrollZoomBlocker.* keys
+        'ScrollZoomBlocker.CtrlMessage': 'Maintenez Ctrl et utilisez la molette pour zoomer sur la carte',
+        'ScrollZoomBlocker.CmdMessage': 'Maintenez ⌘ et utilisez la molette pour zoomer sur la carte',
+        // Fallback key used by some builds
+        'ScrollZoomBlocker.Message': 'Utilisez Ctrl (ou ⌘ sur Mac) + molette pour zoomer sur la carte',
+      } as any,
     });
 
     const onLoad = () => {
@@ -2874,7 +2887,7 @@ export default function MapLibreMap() {
                   setZoneMenuOpen((v) => !v);
                 }}
                 className={`h-12 w-12 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
-                  activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                  zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
                     ? 'bg-blue-600 text-white'
                     : 'bg-white/90 hover:bg-white text-gray-600'
                 }`}
@@ -2882,7 +2895,7 @@ export default function MapLibreMap() {
               >
                 <CircleDotDashed
                   className={
-                    activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
                       ? 'mx-auto text-white'
                       : 'mx-auto text-gray-600'
                   }
