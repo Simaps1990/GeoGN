@@ -81,6 +81,14 @@ function getRasterStyle(tiles: string[], attribution: string) {
   return style;
 }
 
+function cloneStyle<T>(style: T): T {
+  try {
+    return (globalThis as any).structuredClone(style);
+  } catch {
+    return JSON.parse(JSON.stringify(style)) as T;
+  }
+}
+
 function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: number, steps = 64) {
   const latRad = (center.lat * Math.PI) / 180;
   const metersPerDegLat = 111_320;
@@ -607,15 +615,7 @@ export default function MapLibreMap() {
     // la couleur par défaut définie dans le style (pas de couleur inventée).
     if (!myColor) return;
 
-    if (map.getLayer('me-dot')) {
-      map.setPaintProperty('me-dot', 'circle-color', myColor);
-      const stroke = myColor.toLowerCase() === '#ffffff' ? '#d1d5db' : '#ffffff';
-      map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
-    }
-
-    if (map.getLayer('trace-line')) {
-      map.setPaintProperty('trace-line', 'line-color', myColor);
-    }
+    applyMyDynamicPaint(map);
   }, [mapReady, selectedMissionId, user?.id, memberColors]);
 
   // Persist self trace for this mission while the app is open.
@@ -860,7 +860,25 @@ export default function MapLibreMap() {
     []
   );
 
-  const currentBaseStyle = baseStyles[baseStyleIndex]?.style;
+  const currentBaseStyle = useMemo(() => {
+    const style = baseStyles[baseStyleIndex]?.style;
+    return style ? cloneStyle(style) : undefined;
+  }, [baseStyleIndex, baseStyles]);
+
+  function applyMyDynamicPaint(map: MapLibreMapInstance) {
+    if (!user?.id) return;
+    const myColor = memberColors[user.id];
+    if (!myColor) return;
+
+    if (map.getLayer('me-dot')) {
+      map.setPaintProperty('me-dot', 'circle-color', myColor);
+      const stroke = myColor.toLowerCase() === '#ffffff' ? '#d1d5db' : '#ffffff';
+      map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
+    }
+    if (map.getLayer('trace-line')) {
+      map.setPaintProperty('trace-line', 'line-color', myColor);
+    }
+  }
 
   function applyGridLabelStyle(map: MapLibreMapInstance) {
     if (!map.getLayer('zones-grid-labels')) return;
@@ -1897,6 +1915,7 @@ export default function MapLibreMap() {
       ensureOverlays(map);
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
+      applyMyDynamicPaint(map);
     };
 
     map.once('styledata', onStyleData);
@@ -1904,7 +1923,7 @@ export default function MapLibreMap() {
     return () => {
       map.off('styledata', onStyleData as any);
     };
-  }, [currentBaseStyle]);
+  }, [currentBaseStyle, user?.id, memberColors]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2220,7 +2239,6 @@ export default function MapLibreMap() {
       socket.off('connect', flushPending);
       socket.off('reconnect', flushPending as any);
       persistPending();
-      socket.emit('mission:leave', {});
     };
   }, [selectedMissionId, user?.id, memberColors, traceRetentionMs, maxTracePoints]);
 
