@@ -201,6 +201,17 @@ export async function missionsRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND' });
     }
 
+    try {
+      (app as any).io?.to(`mission:${id}`)?.emit('mission:updated', {
+        missionId: id,
+        traceRetentionSeconds: mission.traceRetentionSeconds,
+        title: mission.title,
+        updatedAt: mission.updatedAt,
+      });
+    } catch {
+      // ignore
+    }
+
     return reply.send({
       id: mission._id.toString(),
       title: mission.title,

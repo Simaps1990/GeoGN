@@ -345,6 +345,34 @@ export default function MapLibreMap() {
     return Math.max(0, seconds) * 1000;
   }, [mission?.traceRetentionSeconds]);
 
+  // Immediate purge when retention decreases.
+  const prevTraceRetentionMsRef = useRef<number>(traceRetentionMs);
+  useEffect(() => {
+    const prev = prevTraceRetentionMsRef.current;
+    prevTraceRetentionMsRef.current = traceRetentionMs;
+    if (traceRetentionMs <= 0) return;
+    if (prev <= 0) return;
+    if (traceRetentionMs >= prev) return;
+
+    const cutoff = Date.now() - traceRetentionMs;
+    setTracePoints((prevPts) => prevPts.filter((p) => p.t >= cutoff));
+
+    const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
+    for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+      const filtered = pts.filter((p) => p.t >= cutoff);
+      if (filtered.length) nextOthers[userId] = filtered;
+    }
+    otherTracesRef.current = nextOthers;
+
+    setOtherPositions((prevPos) => {
+      const next: Record<string, { lng: number; lat: number; t: number }> = {};
+      for (const [userId, p] of Object.entries(prevPos)) {
+        if (p && typeof p.t === 'number' && p.t >= cutoff) next[userId] = p;
+      }
+      return next;
+    });
+  }, [traceRetentionMs]);
+
   const maxTracePoints = useMemo(() => {
     // Cible: pouvoir garder une heure à ~1 point/sec (3600) sans tronquer.
     const approxPoints = Math.ceil(traceRetentionMs / 1000);
@@ -356,10 +384,7 @@ export default function MapLibreMap() {
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
 
   useEffect(() => {
-    if (!selectedMissionId) {
-      setMission(null);
-      return;
-    }
+    if (!selectedMissionId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -371,6 +396,68 @@ export default function MapLibreMap() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const socket = getSocket();
+
+    const onMemberUpdated = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const userId = msg?.member?.userId;
+      if (!userId) return;
+      const color = msg?.member?.color;
+      if (typeof color === 'string' && color.trim()) {
+        setMemberColors((prev) => ({ ...prev, [userId]: color.trim() }));
+      }
+    };
+
+    socket.on('member:updated', onMemberUpdated);
+    return () => {
+      socket.off('member:updated', onMemberUpdated);
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const socket = getSocket();
+    const onMissionUpdated = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const nextRetention =
+        typeof msg.traceRetentionSeconds === 'number' && Number.isFinite(msg.traceRetentionSeconds)
+          ? msg.traceRetentionSeconds
+          : null;
+      if (nextRetention === null) return;
+
+      setMission((prev) => {
+        const prevRetention = prev?.traceRetentionSeconds;
+        const next = prev ? { ...prev, traceRetentionSeconds: nextRetention } : prev;
+
+        // If retention increased, request a fresh snapshot to fill missing history.
+        if (prevRetention && nextRetention > prevRetention) {
+          try {
+            socket.emit('mission:join', { missionId: selectedMissionId });
+          } catch {
+            // ignore
+          }
+        }
+
+        return next;
+      });
+    };
+
+    const onMissionUpdatedWindow = (e: any) => {
+      const m = e?.detail?.mission as ApiMission | undefined;
+      if (!m || m.id !== selectedMissionId) return;
+      onMissionUpdated({ missionId: m.id, traceRetentionSeconds: m.traceRetentionSeconds });
+    };
+
+    socket.on('mission:updated', onMissionUpdated);
+    window.addEventListener('geotacops:mission:updated', onMissionUpdatedWindow as any);
+    return () => {
+      socket.off('mission:updated', onMissionUpdated);
+      window.removeEventListener('geotacops:mission:updated', onMissionUpdatedWindow as any);
     };
   }, [selectedMissionId]);
 
@@ -2067,12 +2154,9 @@ export default function MapLibreMap() {
       });
     };
 
-    socket.emit('mission:join', { missionId: selectedMissionId });
-
     // Best effort: flush buffered points on connect/reconnect.
     socket.on('connect', flushPending);
     socket.on('reconnect', flushPending as any);
-    // Also attempt flush shortly after join.
     setTimeout(flushPending, 300);
 
     const onSnapshot = (msg: any) => {

@@ -26,9 +26,11 @@ export default function MissionLayout() {
     if (!user?.id) return;
 
     const socket = getSocket();
-    socket.emit('mission:join', { missionId });
-
-    const isMapRoute = location.pathname.endsWith(`/mission/${missionId}/map`);
+    // Always (re)join the mission room so we continue receiving updates / snapshots.
+    const ensureJoined = () => {
+      socket.emit('mission:join', { missionId });
+    };
+    ensureJoined();
 
     const pendingKey = `geogn.pendingPos.${missionId}.${user.id}`;
     try {
@@ -65,8 +67,13 @@ export default function MissionLayout() {
       });
     };
 
-    socket.on('connect', flushPending);
-    socket.on('reconnect', flushPending as any);
+    const onConnect = () => {
+      ensureJoined();
+      flushPending();
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('reconnect', onConnect as any);
     setTimeout(flushPending, 300);
 
     const pushOnePositionNow = () => {
@@ -94,12 +101,17 @@ export default function MissionLayout() {
     };
 
     const onVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') pushOnePositionNow();
+      if (document.visibilityState !== 'visible') return;
+      // iOS: after backgrounding, socket may be reconnected but not re-joined.
+      ensureJoined();
+      flushPending();
+      pushOnePositionNow();
     };
 
     window.addEventListener('focus', onVisibilityOrFocus);
     document.addEventListener('visibilitychange', onVisibilityOrFocus);
 
+    const isMapRoute = location.pathname.endsWith(`/mission/${missionId}/map`);
     if (navigator.geolocation && !isMapRoute) {
       // Clear any previous watcher.
       if (watchIdRef.current !== null) {
@@ -134,8 +146,8 @@ export default function MissionLayout() {
     }
 
     return () => {
-      socket.off('connect', flushPending);
-      socket.off('reconnect', flushPending as any);
+      socket.off('connect', onConnect);
+      socket.off('reconnect', onConnect as any);
       persistPending();
 
       window.removeEventListener('focus', onVisibilityOrFocus);
@@ -145,8 +157,6 @@ export default function MissionLayout() {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
-
-      socket.emit('mission:leave', {});
     };
   }, [missionId, user?.id, location.pathname]);
 
