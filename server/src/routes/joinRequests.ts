@@ -201,7 +201,7 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       if (!joinReq) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
       }
-      if (joinReq.status !== 'pending') {
+      if (joinReq.status !== 'pending' && joinReq.status !== 'accepted') {
         return reply.code(409).send({ error: 'NOT_PENDING' });
       }
 
@@ -212,13 +212,16 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
 
       const now = new Date();
 
-      await MissionJoinRequestModel.updateOne(
-        { _id: joinReq._id },
-        { $set: { status: 'accepted', handledBy: new mongoose.Types.ObjectId(req.userId), handledAt: now } }
-      );
+      if (joinReq.status === 'pending') {
+        await MissionJoinRequestModel.updateOne(
+          { _id: joinReq._id },
+          { $set: { status: 'accepted', handledBy: new mongoose.Types.ObjectId(req.userId), handledAt: now } }
+        );
+      }
 
       const existingMember = await MissionMemberModel.findOne({ missionId: joinReq.missionId, userId: joinReq.requestedBy }).lean();
-      const memberColor = existingMember?.color ? String(existingMember.color).trim() : await pickMissionMemberColor(joinReq.missionId);
+      const existingColor = existingMember?.color ? String(existingMember.color).trim() : '';
+      const memberColor = existingColor || (await pickMissionMemberColor(joinReq.missionId));
 
       await MissionMemberModel.updateOne(
         { missionId: joinReq.missionId, userId: joinReq.requestedBy },
@@ -234,6 +237,7 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
             joinedAt: now,
             isActive: true,
             role: desiredRole,
+            color: memberColor,
           },
         },
         { upsert: true }
