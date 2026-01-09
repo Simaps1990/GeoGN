@@ -47,6 +47,14 @@ async function ensureContact(ownerUserId: mongoose.Types.ObjectId, contactUserId
   }
 }
 
+function asObjectId(v: any): mongoose.Types.ObjectId | null {
+  if (!v) return null;
+  if (v instanceof mongoose.Types.ObjectId) return v;
+  const s = typeof v === 'string' ? v : v?.toString?.();
+  if (typeof s === 'string' && mongoose.Types.ObjectId.isValid(s)) return new mongoose.Types.ObjectId(s);
+  return null;
+}
+
 export async function joinRequestsRoutes(app: FastifyInstance) {
   app.get<{ Params: { missionId: string } }>('/missions/:missionId/members', async (req, reply) => {
     try {
@@ -244,8 +252,32 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
 
-    const reqs = await MissionJoinRequestModel.find({ missionId, status: 'pending' }).sort({ createdAt: -1 }).lean();
-    const userIds = reqs.map((r) => r.requestedBy);
+    // Robust listing: sometimes a join request may be marked accepted while the member wasn't
+    // actually created (previous accept crashed mid-way). In that case, "accepted" should be
+    // treated as "pending" again.
+    const reqsRaw = await MissionJoinRequestModel.find({ missionId, status: { $in: ['pending', 'accepted'] } })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const repairs: mongoose.Types.ObjectId[] = [];
+    for (const r of reqsRaw) {
+      if ((r as any).status !== 'accepted') continue;
+      const stillMember = await MissionMemberModel.findOne({ missionId, userId: (r as any).requestedBy, removedAt: null }).lean();
+      if (!stillMember) repairs.push((r as any)._id);
+    }
+
+    if (repairs.length) {
+      await MissionJoinRequestModel.updateMany(
+        { _id: { $in: repairs } },
+        { $set: { status: 'pending', handledBy: null, handledAt: null } }
+      );
+    }
+
+    const reqs = repairs.length
+      ? await MissionJoinRequestModel.find({ missionId, status: 'pending' }).sort({ createdAt: -1 }).lean()
+      : reqsRaw.filter((r) => (r as any).status === 'pending');
+
+    const userIds = reqs.map((r) => (r as any).requestedBy);
     const users = await UserModel.find({ _id: { $in: userIds } }).select({ displayName: 1, appUserId: 1 }).lean();
     const userById = new Map(users.map((u) => [u._id.toString(), u] as const));
 
@@ -305,23 +337,22 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
 
         const now = new Date();
 
-        if (joinReq.status === 'pending') {
-          await MissionJoinRequestModel.updateOne(
-            { _id: joinReq._id },
-            { $set: { status: 'accepted', handledBy: adminUserObjectId, handledAt: now } }
-          );
+        const joinMissionId = asObjectId((joinReq as any).missionId);
+        const joinRequestedBy = asObjectId((joinReq as any).requestedBy);
+        if (!joinMissionId || !joinRequestedBy) {
+          return reply.code(500).send({ error: 'JOIN_REQUEST_DATA_INVALID' });
         }
 
-        const existingMember = await MissionMemberModel.findOne({ missionId: joinReq.missionId, userId: joinReq.requestedBy }).lean();
+        const existingMember = await MissionMemberModel.findOne({ missionId: joinMissionId, userId: joinRequestedBy }).lean();
         const existingColor = existingMember?.color ? String(existingMember.color).trim() : '';
-        const memberColor = existingColor || (await pickMissionMemberColor(joinReq.missionId));
+        const memberColor = existingColor || (await pickMissionMemberColor(joinMissionId));
 
         await MissionMemberModel.updateOne(
-          { missionId: joinReq.missionId, userId: joinReq.requestedBy },
+          { missionId: joinMissionId, userId: joinRequestedBy },
           {
             $setOnInsert: {
-              missionId: joinReq.missionId,
-              userId: joinReq.requestedBy,
+              missionId: joinMissionId,
+              userId: joinRequestedBy,
               role: desiredRole,
               color: memberColor,
             },
@@ -336,16 +367,24 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
           { upsert: true }
         );
 
+        if (joinReq.status === 'pending') {
+          await MissionJoinRequestModel.updateOne(
+            { _id: joinReq._id },
+            { $set: { status: 'accepted', handledBy: adminUserObjectId, handledAt: now } }
+          );
+        }
+
         app.io?.to(`mission:${missionId}`).emit('member:updated', {
           missionId,
-          member: { userId: joinReq.requestedBy.toString(), role: desiredRole, color: memberColor },
+          member: { userId: joinRequestedBy.toString(), role: desiredRole, color: memberColor },
         });
 
         // Add to global contacts in both directions (admin <-> requester)
-        await Promise.all([
-          ensureContact(adminUserObjectId, joinReq.requestedBy),
-          ensureContact(joinReq.requestedBy, adminUserObjectId),
-        ]);
+        try {
+          await Promise.all([ensureContact(adminUserObjectId, joinRequestedBy), ensureContact(joinRequestedBy, adminUserObjectId)]);
+        } catch (e: any) {
+          console.error('[join-requests.accept] contact sync failed', e);
+        }
 
         return reply.send({ ok: true });
       } catch (e: any) {
@@ -355,6 +394,12 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
           // ignore
         }
         console.error('[join-requests.accept] failed', e);
+        if (e?.name === 'CastError') {
+          return reply.code(500).send({ error: 'CAST_ERROR' });
+        }
+        if (e?.code === 11000) {
+          return reply.code(500).send({ error: 'DUPLICATE_KEY' });
+        }
         return reply.code(500).send({ error: 'ACCEPT_JOIN_REQUEST_FAILED' });
       }
     }

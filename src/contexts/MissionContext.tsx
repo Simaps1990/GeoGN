@@ -18,6 +18,24 @@ export function MissionProvider({ children }: { children: React.ReactNode }) {
     setSelectedMissionId(v ? v : null);
   }, []);
 
+  useEffect(() => {
+    const onClear = () => {
+      const v = localStorage.getItem(SELECTED_MISSION_KEY);
+      setSelectedMissionId(v ? v : null);
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SELECTED_MISSION_KEY) return;
+      const v = localStorage.getItem(SELECTED_MISSION_KEY);
+      setSelectedMissionId(v ? v : null);
+    };
+    window.addEventListener('geotacops:mission:clear', onClear as any);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('geotacops:mission:clear', onClear as any);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
   function selectMission(missionId: string) {
     localStorage.setItem(SELECTED_MISSION_KEY, missionId);
     setSelectedMissionId(missionId);
