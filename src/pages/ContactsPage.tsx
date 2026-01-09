@@ -80,7 +80,7 @@ export default function ContactsPage() {
           <input
             value={appUserId}
             onChange={(e) => setAppUserId(e.target.value)}
-            placeholder="appUserId du contact (ex: 7F3K9Q)"
+            placeholder="N° d'identification du contact (ex: 7F3K9Q)"
             className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
           />
           <button
@@ -101,7 +101,7 @@ export default function ContactsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher par nom ou numéro (appUserId)"
+            placeholder="Rechercher par nom ou n° d'identification"
             className="h-10 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
           />
         </div>

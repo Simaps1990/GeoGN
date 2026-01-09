@@ -252,7 +252,7 @@ export default function MapLibreMap() {
 
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
-  const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: string }>>({});
+  const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
@@ -280,7 +280,7 @@ export default function MapLibreMap() {
   const [labelsEnabled, setLabelsEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
+    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#ec4899', '#000000', '#ffffff'],
     []
   );
 
@@ -334,6 +334,12 @@ export default function MapLibreMap() {
     const seconds = typeof s === 'number' && Number.isFinite(s) ? s : 3600;
     return Math.max(0, seconds) * 1000;
   }, [mission?.traceRetentionSeconds]);
+
+  const maxTracePoints = useMemo(() => {
+    // Cible: pouvoir garder une heure à ~1 point/sec (3600) sans tronquer.
+    const approxPoints = Math.ceil(traceRetentionMs / 1000);
+    return Math.max(2000, approxPoints + 200);
+  }, [traceRetentionMs]);
 
   // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
   // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
@@ -500,11 +506,11 @@ export default function MapLibreMap() {
         const parsed = JSON.parse(rawOthers) as Record<string, { lng: number; lat: number; t: number }[]>;
         if (parsed && typeof parsed === 'object') {
           otherTracesRef.current = parsed;
-          const nextPositions: Record<string, { lng: number; lat: number; t: string }> = {};
+          const nextPositions: Record<string, { lng: number; lat: number; t: number }> = {};
           for (const [userId, pts] of Object.entries(parsed)) {
             if (!Array.isArray(pts) || pts.length === 0) continue;
             const last = pts[pts.length - 1];
-            nextPositions[userId] = { lng: last.lng, lat: last.lat, t: String(last.t) };
+            nextPositions[userId] = { lng: last.lng, lat: last.lat, t: last.t };
           }
           if (Object.keys(nextPositions).length) {
             setOtherPositions(nextPositions);
@@ -533,10 +539,9 @@ export default function MapLibreMap() {
     otherTracesRef.current = nextOthers;
 
     setOtherPositions((prev) => {
-      const next: Record<string, { lng: number; lat: number; t: string }> = {};
+      const next: Record<string, { lng: number; lat: number; t: number }> = {};
       for (const [userId, p] of Object.entries(prev)) {
-        const tNum = Number(p.t);
-        if (Number.isFinite(tNum) && tNum >= cutoff) {
+        if (Number.isFinite(p.t) && p.t >= cutoff) {
           next[userId] = p;
         }
       }
@@ -544,6 +549,44 @@ export default function MapLibreMap() {
     });
 
   }, [traceRetentionMs, selectedMissionId]);
+
+  // Purge périodique: garantit que le chenillard disparaît exactement au-delà
+  // de la durée configurée, même si aucun nouvel événement n'arrive.
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    if (traceRetentionMs <= 0) {
+      setTracePoints([]);
+      otherTracesRef.current = {};
+      setOtherPositions({});
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      const cutoff = now - traceRetentionMs;
+
+      setTracePoints((prev) => prev.filter((p) => p.t >= cutoff));
+
+      const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
+      for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+        const filtered = pts.filter((p) => p.t >= cutoff);
+        if (filtered.length) nextOthers[userId] = filtered;
+      }
+      otherTracesRef.current = nextOthers;
+
+      setOtherPositions((prev) => {
+        const next: Record<string, { lng: number; lat: number; t: number }> = {};
+        for (const [userId, p] of Object.entries(prev)) {
+          if (Number.isFinite(p.t) && p.t >= cutoff) next[userId] = p;
+        }
+        return next;
+      });
+    }, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [selectedMissionId, traceRetentionMs]);
 
   // Keep the current user's dot and personal trace in sync with their mission color.
   useEffect(() => {
@@ -938,7 +981,11 @@ export default function MapLibreMap() {
           id: 'trace-line',
           type: 'line',
           source: 'trace',
-          paint: { 'line-color': '#00ff00', 'line-width': 8, 'line-opacity': 0.5 },
+          paint: {
+            'line-color': '#00ff00',
+            'line-width': 8,
+            'line-opacity': ['coalesce', ['get', 'opacity'], 0.5],
+          },
         },
         'me-dot'
       );
@@ -958,7 +1005,7 @@ export default function MapLibreMap() {
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
           'line-width': 8,
-          'line-opacity': 0.9,
+          'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
         },
       });
     }
@@ -1898,6 +1945,50 @@ export default function MapLibreMap() {
 
     socket.emit('mission:join', { missionId: selectedMissionId });
 
+    const onSnapshot = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const now = Date.now();
+
+      const positions = (msg.positions && typeof msg.positions === 'object' ? msg.positions : {}) as Record<
+        string,
+        { lng: number; lat: number; t: number }
+      >;
+      const traces = (msg.traces && typeof msg.traces === 'object' ? msg.traces : {}) as Record<
+        string,
+        { lng: number; lat: number; t: number }[]
+      >;
+
+      const cutoff = now - traceRetentionMs;
+
+      const nextOthers: Record<string, { lng: number; lat: number; t: number }> = {};
+      for (const [userId, p] of Object.entries(positions)) {
+        if (!userId) continue;
+        if (user?.id && userId === user.id) continue;
+        if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
+        const t = typeof p.t === 'number' ? p.t : now;
+        if (t < cutoff) continue;
+        nextOthers[userId] = { lng: p.lng, lat: p.lat, t };
+      }
+
+      const nextOthersTraces: Record<string, { lng: number; lat: number; t: number }[]> = {};
+      for (const [userId, pts] of Object.entries(traces)) {
+        if (!userId) continue;
+        if (user?.id && userId === user.id) continue;
+        if (!Array.isArray(pts) || pts.length === 0) continue;
+        const filtered = pts
+          .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number')
+          .map((p) => ({ lng: p.lng, lat: p.lat, t: typeof p.t === 'number' ? p.t : now }))
+          .filter((p) => p.t >= cutoff)
+          .slice(-maxTracePoints);
+        if (filtered.length) {
+          nextOthersTraces[userId] = filtered;
+        }
+      }
+
+      otherTracesRef.current = nextOthersTraces;
+      setOtherPositions(nextOthers);
+    };
+
     const onPos = (msg: any) => {
       if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
       if (user?.id && msg.userId === user.id) return;
@@ -1910,15 +2001,18 @@ export default function MapLibreMap() {
       const now = typeof msg.t === 'number' ? msg.t : Date.now();
       const traces = otherTracesRef.current[msg.userId] ?? [];
       const cutoff = Date.now() - traceRetentionMs;
-      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }].filter((p) => p.t >= cutoff).slice(-200);
+      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }]
+        .filter((p) => p.t >= cutoff)
+        .slice(-maxTracePoints);
       otherTracesRef.current[msg.userId] = nextTraces;
 
       setOtherPositions((prev) => ({
         ...prev,
-        [msg.userId]: { lng: msg.lng, lat: msg.lat, t: String(msg.t ?? now) },
+        [msg.userId]: { lng: msg.lng, lat: msg.lat, t: now },
       }));
     };
 
+    socket.on('mission:snapshot', onSnapshot);
     socket.on('position:update', onPos);
 
     const onPosClear = (msg: any) => {
@@ -1981,6 +2075,7 @@ export default function MapLibreMap() {
     socket.on('zone:deleted', onZoneDeleted);
 
     return () => {
+      socket.off('mission:snapshot', onSnapshot);
       socket.off('position:update', onPos);
       socket.off('position:clear', onPosClear);
       socket.off('poi:created', onPoiCreated);
@@ -1991,7 +2086,7 @@ export default function MapLibreMap() {
       socket.off('zone:deleted', onZoneDeleted);
       socket.emit('mission:leave', {});
     };
-  }, [selectedMissionId, user?.id, memberColors]);
+  }, [selectedMissionId, user?.id, memberColors, traceRetentionMs, maxTracePoints]);
 
   useEffect(() => {
     if (!selectedMissionId) return;
@@ -2059,8 +2154,9 @@ export default function MapLibreMap() {
 
         setLastPos({ lng, lat });
         setTracePoints((prev) => {
-          const next = [...prev, { lng, lat, t }];
-          return next.slice(-200);
+          const cutoff = Date.now() - traceRetentionMs;
+          const next = [...prev, { lng, lat, t }].filter((p) => p.t >= cutoff);
+          return next.slice(-maxTracePoints);
         });
 
         const socket = socketRef.current;
@@ -2089,7 +2185,7 @@ export default function MapLibreMap() {
         watchIdRef.current = null;
       }
     };
-  }, [selectedMissionId, trackingEnabled]);
+  }, [selectedMissionId, trackingEnabled, traceRetentionMs, maxTracePoints]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2198,11 +2294,13 @@ export default function MapLibreMap() {
     const src = map.getSource('others') as GeoJSONSource | undefined;
     if (!src) return;
 
+    const now = Date.now();
+    const inactiveAfterMs = 60_000;
     const features = Object.entries(otherPositions).map(([userId, p]) => {
       const memberColor = memberColors[userId];
-      // Si pas de couleur définie pour ce membre, utiliser un gris neutre commun
-      // plutôt que d'inventer une couleur différente.
-      const color = memberColor ?? '#4b5563';
+      const isInactive = now - p.t > inactiveAfterMs;
+      // Inactif: gris foncé. Sinon, couleur de mission.
+      const color = isInactive ? '#374151' : (memberColor ?? '#374151');
 
       return {
         type: 'Feature',
@@ -2228,20 +2326,39 @@ export default function MapLibreMap() {
     const src = map.getSource('others-traces') as GeoJSONSource | undefined;
     if (!src) return;
 
+    const now = Date.now();
+    const inactiveAfterMs = 60_000;
     const features: any[] = [];
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       if (pts.length < 2) continue;
       const memberColor = memberColors[userId];
-      const color = memberColor ?? '#4b5563';
-      features.push({
-        type: 'Feature',
-        properties: { userId, color },
-        geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
-      });
+      const lastT = pts[pts.length - 1]?.t ?? 0;
+      const isInactive = now - lastT > inactiveAfterMs;
+      const color = isInactive ? '#374151' : (memberColor ?? '#374151');
+
+      const tA = now - traceRetentionMs * (2 / 3);
+      const tB = now - traceRetentionMs * (1 / 3);
+
+      const oldest = pts.filter((p) => p.t < tA);
+      const middle = pts.filter((p) => p.t >= tA && p.t < tB);
+      const newest = pts.filter((p) => p.t >= tB);
+
+      const pushSeg = (segPts: typeof pts, opacity: number) => {
+        if (segPts.length < 2) return;
+        features.push({
+          type: 'Feature',
+          properties: { userId, color, opacity },
+          geometry: { type: 'LineString', coordinates: segPts.map((p) => [p.lng, p.lat]) },
+        });
+      };
+
+      pushSeg(oldest, 0.3);
+      pushSeg(middle, 0.6);
+      pushSeg(newest, 0.9);
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
-  }, [otherPositions, memberColors, mapReady]);
+  }, [otherPositions, memberColors, mapReady, traceRetentionMs]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2269,24 +2386,36 @@ export default function MapLibreMap() {
         meSource.setData({ type: 'FeatureCollection', features: [] } as any);
       }
 
-      const retentionMs = 60 * 60 * 1000;
+      const retentionMs = traceRetentionMs;
       const now = Date.now();
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
       if (filtered.length !== tracePoints.length) setTracePoints(filtered);
 
       if (filtered.length >= 2) {
+        const tA = now - retentionMs * (2 / 3);
+        const tB = now - retentionMs * (1 / 3);
+
+        const oldest = filtered.filter((p) => p.t < tA);
+        const middle = filtered.filter((p) => p.t >= tA && p.t < tB);
+        const newest = filtered.filter((p) => p.t >= tB);
+
+        const features: any[] = [];
+        const pushSeg = (segPts: typeof filtered, opacity: number) => {
+          if (segPts.length < 2) return;
+          features.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: segPts.map((p) => [p.lng, p.lat]) },
+            properties: { opacity },
+          });
+        };
+
+        pushSeg(oldest, 0.3);
+        pushSeg(middle, 0.6);
+        pushSeg(newest, 0.9);
+
         traceSource.setData({
           type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: filtered.map((p) => [p.lng, p.lat]),
-              },
-              properties: {},
-            },
-          ],
+          features,
         });
       } else {
         traceSource.setData({ type: 'FeatureCollection', features: [] });
@@ -2294,7 +2423,7 @@ export default function MapLibreMap() {
     };
 
     update();
-  }, [lastPos, tracePoints, mapReady]);
+  }, [lastPos, tracePoints, mapReady, traceRetentionMs]);
 
   return (
     <div className="relative w-full h-screen">

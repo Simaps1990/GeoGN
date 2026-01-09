@@ -42,7 +42,6 @@ export default function MissionContactsPage() {
       '#a855f7',
       '#14b8a6',
       '#eab308',
-      '#64748b',
       '#ec4899',
       '#000000',
       '#ffffff',
@@ -557,30 +556,32 @@ export default function MissionContactsPage() {
                           >
                             <Pencil size={16} />
                           </button>
-                          <button
-                            type="button"
-                            disabled={busyKey === `memberRemove:${m.user.id}`}
-                            onClick={async () => {
-                              if (!missionId || !m.user?.id) return;
-                              const ok = window.confirm(`Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`);
-                              if (!ok) return;
-                              setBusyKey(`memberRemove:${m.user.id}`);
-                              setError(null);
-                              try {
-                                await removeMissionMember(missionId, m.user.id);
-                                setMembers((prev) => prev.filter((x) => x.user?.id !== m.user?.id));
-                                await refresh();
-                              } catch (e: any) {
-                                setError(e?.message ?? 'Erreur');
-                              } finally {
-                                setBusyKey(null);
-                              }
-                            }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                            title="Retirer"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {!isSelf ? (
+                            <button
+                              type="button"
+                              disabled={busyKey === `memberRemove:${m.user.id}`}
+                              onClick={async () => {
+                                if (!missionId || !m.user?.id) return;
+                                const ok = window.confirm(`Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`);
+                                if (!ok) return;
+                                setBusyKey(`memberRemove:${m.user.id}`);
+                                setError(null);
+                                try {
+                                  await removeMissionMember(missionId, m.user.id);
+                                  setMembers((prev) => prev.filter((x) => x.user?.id !== m.user?.id));
+                                  await refresh();
+                                } catch (e: any) {
+                                  setError(e?.message ?? 'Erreur');
+                                } finally {
+                                  setBusyKey(null);
+                                }
+                              }}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                              title="Retirer"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          ) : null}
                         </>
                       ) : null}
                     </div>

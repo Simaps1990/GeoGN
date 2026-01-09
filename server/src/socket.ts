@@ -23,6 +23,64 @@ type PositionUpdatePayload = {
   t?: number;
 };
 
+async function emitMissionSnapshot(socket: any, missionId: string) {
+  if (!mongoose.Types.ObjectId.isValid(missionId)) return;
+
+  const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+  const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+  const now = Date.now();
+  const cutoff = new Date(now - Math.max(0, retentionSeconds) * 1000);
+
+  const [positionsAgg, traces] = await Promise.all([
+    PositionModel.aggregate([
+      { $match: { missionId: new mongoose.Types.ObjectId(missionId), createdAt: { $gte: cutoff } } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$userId',
+          lng: { $first: { $arrayElemAt: ['$loc.coordinates', 0] } },
+          lat: { $first: { $arrayElemAt: ['$loc.coordinates', 1] } },
+          t: { $first: '$createdAt' },
+        },
+      },
+    ]),
+    TraceModel.find({ missionId: new mongoose.Types.ObjectId(missionId), createdAt: { $gte: cutoff } })
+      .select({ userId: 1, loc: 1, createdAt: 1 })
+      .sort({ userId: 1, createdAt: 1 })
+      .limit(Math.max(500, retentionSeconds * 2))
+      .lean(),
+  ]);
+
+  const positions: Record<string, { lng: number; lat: number; t: number }> = {};
+  for (const p of positionsAgg as any[]) {
+    const uid = String(p?._id ?? '');
+    if (!uid) continue;
+    if (typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
+    const tMs = p.t instanceof Date ? p.t.getTime() : now;
+    positions[uid] = { lng: p.lng, lat: p.lat, t: tMs };
+  }
+
+  const tracesByUser: Record<string, { lng: number; lat: number; t: number }[]> = {};
+  for (const tr of traces as any[]) {
+    const uid = String(tr?.userId ?? '');
+    if (!uid) continue;
+    const coords = tr?.loc?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) continue;
+    const lng = coords[0];
+    const lat = coords[1];
+    if (typeof lng !== 'number' || typeof lat !== 'number') continue;
+    const tMs = tr.createdAt instanceof Date ? tr.createdAt.getTime() : now;
+    (tracesByUser[uid] ??= []).push({ lng, lat, t: tMs });
+  }
+
+  socket.emit('mission:snapshot', {
+    missionId,
+    retentionSeconds,
+    positions,
+    traces: tracesByUser,
+  });
+}
+
 async function requireMissionMember(userId: string, missionId: string) {
   if (!mongoose.Types.ObjectId.isValid(missionId)) return false;
   const mem = await MissionMemberModel.findOne({ missionId, userId, removedAt: null }).lean();
@@ -82,6 +140,10 @@ export function setupSocket(app: FastifyInstance) {
 
         ack?.({ ok: true });
         socket.emit('mission:joined', { missionId });
+
+        // Envoyer un snapshot pour que les clients qui reviennent sur la carte
+        // voient immédiatement les positions + traces récentes.
+        await emitMissionSnapshot(socket, missionId);
       } catch {
         ack?.({ ok: false, error: 'JOIN_FAILED' });
       }
@@ -150,12 +212,15 @@ export function setupSocket(app: FastifyInstance) {
 
         const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
         const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
-        const expiresAt = new Date(t.getTime() + Math.max(60, retentionSeconds) * 1000);
+        const expiresAt = new Date(t.getTime() + Math.max(0, retentionSeconds) * 1000);
+
+        const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null }).select({ color: 1 }).lean();
+        const color = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
 
         await TraceModel.create({
           missionId: new mongoose.Types.ObjectId(missionId),
           userId: new mongoose.Types.ObjectId(userId),
-          color: '#3b82f6',
+          color,
           loc: { type: 'Point', coordinates: [payload.lng, payload.lat] },
           createdAt: t,
           expiresAt,
@@ -169,7 +234,7 @@ export function setupSocket(app: FastifyInstance) {
           speed: payload.speed ?? null,
           heading: payload.heading ?? null,
           accuracy: payload.accuracy ?? null,
-          t: t.toISOString(),
+          t: t.getTime(),
         };
 
         io.to(`mission:${missionId}`).emit('position:update', msg);
