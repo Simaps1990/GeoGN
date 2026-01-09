@@ -675,14 +675,14 @@ export default function MapLibreMap() {
     const styleId = baseStyles[baseStyleIndex]?.id;
 
     if (styleId === 'sat') {
-      // Fond satellite: texte blanc 60%, sans contour.
+      // Fond satellite: texte blanc 70%, sans contour.
       map.setPaintProperty('zones-grid-labels', 'text-color', '#ffffff');
       map.setPaintProperty('zones-grid-labels', 'text-halo-color', 'rgba(0,0,0,0)');
       map.setPaintProperty('zones-grid-labels', 'text-halo-width', 0);
       map.setPaintProperty('zones-grid-labels', 'text-opacity', [
         'case',
         ['<=', ['*', ['get', 'rows'], ['get', 'cols']], 64],
-        0.6,
+        0.7,
         0,
       ]);
       return;
@@ -2227,7 +2227,46 @@ export default function MapLibreMap() {
       <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-3">
         <button
           type="button"
-          onClick={() => setTrackingEnabled((v) => !v)}
+          onClick={() => {
+            setTrackingEnabled((prev) => {
+              const next = !prev;
+              // Si on vient de réactiver le tracking, forcer une mise à jour immédiate de la position
+              // pour réafficher le point et relancer un nouveau tracé, pour soi et pour les autres.
+              if (!prev && next && navigator.geolocation && selectedMissionId && user?.id) {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    const lng = pos.coords.longitude;
+                    const lat = pos.coords.latitude;
+                    const t = Date.now();
+
+                    setLastPos({ lng, lat });
+                    setTracePoints([{ lng, lat, t }]);
+
+                    const socket = socketRef.current;
+                    if (socket) {
+                      socket.emit('position:update', {
+                        lng,
+                        lat,
+                        speed: pos.coords.speed ?? undefined,
+                        heading: pos.coords.heading ?? undefined,
+                        accuracy: pos.coords.accuracy ?? undefined,
+                        t,
+                      });
+                    }
+                  },
+                  () => {
+                    // ignore error; le watcher prendra le relais si possible
+                  },
+                  {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 5000,
+                  }
+                );
+              }
+              return next;
+            });
+          }}
           className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
         >
           {trackingEnabled ? (
