@@ -25,6 +25,7 @@ import {
   Navigation,
   NavigationOff,
   MessageCircle,
+  Timer,
   Users,
   Dog,
   PawPrint,
@@ -51,6 +52,7 @@ import {
   listPois,
   listMissionMembers,
   listZones,
+  updateMission,
   type ApiMission,
   type ApiPoi,
   type ApiZone,
@@ -339,6 +341,11 @@ export default function MapLibreMap() {
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
+  const [timerModalOpen, setTimerModalOpen] = useState(false);
+  const [timerSecondsInput, setTimerSecondsInput] = useState('');
+  const [timerSaving, setTimerSaving] = useState(false);
+  const [timerError, setTimerError] = useState<string | null>(null);
+
   const traceRetentionMs = useMemo(() => {
     const s = mission?.traceRetentionSeconds;
     const seconds = typeof s === 'number' && Number.isFinite(s) ? s : 3600;
@@ -382,6 +389,35 @@ export default function MapLibreMap() {
   // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
   // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
+  const isAdmin = !!mission && mission.membership?.role === 'admin';
+
+  async function onSaveTraceRetentionSeconds() {
+    if (!selectedMissionId) return;
+    if (!isAdmin) return;
+    setTimerSaving(true);
+    setTimerError(null);
+    try {
+      const trimmed = timerSecondsInput.trim();
+      const parsed = trimmed ? Number(trimmed) : NaN;
+      if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+        setTimerError('Durée invalide');
+        return;
+      }
+      const nextRetention = Math.max(0, Math.floor(parsed));
+      const updated = await updateMission(selectedMissionId, { traceRetentionSeconds: nextRetention });
+      setMission(updated);
+      setTimerModalOpen(false);
+      try {
+        window.dispatchEvent(new CustomEvent('geotacops:mission:updated', { detail: { mission: updated } }));
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setTimerError(e?.message ?? 'Erreur');
+    } finally {
+      setTimerSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!selectedMissionId) return;
@@ -902,14 +938,10 @@ export default function MapLibreMap() {
         ),
       },
       {
-        id: 'topo',
+        id: 'sat',
         style: getRasterStyle(
-          [
-            'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
-            'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
-            'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
-          ],
-          '© OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+          ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          'Tiles Esri'
         ),
       },
       {
@@ -925,13 +957,6 @@ export default function MapLibreMap() {
         ),
       },
       {
-        id: 'sat',
-        style: getRasterStyle(
-          ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-          'Tiles Esri'
-        ),
-      },
-      {
         id: 'voyager',
         style: getRasterStyle(
           [
@@ -941,6 +966,17 @@ export default function MapLibreMap() {
             'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
           ],
           '© OpenStreetMap contributors © CARTO'
+        ),
+      },
+      {
+        id: 'topo',
+        style: getRasterStyle(
+          [
+            'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+            'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
+          ],
+          '© OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
         ),
       },
     ],
@@ -1966,6 +2002,7 @@ export default function MapLibreMap() {
       style: initialStyle,
       center: [2.3522, 48.8566],
       zoom: 13,
+      attributionControl: false,
     });
 
     const onLoad = () => {
@@ -1990,6 +2027,26 @@ export default function MapLibreMap() {
       mapInstanceRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const onResize = () => {
+      try {
+        map.resize();
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, [mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2744,42 +2801,42 @@ export default function MapLibreMap() {
               return next;
             });
           }}
-          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
         >
           {trackingEnabled ? (
-            <Navigation className="mx-auto text-green-600" size={22} />
+            <Navigation className="mx-auto text-green-600" size={20} />
           ) : (
-            <NavigationOff className="mx-auto text-gray-600" size={22} />
+            <NavigationOff className="mx-auto text-gray-600" size={20} />
           )}
         </button>
 
         <button
           type="button"
           onClick={centerOnMe}
-          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Centrer sur moi"
         >
-          <Crosshair className="mx-auto text-gray-600" size={22} />
+          <Crosshair className="mx-auto text-gray-600" size={20} />
         </button>
 
         <button
           type="button"
           onClick={toggleMapStyle}
-          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Changer le fond de carte"
         >
-          <Layers className="mx-auto text-gray-600" size={22} />
+          <Layers className="mx-auto text-gray-600" size={20} />
         </button>
 
         <button
           type="button"
           onClick={() => setLabelsEnabled((v) => !v)}
-          className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
           title="Afficher les noms (POI + zones + utilisateurs)"
         >
           <Tag
             className={`mx-auto ${labelsEnabled ? 'text-green-600' : 'text-gray-600'}`}
-            size={20}
+            size={18}
           />
         </button>
 
@@ -2796,7 +2853,7 @@ export default function MapLibreMap() {
                 setZoneMenuOpen(false);
                 setActiveTool('poi');
               }}
-              className={`h-14 w-14 rounded-2xl border shadow backdrop-blur ${
+              className={`h-12 w-12 rounded-2xl border shadow backdrop-blur ${
                 activeTool === 'poi' ? 'bg-blue-600 text-white' : 'bg-white/90 hover:bg-white'
               }`}
               title="Ajouter un POI"
@@ -2805,7 +2862,7 @@ export default function MapLibreMap() {
                 className={
                   activeTool === 'poi' ? 'mx-auto' : 'mx-auto text-gray-600'
                 }
-                size={22}
+                size={20}
               />
             </button>
 
@@ -2816,7 +2873,7 @@ export default function MapLibreMap() {
                   setActionError(null);
                   setZoneMenuOpen((v) => !v);
                 }}
-                className={`h-14 w-14 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
+                className={`h-12 w-12 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
                   activeTool === 'zone_circle' || activeTool === 'zone_polygon'
                     ? 'bg-blue-600 text-white'
                     : 'bg-white/90 hover:bg-white text-gray-600'
@@ -2829,7 +2886,7 @@ export default function MapLibreMap() {
                       ? 'mx-auto text-white'
                       : 'mx-auto text-gray-600'
                   }
-                  size={22}
+                  size={20}
                 />
               </button>
 
@@ -2893,13 +2950,76 @@ export default function MapLibreMap() {
           <button
             type="button"
             onClick={resetNorth}
-            className="h-14 w-14 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
             title="Boussole"
           >
-            <Compass className="mx-auto text-gray-600" size={22} />
+            <Compass className="mx-auto text-gray-600" size={20} />
           </button>
+
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => {
+                const rs = mission?.traceRetentionSeconds ?? 3600;
+                setTimerSecondsInput(String(rs));
+                setTimerError(null);
+                setTimerModalOpen(true);
+              }}
+              className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+              title="Timer-reset"
+            >
+              <Timer className="mx-auto text-gray-600" size={20} />
+            </button>
+          ) : null}
         </div>
       </div>
+
+      {timerModalOpen ? (
+        <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="text-base font-bold text-gray-900">Durée chenillard</div>
+              <button
+                type="button"
+                onClick={() => setTimerModalOpen(false)}
+                className="h-10 w-10 rounded-2xl border bg-white"
+              >
+                <X className="mx-auto" size={18} />
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              <div className="text-xs font-semibold text-gray-700">Durée (secondes)</div>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={timerSecondsInput}
+                onChange={(e) => setTimerSecondsInput(e.target.value)}
+                className="h-11 w-full rounded-2xl border px-3 text-sm"
+              />
+              {timerError ? <div className="text-sm text-red-600">{timerError}</div> : null}
+
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTimerModalOpen(false)}
+                  className="h-11 rounded-2xl border bg-white text-sm font-semibold text-gray-700"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={timerSaving}
+                  onClick={() => void onSaveTraceRetentionSeconds()}
+                  className="h-11 rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
+                >
+                  Valider
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {activeTool !== 'none' && activeTool !== 'zone_polygon' && !showValidation ? (
         <div className="absolute left-1/2 top-4 -translate-x-1/2 z-[1000] rounded-2xl border bg-white/90 px-4 py-2 text-sm shadow backdrop-blur">

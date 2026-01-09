@@ -10,10 +10,10 @@ export default function MissionMapPage() {
       <button
         type="button"
         onClick={() => navigate('/home')}
-        className="absolute left-4 top-4 z-[1200] inline-flex h-14 w-14 items-center justify-center rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+        className="absolute left-4 top-4 z-[1200] inline-flex h-12 w-12 items-center justify-center rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
         title="Retour"
       >
-        <ArrowLeft size={22} />
+        <ArrowLeft size={20} />
       </button>
       <MapLibreMap />
     </div>

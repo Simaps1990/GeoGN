@@ -23,9 +23,6 @@ export default function CurrentMissionPage() {
   const [joinMissionId, setJoinMissionId] = useState('');
   const [joinSubmitting, setJoinSubmitting] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | null>(null);
-
-  const [retentionSeconds, setRetentionSeconds] = useState<number>(3600);
-  const [retentionSecondsInput, setRetentionSecondsInput] = useState('3600');
   const [savingSettings, setSavingSettings] = useState(false);
 
   async function refreshSelectedMission() {
@@ -43,9 +40,6 @@ export default function CurrentMissionPage() {
       const data = await getMission(selectedMissionId);
       setMission(data);
       setMissionTitle(data.title ?? '');
-      const rs = data.traceRetentionSeconds ?? 3600;
-      setRetentionSeconds(rs);
-      setRetentionSecondsInput(String(rs));
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
     } finally {
@@ -128,22 +122,13 @@ export default function CurrentMissionPage() {
     if (!selectedMissionId) return;
     setSavingSettings(true);
     try {
-      let nextRetention = retentionSeconds;
-      const trimmedRetention = retentionSecondsInput.trim();
-      if (trimmedRetention) {
-        const parsed = Number(trimmedRetention);
-        if (!Number.isNaN(parsed)) {
-          nextRetention = parsed;
-        }
-      }
-
-      const payload: { traceRetentionSeconds?: number; title?: string } = {
-        traceRetentionSeconds: nextRetention,
-      };
+      const payload: { title?: string } = {};
       const trimmedTitle = missionTitle.trim();
       if (trimmedTitle && trimmedTitle !== mission?.title) {
-        (payload as any).title = trimmedTitle;
+        payload.title = trimmedTitle;
       }
+
+      if (!payload.title) return;
 
       const updated = await updateMission(selectedMissionId, payload);
       setMission(updated);
@@ -155,18 +140,14 @@ export default function CurrentMissionPage() {
       }
 
       // Mettre à jour la liste des missions pour refléter immédiatement
-      // le nouveau nom et la nouvelle durée de traînée sans rechargement.
+      // le nouveau nom sans rechargement.
       setMissions((prev) =>
         prev.map((m) =>
           m.id === updated.id
-            ? { ...m, title: updated.title, traceRetentionSeconds: updated.traceRetentionSeconds }
+            ? { ...m, title: updated.title }
             : m
         )
       );
-
-      const rs = updated.traceRetentionSeconds ?? nextRetention;
-      setRetentionSeconds(rs);
-      setRetentionSecondsInput(String(rs));
       setMissionTitle(updated.title ?? missionTitle);
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
@@ -266,14 +247,11 @@ export default function CurrentMissionPage() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Sélectionner la mission pour afficher les réglages (nom + durée de traînée)
+                          // Sélectionner la mission pour afficher les réglages (nom)
                           selectMission(m.id);
                           // Initialiser immédiatement l'état local pour afficher la section Réglages sans attendre la requête API
                           setMission(m);
                           setMissionTitle(m.title ?? '');
-                          const rs = m.traceRetentionSeconds ?? 3600;
-                          setRetentionSeconds(rs);
-                          setRetentionSecondsInput(String(rs));
                           setLoading(false);
                           setShowSettings(true);
                           // Faire descendre la vue vers la section Réglages
@@ -315,14 +293,6 @@ export default function CurrentMissionPage() {
               type="text"
               value={missionTitle}
               onChange={(e) => setMissionTitle(e.target.value)}
-              className="mt-2 h-11 w-full rounded-xl border px-3 text-sm"
-            />
-            <div className="mt-3 text-xs font-semibold text-gray-700">Durée de traînée (secondes)</div>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={retentionSecondsInput}
-              onChange={(e) => setRetentionSecondsInput(e.target.value)}
               className="mt-2 h-11 w-full rounded-xl border px-3 text-sm"
             />
             <button

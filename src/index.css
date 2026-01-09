@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  height: 100%;
+  background: #f9fafb;
+}
+
 body {
   margin: 0;
   padding: 0;
