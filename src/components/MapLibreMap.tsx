@@ -324,6 +324,8 @@ export default function MapLibreMap() {
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
   const tracesLoadedRef = useRef(false);
+  const autoCenterMissionIdRef = useRef<string | null>(null);
+  const autoCenterDoneRef = useRef(false);
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
@@ -349,6 +351,44 @@ export default function MapLibreMap() {
       cancelled = true;
     };
   }, [selectedMissionId]);
+
+  // Au chargement de la carte pour une mission, centrer automatiquement sur ma position (une seule fois).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!selectedMissionId) return;
+
+    if (autoCenterMissionIdRef.current !== selectedMissionId) {
+      autoCenterMissionIdRef.current = selectedMissionId;
+      autoCenterDoneRef.current = false;
+    }
+
+    if (autoCenterDoneRef.current) return;
+
+    const doCenter = (lng: number, lat: number) => {
+      try {
+        autoCenterDoneRef.current = true;
+        map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 16), duration: 800 });
+      } catch {
+        // ignore
+      }
+    };
+
+    // Si on a déjà une position en mémoire (tracking), l'utiliser en priorité.
+    if (lastPos) {
+      doCenter(lastPos.lng, lastPos.lat);
+      return;
+    }
+
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        doCenter(pos.coords.longitude, pos.coords.latitude);
+      },
+      () => {}
+    );
+  }, [mapReady, selectedMissionId, lastPos]);
 
   useEffect(() => {
     if (!selectedMissionId) {

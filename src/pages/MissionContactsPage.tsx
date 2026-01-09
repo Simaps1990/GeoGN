@@ -107,9 +107,25 @@ export default function MissionContactsPage() {
     return [...contacts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }, [contacts]);
 
+  const availableContacts = useMemo(() => {
+    const memberUserIds = new Set(members.map((m) => m.user?.id).filter(Boolean) as string[]);
+    return sortedContacts.filter((c) => {
+      const id = c.contact?.id;
+      if (!id) return false;
+      return !memberUserIds.has(id);
+    });
+  }, [members, sortedContacts]);
+
   const addContact = useMemo(() => {
-    return sortedContacts.find((c) => c.id === addContactId) ?? null;
-  }, [addContactId, sortedContacts]);
+    return availableContacts.find((c) => c.id === addContactId) ?? null;
+  }, [addContactId, availableContacts]);
+
+  useEffect(() => {
+    if (!addContactId) return;
+    if (!availableContacts.some((c) => c.id === addContactId)) {
+      setAddContactId('');
+    }
+  }, [addContactId, availableContacts]);
 
   useEffect(() => {
     if (!addContactOpen) return;
@@ -262,11 +278,11 @@ export default function MissionContactsPage() {
 
               {addContactOpen ? (
                 <div className="absolute left-0 right-0 z-[2100] mt-2 max-h-64 overflow-auto rounded-2xl border bg-white shadow-xl">
-                  {sortedContacts.length === 0 ? (
+                  {availableContacts.length === 0 ? (
                     <div className="p-3 text-sm text-gray-600">Aucun contact.</div>
                   ) : (
                     <div className="p-2">
-                      {sortedContacts.map((c) => {
+                      {availableContacts.map((c) => {
                         const name = c.alias?.trim() || c.contact?.displayName || 'Contact';
                         const id = c.contact?.appUserId || '-';
                         const active = c.id === addContactId;
