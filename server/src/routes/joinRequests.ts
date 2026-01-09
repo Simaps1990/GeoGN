@@ -191,7 +191,19 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: 'ALREADY_REQUESTED' });
       }
       if (existing.status === 'accepted') {
-        return reply.code(409).send({ error: 'ALREADY_ACCEPTED' });
+        // If the join request is marked accepted but the member isn't actually in the mission
+        // (e.g. a previous accept failed mid-way), allow re-request by resetting to pending.
+        const stillMember = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+        if (stillMember) {
+          return reply.code(409).send({ error: 'ALREADY_ACCEPTED' });
+        }
+
+        await MissionJoinRequestModel.updateOne(
+          { _id: existing._id },
+          { $set: { status: 'pending', createdAt: new Date(), handledBy: null, handledAt: null } }
+        );
+
+        return reply.code(201).send({ ok: true });
       }
 
       await MissionJoinRequestModel.updateOne(
