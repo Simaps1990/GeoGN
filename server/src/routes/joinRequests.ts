@@ -147,8 +147,6 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
           $setOnInsert: {
             missionId: new mongoose.Types.ObjectId(missionId),
             userId: user._id,
-            role: desiredRole,
-            color: memberColor,
           },
           $set: {
             removedAt: null,
@@ -353,8 +351,6 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
             $setOnInsert: {
               missionId: joinMissionId,
               userId: joinRequestedBy,
-              role: desiredRole,
-              color: memberColor,
             },
             $set: {
               removedAt: null,
