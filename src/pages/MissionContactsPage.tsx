@@ -38,6 +38,7 @@ export default function MissionContactsPage() {
 
   const colorPalette = useMemo(
     () => [
+      // Même palette que les POI, mais sans le blanc (#ffffff) pour les utilisateurs
       '#ef4444',
       '#f97316',
       '#fde047',
@@ -699,7 +700,7 @@ export default function MissionContactsPage() {
 
             <div className="mt-4">
               <div className="text-xs font-semibold text-gray-700">Couleur</div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 grid grid-cols-8 gap-2">
                 {colorPalette.map((c) => {
                   const usedByOther = usedColorsByOtherMembers.has(c);
                   const selected = editColor === c;
@@ -708,10 +709,11 @@ export default function MissionContactsPage() {
                       key={c}
                       type="button"
                       onClick={() => setEditColor(c)}
-                      className={`relative h-10 w-10 rounded-xl border ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                      className={`relative h-7 w-7 rounded-xl border ${selected ? 'ring-2 ring-blue-500' : ''}`}
                       style={{
                         backgroundColor: c,
-                        backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                        backgroundImage:
+                          'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
                         borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
                       }}
                       aria-label={c}

@@ -3207,7 +3207,7 @@ export default function MapLibreMap() {
 
       {showValidation ? (
         <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl h-[calc(100vh-32px)] flex flex-col">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-32px)] flex flex-col">
             <div className="px-4 pt-3 pb-2 flex items-center justify-between">
               <div className="text-base font-bold text-gray-900">Validation</div>
               <button type="button" onClick={cancelDraft} className="h-10 w-10 rounded-2xl border bg-white">
@@ -3215,7 +3215,7 @@ export default function MapLibreMap() {
               </button>
             </div>
 
-            <div className="px-4 pt-1 pb-4 overflow-y-auto flex-1">
+            <div className="px-4 pt-1 pb-4 overflow-y-auto">
               <div className="grid gap-2">
               <input
                 value={draftTitle}
