@@ -23,19 +23,19 @@ export default function MissionZonesPage() {
 
   const colorOptions = useMemo(
     () => [
-      '#ec4899',
-      '#ffffff',
-      '#1e3a8a',
-      '#60a5fa',
-      '#000000',
-      '#fde047',
-      '#f97316',
       '#ef4444',
-      '#a855f7',
-      '#6b3f35',
+      '#f97316',
+      '#fde047',
       '#4ade80',
-      '#a19579',
       '#596643',
+      '#60a5fa',
+      '#1e3a8a',
+      '#a855f7',
+      '#ec4899',
+      '#6b3f35',
+      '#a19579',
+      '#000000',
+      '#ffffff',
     ],
     []
   );

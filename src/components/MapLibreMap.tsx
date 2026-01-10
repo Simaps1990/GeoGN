@@ -31,11 +31,11 @@ import {
   PawPrint,
   Plane,
   Radiation,
+  Ruler,
   Shield,
   Skull,
   Spline,
   Tag,
-  Tent,
   Truck,
   Undo2,
   Warehouse,
@@ -293,22 +293,23 @@ export default function MapLibreMap() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [labelsEnabled, setLabelsEnabled] = useState(false);
+  const [scaleEnabled, setScaleEnabled] = useState(true);
 
   const poiColorOptions = useMemo(
     () => [
-      '#ec4899',
-      '#ffffff',
-      '#1e3a8a',
-      '#60a5fa',
-      '#000000',
-      '#fde047',
-      '#f97316',
       '#ef4444',
-      '#a855f7',
-      '#6b3f35',
+      '#f97316',
+      '#fde047',
       '#4ade80',
-      '#a19579',
       '#596643',
+      '#60a5fa',
+      '#1e3a8a',
+      '#a855f7',
+      '#ec4899',
+      '#6b3f35',
+      '#a19579',
+      '#000000',
+      '#ffffff',
     ],
     []
   );
@@ -335,7 +336,6 @@ export default function MapLibreMap() {
       { id: 'truck', Icon: Truck, label: 'Truck' },
       { id: 'motorcycle', Icon: Bike, label: 'Motorbike' },
       { id: 'shield', Icon: Shield, label: 'Shield' },
-      { id: 'tent', Icon: Tent, label: 'Tent' },
       { id: 'house', Icon: House, label: 'House' },
       { id: 'speech', Icon: MessageCircle, label: 'Speech' },
       { id: 'users', Icon: Users, label: 'Users' },
@@ -373,6 +373,7 @@ export default function MapLibreMap() {
 
   // Immediate purge when retention decreases.
   const prevTraceRetentionMsRef = useRef<number>(traceRetentionMs);
+  const lastViewRef = useRef<{ lng: number; lat: number; zoom: number; bearing: number; pitch: number } | null>(null);
   useEffect(() => {
     const prev = prevTraceRetentionMsRef.current;
     prevTraceRetentionMsRef.current = traceRetentionMs;
@@ -838,12 +839,31 @@ export default function MapLibreMap() {
       return;
     }
 
+    const existing = lastViewRef.current;
+    if (existing) {
+      map.jumpTo({
+        center: [existing.lng, existing.lat],
+        zoom: existing.zoom,
+        bearing: existing.bearing,
+        pitch: existing.pitch,
+      });
+      return;
+    }
+
     const saved = localStorage.getItem(mapViewKey);
     if (!saved) return;
     try {
       const v = JSON.parse(saved) as any;
       if (v && typeof v.lng === 'number' && typeof v.lat === 'number') {
-        map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom ?? map.getZoom(), bearing: v.bearing ?? 0, pitch: v.pitch ?? 0 });
+        const view = {
+          lng: v.lng,
+          lat: v.lat,
+          zoom: typeof v.zoom === 'number' ? v.zoom : map.getZoom(),
+          bearing: typeof v.bearing === 'number' ? v.bearing : 0,
+          pitch: typeof v.pitch === 'number' ? v.pitch : 0,
+        };
+        lastViewRef.current = view;
+        map.jumpTo({ center: [view.lng, view.lat], zoom: view.zoom, bearing: view.bearing, pitch: view.pitch });
       }
     } catch {
       // ignore
@@ -910,7 +930,7 @@ export default function MapLibreMap() {
     if (!mapReady) return;
     if (!map.getLayer('zones-labels')) return;
     try {
-      map.setLayoutProperty('zones-labels', 'text-offset', [0, 0.1]);
+      map.setLayoutProperty('zones-labels', 'text-offset', [0, 0.06]);
     } catch {
       // ignore
     }
@@ -2076,7 +2096,7 @@ export default function MapLibreMap() {
 
     // Échelle réelle (mètres / km) placée au-dessus du footer
     try {
-      const control = new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' });
+      const control = new maplibregl.ScaleControl({ maxWidth: 170, unit: 'metric' });
       scaleControlRef.current = control;
       const el = control.onAdd(map);
       scaleControlElRef.current = el;
@@ -2088,7 +2108,7 @@ export default function MapLibreMap() {
         if (scaleEl) {
           scaleEl.style.height = '16px';
           scaleEl.style.lineHeight = '16px';
-          scaleEl.style.padding = '0 6px';
+          scaleEl.style.padding = '0 10px';
           scaleEl.style.fontSize = '10px';
         }
       } catch {
@@ -2135,6 +2155,13 @@ export default function MapLibreMap() {
     };
   }, [currentBaseStyle]);
 
+  // Keep scale visibility in sync with scaleEnabled
+  useEffect(() => {
+    const el = scaleControlElRef.current;
+    if (!el) return;
+    (el as HTMLElement).style.display = scaleEnabled ? '' : 'none';
+  }, [scaleEnabled]);
+
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -2159,9 +2186,9 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!currentBaseStyle) return;
-
     const c = map.getCenter();
-    const view = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+    const fallbackView = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+    const view = lastViewRef.current ?? fallbackView;
 
     map.setStyle(currentBaseStyle);
 
@@ -2217,6 +2244,7 @@ export default function MapLibreMap() {
     const save = () => {
       const c = map.getCenter();
       const payload = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+      lastViewRef.current = payload;
       localStorage.setItem(mapViewKey, JSON.stringify(payload));
     };
 
@@ -2661,17 +2689,20 @@ export default function MapLibreMap() {
     });
   }, [pois, mapReady]);
 
+  // HTML markers for POIs (circles with inner icon).
+  // We fully rebuild them whenever POIs, map readiness, icon options or base style change,
+  // to avoid inconsistent DOM state after style changes.
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
 
     const markers = poiMarkersRef.current;
-    const nextIds = new Set(pois.map((p) => p.id));
 
     const applyMarkerContent = (el: HTMLDivElement, p: ApiPoi) => {
       const Icon = getPoiIconComponent(p.icon);
-      const iconColor = (p.color || '').toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
+      const colorLower = (p.color || '').toLowerCase();
+      const iconColor = colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
       const svg = renderToStaticMarkup(<Icon size={16} color={iconColor} strokeWidth={2.5} />);
       el.style.width = '28px';
       el.style.height = '28px';
@@ -2692,28 +2723,21 @@ export default function MapLibreMap() {
       };
     };
 
-    // remove stale markers
-    for (const [id, marker] of markers.entries()) {
-      if (!nextIds.has(id)) {
-        marker.remove();
-        markers.delete(id);
-      }
+    // Remove all existing markers and rebuild from scratch.
+    for (const marker of markers.values()) {
+      marker.remove();
     }
+    markers.clear();
 
     for (const p of pois) {
-      const existing = markers.get(p.id);
-      if (existing) {
-        existing.setLngLat([p.lng, p.lat]);
-        const el = existing.getElement() as HTMLDivElement;
-        applyMarkerContent(el, p);
-      } else {
-        const el = document.createElement('div');
-        applyMarkerContent(el, p);
-        const marker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lng, p.lat]).addTo(map);
-        markers.set(p.id, marker);
-      }
+      const el = document.createElement('div');
+      applyMarkerContent(el, p);
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([p.lng, p.lat])
+        .addTo(map);
+      markers.set(p.id, marker);
     }
-  }, [pois, mapReady, poiIconOptions]);
+  }, [pois, mapReady, poiIconOptions, currentBaseStyle]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2872,10 +2896,13 @@ export default function MapLibreMap() {
             <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
               {(() => {
                 const Icon = getPoiIconComponent(selectedPoi.icon);
+                const bg = selectedPoi.color || '#f97316';
+                const bgLower = bg.toLowerCase();
+                const iconColor = bgLower === '#ffffff' || bgLower === '#fde047' ? '#000000' : '#ffffff';
                 return (
-                  <div className="h-9 w-9 rounded-full border-2 border-white shadow" style={{ backgroundColor: selectedPoi.color || '#f97316' }}>
+                  <div className="h-9 w-9 rounded-full border-2 border-white shadow" style={{ backgroundColor: bg }}>
                     <div className="flex h-full w-full items-center justify-center">
-                      <Icon size={16} color="#ffffff" strokeWidth={2.5} />
+                      <Icon size={16} color={iconColor} strokeWidth={2.5} />
                     </div>
                   </div>
                 );
@@ -2907,68 +2934,6 @@ export default function MapLibreMap() {
       >
         <button
           type="button"
-          onClick={() => {
-            setTrackingEnabled((prev) => {
-              const next = !prev;
-              // Si on vient de réactiver le tracking, forcer une mise à jour immédiate de la position
-              // pour réafficher le point et relancer un nouveau tracé, pour soi et pour les autres.
-              if (!prev && next && navigator.geolocation && selectedMissionId && user?.id) {
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    const lng = pos.coords.longitude;
-                    const lat = pos.coords.latitude;
-                    const t = Date.now();
-
-                    setLastPos({ lng, lat });
-                    setTracePoints([{ lng, lat, t }]);
-
-                    const socket = socketRef.current;
-                    if (socket) {
-                      const payload = {
-                        lng,
-                        lat,
-                        speed: pos.coords.speed ?? undefined,
-                        heading: pos.coords.heading ?? undefined,
-                        accuracy: pos.coords.accuracy ?? undefined,
-                        t,
-                      };
-                      if (socket.connected) {
-                        socket.emit('position:update', payload);
-                      } else {
-                        pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
-                        const key = `geogn.pendingPos.${selectedMissionId}.${user.id}`;
-                        try {
-                          localStorage.setItem(key, JSON.stringify(pendingBulkRef.current));
-                        } catch {
-                          // ignore
-                        }
-                      }
-                    }
-                  },
-                  () => {
-                    // ignore error; le watcher prendra le relais si possible
-                  },
-                  {
-                    enableHighAccuracy: true,
-                    maximumAge: 0,
-                    timeout: 5000,
-                  }
-                );
-              }
-              return next;
-            });
-          }}
-          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
-        >
-          {trackingEnabled ? (
-            <Navigation className="mx-auto text-green-600" size={20} />
-          ) : (
-            <NavigationOff className="mx-auto text-gray-600" size={20} />
-          )}
-        </button>
-
-        <button
-          type="button"
           onClick={centerOnMe}
           className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
           title="Centrer sur moi"
@@ -2983,6 +2948,15 @@ export default function MapLibreMap() {
           title="Changer le fond de carte"
         >
           <Layers className="mx-auto text-gray-600" size={20} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setScaleEnabled((v) => !v)}
+          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          title="Afficher l'échelle"
+        >
+          <Ruler className={scaleEnabled ? 'mx-auto text-green-600' : 'mx-auto text-gray-600'} size={20} />
         </button>
 
         <button
@@ -3136,7 +3110,7 @@ export default function MapLibreMap() {
 
       {timerModalOpen ? (
         <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 px-4 pt-6 pb-28">
-          <div className="w-full max-w-md rounded-3xl bg-white p-4 shadow-xl">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div className="text-base font-bold text-gray-900">Durée de la piste</div>
               <button
@@ -3148,29 +3122,36 @@ export default function MapLibreMap() {
               </button>
             </div>
 
-            <div className="mt-3 grid gap-2">
+            <div className="mt-3 grid gap-3">
               <div className="text-xs font-semibold text-gray-700">Durée (secondes)</div>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={timerSecondsInput}
-                onChange={(e) => setTimerSecondsInput(e.target.value)}
-                className="h-11 w-full rounded-2xl border px-3 text-sm"
-              />
-              {(() => {
-                const trimmed = timerSecondsInput.trim();
-                const parsed = trimmed ? Number(trimmed) : NaN;
-                if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) return null;
-                const total = Math.floor(parsed);
-                const h = Math.floor(total / 3600);
-                const m = Math.floor((total % 3600) / 60);
-                const s = total % 60;
-                const parts: string[] = [];
-                if (h > 0) parts.push(`${h} h`);
-                if (h > 0 || m > 0) parts.push(`${m} min`);
-                parts.push(`${s} s`);
-                return <div className="-mt-1 text-xs text-gray-500">({parts.join(' ')})</div>;
-              })()}
+              <div className="text-[11px] text-gray-600">
+                Ceci règle combien de temps la trace reste visible avant de commencer à s'effacer.
+              </div>
+
+              <div className="mt-1 flex items-center justify-center gap-3">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={timerSecondsInput}
+                  onChange={(e) => setTimerSecondsInput(e.target.value)}
+                  className="h-10 w-24 rounded-2xl border px-3 text-sm text-center"
+                />
+                {(() => {
+                  const trimmed = timerSecondsInput.trim();
+                  const parsed = trimmed ? Number(trimmed) : NaN;
+                  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) return null;
+                  const total = Math.floor(parsed);
+                  const h = Math.floor(total / 3600);
+                  const m = Math.floor((total % 3600) / 60);
+                  const s = total % 60;
+                  const parts: string[] = [];
+                  if (h > 0) parts.push(`${h} h`);
+                  if (h > 0 || m > 0) parts.push(`${m} min`);
+                  parts.push(`${s} s`);
+                  return <div className="text-sm font-medium text-gray-700">{parts.join(' ')}</div>;
+                })()}
+              </div>
+
               {timerError ? <div className="text-sm text-red-600">{timerError}</div> : null}
 
               <div className="mt-1 grid grid-cols-2 gap-2">
@@ -3227,8 +3208,8 @@ export default function MapLibreMap() {
       ) : null}
 
       {showValidation ? (
-        <div className="absolute inset-0 z-[1200] flex items-end justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-140px)] flex flex-col">
+        <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-32px)] min-h-[400px] flex flex-col">
             <div className="p-4 flex items-center justify-between">
               <div className="text-base font-bold text-gray-900">Validation</div>
               <button type="button" onClick={cancelDraft} className="h-10 w-10 rounded-2xl border bg-white">
@@ -3255,7 +3236,7 @@ export default function MapLibreMap() {
                           key={c}
                           type="button"
                           onClick={() => setDraftColor(c)}
-                          className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
+                          className={`h-7 w-7 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
                           style={{
                             backgroundColor: c,
                             backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
@@ -3275,12 +3256,26 @@ export default function MapLibreMap() {
                           key={id}
                           type="button"
                           onClick={() => setDraftIcon(id)}
-                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border bg-white ${
-                            draftIcon === id ? 'ring-2 ring-blue-500' : 'hover:bg-gray-50'
+                          className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border ${
+                            draftIcon === id ? 'ring-2 ring-blue-500' : ''
                           }`}
+                          style={{
+                            backgroundColor: draftColor || '#ffffff',
+                            backgroundImage:
+                              'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                            borderColor:
+                              (draftColor || '#ffffff').toLowerCase() === '#ffffff'
+                                ? '#9ca3af'
+                                : 'rgba(0,0,0,0.12)',
+                          }}
                           aria-label={id}
                         >
-                          <Icon size={18} />
+                          {(() => {
+                            const colorLower = (draftColor || '#ffffff').toLowerCase();
+                            const iconColor =
+                              colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
+                            return <Icon size={18} color={iconColor} />;
+                          })()}
                         </button>
                       ))}
                     </div>

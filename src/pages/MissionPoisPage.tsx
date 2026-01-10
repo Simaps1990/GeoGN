@@ -21,7 +21,6 @@ import {
   Shield,
   Skull,
   Target,
-  Tent,
   Truck,
   Warehouse,
   MessageCircle,
@@ -49,7 +48,7 @@ export default function MissionPoisPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const colorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
+    () => ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#64748b', '#a855f7', '#ec4899', '#000000', '#ffffff'],
     []
   );
 
@@ -75,7 +74,6 @@ export default function MissionPoisPage() {
       { id: 'truck', Icon: Truck },
       { id: 'motorcycle', Icon: Bike },
       { id: 'shield', Icon: Shield },
-      { id: 'tent', Icon: Tent },
       { id: 'house', Icon: House },
       { id: 'speech', Icon: MessageCircle },
       { id: 'users', Icon: Users },
@@ -143,25 +141,6 @@ export default function MissionPoisPage() {
                   />
 
                   <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Icône</div>
-                    <div className="mt-2 grid grid-cols-5 gap-2">
-                      {iconOptions.map(({ id, Icon }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setEditDraft({ ...editDraft, icon: id })}
-                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border bg-white ${
-                            editDraft.icon === id ? 'ring-2 ring-blue-500' : 'hover:bg-gray-50'
-                          }`}
-                          aria-label={id}
-                        >
-                          <Icon size={20} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border p-3">
                     <div className="text-xs font-semibold text-gray-700">Couleur</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {colorOptions.map((c) => (
@@ -173,6 +152,39 @@ export default function MissionPoisPage() {
                           style={{ backgroundColor: c }}
                           aria-label={c}
                         />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Icône</div>
+                    <div className="mt-2 grid grid-cols-5 gap-2">
+                      {iconOptions.map(({ id, Icon }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setEditDraft({ ...editDraft, icon: id })}
+                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border ${
+                            editDraft.icon === id ? 'ring-2 ring-blue-500' : ''
+                          }`}
+                          style={{
+                            backgroundColor: editDraft.color || '#f97316',
+                            backgroundImage:
+                              'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                            borderColor:
+                              (editDraft.color || '#f97316').toLowerCase() === '#ffffff'
+                                ? '#9ca3af'
+                                : 'rgba(0,0,0,0.12)',
+                          }}
+                          aria-label={id}
+                        >
+                          {(() => {
+                            const colorLower = (editDraft.color || '#f97316').toLowerCase();
+                            const iconColor =
+                              colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
+                            return <Icon size={20} color={iconColor} />;
+                          })()}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -249,9 +261,16 @@ export default function MissionPoisPage() {
                         style={{ backgroundColor: p.color || '#f97316' }}
                         title={p.title}
                       >
-                        <div className={p.color?.toLowerCase() === '#ffffff' ? 'text-black' : 'text-white'}>
-                          <IconForId id={p.icon} size={18} />
-                        </div>
+                        {(() => {
+                          const colorLower = (p.color || '#f97316').toLowerCase();
+                          const iconColor =
+                            colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
+                          return (
+                            <div style={{ color: iconColor }}>
+                              <IconForId id={p.icon} size={18} />
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-gray-900">{p.title}</div>
