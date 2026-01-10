@@ -18,6 +18,7 @@ type CreateZoneBody =
   | {
       type: 'circle';
       title: string;
+      comment?: string;
       color: string;
       circle: { center: { lng: number; lat: number }; radiusMeters: number };
       sectors?: { sectorId: string; color: string; geometry: GeoJSONPolygon }[];
@@ -26,6 +27,7 @@ type CreateZoneBody =
   | {
       type: 'polygon';
       title: string;
+      comment?: string;
       color: string;
       polygon: GeoJSONPolygon;
       sectors?: { sectorId: string; color: string; geometry: GeoJSONPolygon }[];
@@ -63,6 +65,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         zones.map((z) => ({
           id: z._id.toString(),
           title: z.title,
+          comment: (z as any).comment ?? '',
           color: z.color,
           type: z.type,
           circle: z.circle ?? null,
@@ -115,6 +118,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       const zone = await ZoneModel.create({
         missionId: new mongoose.Types.ObjectId(missionId),
         title: body.title.trim(),
+        comment: typeof body.comment === 'string' ? body.comment.trim() : '',
         color: body.color.trim(),
         type,
         circle: type === 'circle' ? body.circle : undefined,
@@ -136,6 +140,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       const dto = {
         id: zone._id.toString(),
         title: zone.title,
+        comment: (zone as any).comment ?? '',
         color: zone.color,
         type: zone.type,
         circle: zone.circle ?? null,
@@ -182,6 +187,7 @@ export async function zonesRoutes(app: FastifyInstance) {
 
       if (body.type) update.type = body.type;
       if (typeof body.title === 'string') update.title = body.title.trim();
+      if (typeof body.comment === 'string') update.comment = body.comment.trim();
       if (typeof body.color === 'string') update.color = body.color.trim();
       if (body.circle) update.circle = body.circle;
       if (body.polygon) update.polygon = body.polygon;
@@ -210,6 +216,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       const dto = {
         id: zone._id.toString(),
         title: zone.title,
+        comment: (zone as any).comment ?? '',
         color: zone.color,
         type: zone.type,
         circle: zone.circle ?? null,

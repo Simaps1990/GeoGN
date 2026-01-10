@@ -252,6 +252,9 @@ export default function MapLibreMap() {
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
 
+  const scaleControlRef = useRef<maplibregl.ScaleControl | null>(null);
+  const scaleControlElRef = useRef<HTMLElement | null>(null);
+
   const poiMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
 
   const polygonDraftRef = useRef<[number, number][]>([]);
@@ -283,8 +286,8 @@ export default function MapLibreMap() {
   const [showValidation, setShowValidation] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftComment, setDraftComment] = useState('');
-  const [draftColor, setDraftColor] = useState('#f97316');
-  const [draftIcon, setDraftIcon] = useState('target');
+  const [draftColor, setDraftColor] = useState('');
+  const [draftIcon, setDraftIcon] = useState('');
 
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -292,7 +295,21 @@ export default function MapLibreMap() {
   const [labelsEnabled, setLabelsEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#ec4899', '#000000', '#ffffff'],
+    () => [
+      '#ec4899',
+      '#ffffff',
+      '#1e3a8a',
+      '#60a5fa',
+      '#000000',
+      '#fde047',
+      '#f97316',
+      '#ef4444',
+      '#a855f7',
+      '#6b3f35',
+      '#4ade80',
+      '#a19579',
+      '#596643',
+    ],
     []
   );
 
@@ -345,6 +362,8 @@ export default function MapLibreMap() {
   const [timerSecondsInput, setTimerSecondsInput] = useState('');
   const [timerSaving, setTimerSaving] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
+
+  const [isMapRotated, setIsMapRotated] = useState(false);
 
   const traceRetentionMs = useMemo(() => {
     const s = mission?.traceRetentionSeconds;
@@ -1229,6 +1248,20 @@ export default function MapLibreMap() {
         },
       });
     }
+
+    if (!map.getLayer('others-points-inactive-dot')) {
+      // Petit point noir au centre uniquement quand le membre est inactif.
+      map.addLayer({
+        id: 'others-points-inactive-dot',
+        type: 'circle',
+        source: 'others',
+        paint: {
+          'circle-radius': 1.8,
+          'circle-color': '#000000',
+          'circle-opacity': ['case', ['==', ['get', 'inactive'], true], 1, 0],
+        },
+      });
+    }
     if (!map.getLayer('others-labels')) {
       // Labels (pseudos) au-dessus des points des autres utilisateurs.
       map.addLayer({
@@ -1916,6 +1949,17 @@ export default function MapLibreMap() {
       return;
     }
 
+    if (activeTool === 'poi') {
+      if (!draftColor.trim()) {
+        setActionError('Couleur requise');
+        return;
+      }
+      if (!draftIcon.trim()) {
+        setActionError('Icône requise');
+        return;
+      }
+    }
+
     const nextTitle = draftTitle.trim();
     const nextKey = nextTitle.toLowerCase();
     if (activeTool === 'poi') {
@@ -1953,6 +1997,7 @@ export default function MapLibreMap() {
         const created = await createZone(selectedMissionId, {
           type: 'circle',
           title: nextTitle,
+          comment: draftComment.trim() || '',
           color: draftColor,
           circle: { center: { lng: draftLngLat.lng, lat: draftLngLat.lat }, radiusMeters: draftCircleRadius },
         });
@@ -1970,6 +2015,7 @@ export default function MapLibreMap() {
         const created = await createZone(selectedMissionId, {
           type: 'polygon',
           title: nextTitle,
+          comment: draftComment.trim() || '',
           color: draftColor,
           polygon: { type: 'Polygon', coordinates: [ring] },
         });
@@ -1978,8 +2024,8 @@ export default function MapLibreMap() {
 
       setDraftTitle('');
       setDraftComment('');
-      setDraftColor('#f97316');
-      setDraftIcon('target');
+      setDraftColor('');
+      setDraftIcon('');
       setShowValidation(false);
       setActiveTool('none');
       setDraftLngLat(null);
@@ -1992,8 +2038,7 @@ export default function MapLibreMap() {
   }
 
   useEffect(() => {
-    if (!mapRef.current) return;
-    if (mapInstanceRef.current) return;
+    if (!mapRef.current || mapInstanceRef.current) return;
 
     const initialStyle = currentBaseStyle ?? baseStyles[0]?.style;
 
@@ -2028,18 +2073,66 @@ export default function MapLibreMap() {
     map.on('load', onLoad);
     mapInstanceRef.current = map;
 
-    return () => {
-      map.off('load', onLoad);
+    // Échelle réelle (mètres / km) placée au-dessus du footer
+    try {
+      const control = new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' });
+      scaleControlRef.current = control;
+      const el = control.onAdd(map);
+      scaleControlElRef.current = el;
+      try {
+        (el as any).style.transform = 'scale(1.05)';
+        (el as any).style.transformOrigin = 'center bottom';
 
-      for (const marker of poiMarkersRef.current.values()) {
-        marker.remove();
+        const scaleEl = (el as any).querySelector?.('.maplibregl-ctrl-scale') as HTMLElement | null;
+        if (scaleEl) {
+          scaleEl.style.height = '16px';
+          scaleEl.style.lineHeight = '16px';
+          scaleEl.style.padding = '0 6px';
+          scaleEl.style.fontSize = '10px';
+        }
+      } catch {
+        // ignore
       }
-      poiMarkersRef.current.clear();
+      const host = document.getElementById('map-scale-container');
+      if (host) {
+        host.appendChild(el);
+      } else {
+        map.addControl(control, 'bottom-left');
+      }
+    } catch {
+      // ignore
+    }
+
+    // Afficher la boussole uniquement quand la carte est orientée
+    const updateRotated = () => {
+      const bearing = map.getBearing?.() ?? 0;
+      const pitch = map.getPitch?.() ?? 0;
+      setIsMapRotated(Math.abs(bearing) > 0.5 || Math.abs(pitch) > 0.5);
+    };
+    map.on('rotate', updateRotated);
+    map.on('pitch', updateRotated);
+    map.on('load', updateRotated);
+
+    return () => {
+      map.off('rotate', updateRotated);
+      map.off('pitch', updateRotated);
+      map.off('load', updateRotated);
+
+      try {
+        const el = scaleControlElRef.current;
+        if (el && el.parentElement) el.parentElement.removeChild(el);
+        const ctrl = scaleControlRef.current;
+        if (ctrl && (ctrl as any).onRemove) (ctrl as any).onRemove(map);
+      } catch {
+        // ignore
+      }
+      scaleControlElRef.current = null;
+      scaleControlRef.current = null;
 
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, []);
+  }, [currentBaseStyle]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2618,21 +2711,17 @@ export default function MapLibreMap() {
 
     const now = Date.now();
     const inactiveAfterMs = 60_000;
+    const inactiveColor = '#d1d5db'; // lighter gray
     const features = Object.entries(otherPositions).map(([userId, p]) => {
       const memberColor = memberColors[userId];
       const isInactive = now - p.t > inactiveAfterMs;
-      // Inactif: gris foncé. Sinon, couleur de mission.
-      const color = isInactive ? '#374151' : (memberColor ?? '#374151');
+      // Inactif: gris plus clair. Sinon, couleur de mission.
+      const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
       const name = memberNames[userId] ?? '';
 
       return {
         type: 'Feature',
-        properties: {
-          userId,
-          t: p.t,
-          color,
-          name,
-        },
+        properties: { userId, color, name, inactive: isInactive },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       };
     });
@@ -2651,17 +2740,18 @@ export default function MapLibreMap() {
 
     const now = Date.now();
     const inactiveAfterMs = 60_000;
+    const inactiveColor = '#9ca3af';
     const features: any[] = [];
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       if (pts.length < 2) continue;
       const memberColor = memberColors[userId];
       const lastT = pts[pts.length - 1]?.t ?? 0;
       const isInactive = now - lastT > inactiveAfterMs;
-      const color = isInactive ? '#374151' : (memberColor ?? '#374151');
+      const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
 
       features.push({
         type: 'Feature',
-        properties: { userId, color },
+        properties: { userId, color, inactive: isInactive },
         geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
       });
     }
@@ -2728,6 +2818,10 @@ export default function MapLibreMap() {
     <div className="relative w-full h-screen">
       <div ref={mapRef} className="w-full h-full" />
 
+      <div className="pointer-events-none absolute bottom-[calc(max(env(safe-area-inset-bottom),16px)+84px)] left-1/2 z-[1000] w-full -translate-x-1/2 max-w-md px-3 sm:max-w-lg md:max-w-xl">
+        <div id="map-scale-container" className="pointer-events-auto flex w-full justify-center" />
+      </div>
+
       {selectedPoi && (
         <div className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/25 backdrop-blur-sm">
           <div className="mx-6 max-w-md w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl flex items-start gap-3">
@@ -2760,7 +2854,13 @@ export default function MapLibreMap() {
         </div>
       )}
 
-      <div className="absolute right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-3">
+      <div
+        className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-3 touch-none"
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerMove={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
         <button
           type="button"
           onClick={() => {
@@ -2864,6 +2964,9 @@ export default function MapLibreMap() {
                 }
                 cancelDraft();
                 setZoneMenuOpen(false);
+                setDraftColor('');
+                setDraftIcon('');
+                setDraftComment('');
                 setActiveTool('poi');
               }}
               className={`h-12 w-12 rounded-2xl border shadow backdrop-blur ${
@@ -2879,7 +2982,7 @@ export default function MapLibreMap() {
               />
             </button>
 
-            <div className="relative flex items-center justify-end">
+            <div className="relative h-12 w-12">
               <button
                 type="button"
                 onClick={() => {
@@ -2959,7 +3062,7 @@ export default function MapLibreMap() {
           </>
         ) : null}
 
-        <div className="flex flex-col gap-3 pt-1">
+        {isMapRotated ? (
           <button
             type="button"
             onClick={resetNorth}
@@ -2968,30 +3071,30 @@ export default function MapLibreMap() {
           >
             <Compass className="mx-auto text-gray-600" size={20} />
           </button>
+        ) : null}
 
-          {isAdmin ? (
-            <button
-              type="button"
-              onClick={() => {
-                const rs = mission?.traceRetentionSeconds ?? 3600;
-                setTimerSecondsInput(String(rs));
-                setTimerError(null);
-                setTimerModalOpen(true);
-              }}
-              className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
-              title="Timer-reset"
-            >
-              <Timer className="mx-auto text-gray-600" size={20} />
-            </button>
-          ) : null}
-        </div>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => {
+              const rs = mission?.traceRetentionSeconds ?? 3600;
+              setTimerSecondsInput(String(rs));
+              setTimerError(null);
+              setTimerModalOpen(true);
+            }}
+            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+            title="Durée de la piste"
+          >
+            <Timer className="mx-auto text-gray-600" size={20} />
+          </button>
+        ) : null}
       </div>
 
       {timerModalOpen ? (
-        <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 p-4">
+        <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 px-4 pt-6 pb-28">
           <div className="w-full max-w-md rounded-3xl bg-white p-4 shadow-xl">
             <div className="flex items-center justify-between">
-              <div className="text-base font-bold text-gray-900">Durée chenillard</div>
+              <div className="text-base font-bold text-gray-900">Durée de la piste</div>
               <button
                 type="button"
                 onClick={() => setTimerModalOpen(false)}
@@ -3067,15 +3170,16 @@ export default function MapLibreMap() {
 
       {showValidation ? (
         <div className="absolute inset-0 z-[1200] flex items-end justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white p-4 shadow-xl">
-            <div className="flex items-center justify-between">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-140px)] flex flex-col">
+            <div className="p-4 flex items-center justify-between">
               <div className="text-base font-bold text-gray-900">Validation</div>
               <button type="button" onClick={cancelDraft} className="h-10 w-10 rounded-2xl border bg-white">
                 <X className="mx-auto" size={18} />
               </button>
             </div>
 
-            <div className="mt-3 grid gap-2">
+            <div className="px-4 pb-4 overflow-y-auto flex-1">
+              <div className="grid gap-2">
               <input
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
@@ -3094,7 +3198,11 @@ export default function MapLibreMap() {
                           type="button"
                           onClick={() => setDraftColor(c)}
                           className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
-                          style={{ backgroundColor: c }}
+                          style={{
+                            backgroundColor: c,
+                            backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                            borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
+                          }}
                           aria-label={c}
                         />
                       ))}
@@ -3119,6 +3227,7 @@ export default function MapLibreMap() {
                       ))}
                     </div>
                   </div>
+
                   <input
                     value={draftComment}
                     onChange={(e) => setDraftComment(e.target.value)}
@@ -3126,6 +3235,15 @@ export default function MapLibreMap() {
                     className="h-11 w-full rounded-2xl border px-3 text-sm"
                   />
                 </>
+              ) : null}
+
+              {activeTool === 'zone_circle' || activeTool === 'zone_polygon' ? (
+                <input
+                  value={draftComment}
+                  onChange={(e) => setDraftComment(e.target.value)}
+                  placeholder="Commentaire"
+                  className="h-11 w-full rounded-2xl border px-3 text-sm"
+                />
               ) : null}
 
               {activeTool === 'zone_circle' ? (
@@ -3153,7 +3271,11 @@ export default function MapLibreMap() {
                         type="button"
                         onClick={() => setDraftColor(c)}
                         className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
-                        style={{ backgroundColor: c }}
+                        style={{
+                          backgroundColor: c,
+                          backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                          borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
+                        }}
                         aria-label={c}
                       />
                     ))}
@@ -3162,7 +3284,10 @@ export default function MapLibreMap() {
               ) : null}
 
               {actionError ? <div className="text-sm text-red-600">{actionError}</div> : null}
+              </div>
+            </div>
 
+            <div className="p-4 pt-0">
               <button
                 type="button"
                 disabled={actionBusy}

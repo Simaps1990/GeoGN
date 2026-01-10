@@ -27,6 +27,7 @@ export interface ZoneDoc {
   _id: mongoose.Types.ObjectId;
   missionId: mongoose.Types.ObjectId;
   title: string;
+  comment?: string;
   color: string;
   type: ZoneType;
   circle?: Circle;
@@ -67,6 +68,7 @@ const ZoneSchema = new Schema<ZoneDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
     title: { type: String, required: true },
+    comment: { type: String, required: false, default: '' },
     color: { type: String, required: true, default: '#22c55e' },
     type: { type: String, required: true, enum: ['circle', 'polygon'] },
     circle: {

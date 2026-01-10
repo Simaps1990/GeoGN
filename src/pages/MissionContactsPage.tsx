@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { BookPlus, Check, ChevronDown, Copy, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { BookPlus, Check, ChevronDown, Copy, LogOut, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useMission } from '../contexts/MissionContext';
 import {
   acceptMissionJoinRequestWithRole,
   addContact,
@@ -23,6 +24,8 @@ export default function MissionContactsPage() {
   const { missionId } = useParams();
 
   const { user } = useAuth();
+  const { clearMission } = useMission();
+  const navigate = useNavigate();
 
   const roleDescriptions = useMemo(
     () => ({
@@ -35,16 +38,19 @@ export default function MissionContactsPage() {
 
   const colorPalette = useMemo(
     () => [
-      '#3b82f6',
-      '#22c55e',
+      '#ec4899',
+      '#ffffff',
+      '#1e3a8a',
+      '#60a5fa',
+      '#000000',
+      '#fde047',
       '#f97316',
       '#ef4444',
       '#a855f7',
-      '#14b8a6',
-      '#eab308',
-      '#ec4899',
-      '#000000',
-      '#ffffff',
+      '#6b3f35',
+      '#4ade80',
+      '#a19579',
+      '#596643',
     ],
     []
   );
@@ -500,6 +506,7 @@ export default function MissionContactsPage() {
             {sortedMembers.map((m, index) => {
               const userId = m.user?.id ?? '';
               const memberAppUserId = m.user?.appUserId ?? '';
+              const adminsCount = sortedMembers.filter((x) => x.role === 'admin').length;
               const isSelf = Boolean(
                 user &&
                   ((userId && user.id === userId) ||
@@ -507,6 +514,7 @@ export default function MissionContactsPage() {
               );
               const isSingleMember = sortedMembers.length === 1 && index === 0;
               const hideBook = isSelf || isSingleMember;
+              const canLeaveMission = isSelf && !isSingleMember && !(m.role === 'admin' && adminsCount === 1);
               const isInContacts = userId ? contactsByUserId.has(userId) : false;
               const addBusy = busyKey === (userId ? `addContact:${userId}` : '');
 
@@ -525,6 +533,33 @@ export default function MissionContactsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {canLeaveMission ? (
+                        <button
+                          type="button"
+                          disabled={busyKey === 'leaveMission'}
+                          onClick={async () => {
+                            if (!missionId || !userId) return;
+                            const ok = window.confirm('Quitter cette mission ?');
+                            if (!ok) return;
+                            setBusyKey('leaveMission');
+                            setError(null);
+                            try {
+                              await removeMissionMember(missionId, userId);
+                              clearMission();
+                              navigate('/home', { replace: true });
+                            } catch (e: any) {
+                              setError(e?.message ?? 'Erreur');
+                            } finally {
+                              setBusyKey(null);
+                            }
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          title="Quitter la mission"
+                        >
+                          <LogOut size={16} />
+                        </button>
+                      ) : null}
+
                       {!hideBook && !isInContacts ? (
                         <button
                           type="button"
@@ -675,7 +710,11 @@ export default function MissionContactsPage() {
                       type="button"
                       onClick={() => setEditColor(c)}
                       className={`relative h-10 w-10 rounded-xl border ${selected ? 'ring-2 ring-blue-500' : ''}`}
-                      style={{ backgroundColor: c }}
+                      style={{
+                        backgroundColor: c,
+                        backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                        borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
+                      }}
                       aria-label={c}
                     >
                       {usedByOther ? (

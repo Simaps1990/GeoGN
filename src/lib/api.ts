@@ -56,6 +56,7 @@ export type ApiPoi = {
 export type ApiZone = {
   id: string;
   title: string;
+  comment: string;
   color: string;
   type: 'circle' | 'polygon';
   circle: { center: { lng: number; lat: number }; radiusMeters: number } | null;
@@ -534,6 +535,7 @@ export async function createZone(
     | {
         type: 'circle';
         title: string;
+        comment?: string;
         color: string;
         circle: { center: { lng: number; lat: number }; radiusMeters: number };
         grid?: { rows: number; cols: number } | null;
@@ -541,6 +543,7 @@ export async function createZone(
     | {
         type: 'polygon';
         title: string;
+        comment?: string;
         color: string;
         polygon: { type: 'Polygon'; coordinates: number[][][] };
         grid?: { rows: number; cols: number } | null;
@@ -607,7 +610,7 @@ export async function deleteZone(missionId: string, zoneId: string) {
 export async function updateZone(
   missionId: string,
   zoneId: string,
-  input: Partial<{ title: string; color: string; type: 'circle' | 'polygon'; circle: any; polygon: any; sectors: any; grid: { rows: number; cols: number } | null }>
+  input: Partial<{ title: string; comment: string; color: string; type: 'circle' | 'polygon'; circle: any; polygon: any; sectors: any; grid: { rows: number; cols: number } | null }>
 ) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones/${encodeURIComponent(zoneId)}`,
     {

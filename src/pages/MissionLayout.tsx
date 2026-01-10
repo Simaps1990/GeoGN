@@ -15,6 +15,10 @@ export default function MissionLayout() {
   const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (!missionId) return;
     if (selectedMissionId !== missionId) {
       selectMission(missionId);
@@ -162,7 +166,7 @@ export default function MissionLayout() {
 
   return (
     <div className={isMapRoute ? 'min-h-screen bg-gray-50' : 'min-h-screen bg-gray-50 pb-[max(env(safe-area-inset-bottom),10px)]'}>
-      <div className="w-full">
+      <div className="w-full" key={location.pathname}>
         <Outlet />
       </div>
       <MissionTabs />

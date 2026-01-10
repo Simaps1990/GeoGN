@@ -15,13 +15,28 @@ export default function MissionZonesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
     title: string;
+    comment: string;
     color: string;
   } | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [gridErrorByZoneId, setGridErrorByZoneId] = useState<Record<string, string>>({});
 
   const colorOptions = useMemo(
-    () => ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#eab308', '#64748b', '#ec4899', '#000000', '#ffffff'],
+    () => [
+      '#ec4899',
+      '#ffffff',
+      '#1e3a8a',
+      '#60a5fa',
+      '#000000',
+      '#fde047',
+      '#f97316',
+      '#ef4444',
+      '#a855f7',
+      '#6b3f35',
+      '#4ade80',
+      '#a19579',
+      '#596643',
+    ],
     []
   );
 
@@ -93,6 +108,13 @@ export default function MissionZonesPage() {
                     className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
                   />
 
+                  <input
+                    value={editDraft.comment}
+                    onChange={(e) => setEditDraft({ ...editDraft, comment: e.target.value })}
+                    placeholder="Commentaire"
+                    className="h-11 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
+                  />
+
                   <div className="rounded-2xl border p-3">
                     <div className="text-xs font-semibold text-gray-700">Couleur</div>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -102,7 +124,11 @@ export default function MissionZonesPage() {
                           type="button"
                           onClick={() => setEditDraft({ ...editDraft, color: c })}
                           className={`h-9 w-9 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''}`}
-                          style={{ backgroundColor: c }}
+                          style={{
+                            backgroundColor: c,
+                            backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                            borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
+                          }}
                           aria-label={c}
                         />
                       ))}
@@ -128,6 +154,7 @@ export default function MissionZonesPage() {
                         try {
                           const updated = await updateZone(missionId, z.id, {
                             title: nextTitle,
+                            comment: editDraft.comment.trim(),
                             color: editDraft.color.trim(),
                           });
                           setZones((prev) => prev.map((x) => (x.id === z.id ? updated : x)));
@@ -173,12 +200,8 @@ export default function MissionZonesPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-gray-900">{z.title}</div>
-                      <div className="mt-1 text-xs text-gray-600">
-                        {z.type === 'circle'
-                          ? 'Zone circulaire'
-                          : z.type === 'polygon'
-                          ? 'Zone polygonale'
-                          : 'Zone'}
+                      <div className="mt-1 text-xs text-gray-600 break-words">
+                        {z.comment?.trim() ? z.comment : z.type === 'circle' ? 'Zone circulaire' : z.type === 'polygon' ? 'Zone polygonale' : 'Zone'}
                       </div>
                     </div>
                   </div>
@@ -376,6 +399,7 @@ export default function MissionZonesPage() {
                           setEditError(null);
                           setEditDraft({
                             title: z.title,
+                            comment: z.comment ?? '',
                             color: z.color,
                           });
                         }}
