@@ -16,16 +16,16 @@ import {
   Map as MapIcon,
   Mic,
   PawPrint,
-  Plane,
   Radiation,
-  Shield,
+  ShieldPlus,
+  Siren,
   Skull,
   Target,
   Truck,
+  UserRound,
   Warehouse,
-  MessageCircle,
-  Users,
   Dog,
+  Zap,
 } from 'lucide-react';
 import { deletePoi, getMission, listPois, updatePoi, type ApiMission, type ApiPoi } from '../lib/api';
 
@@ -48,36 +48,50 @@ export default function MissionPoisPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const colorOptions = useMemo(
-    () => ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#64748b', '#a855f7', '#ec4899', '#000000', '#ffffff'],
+    () => [
+      '#ef4444',
+      '#f97316',
+      '#fde047',
+      '#4ade80',
+      '#596643',
+      '#60a5fa',
+      '#1e3a8a',
+      '#a855f7',
+      '#ec4899',
+      '#6b3f35',
+      '#a19579',
+      '#000000',
+      '#ffffff',
+    ],
     []
   );
 
   const iconOptions = useMemo(
     () => [
       { id: 'target', Icon: Target },
-      { id: 'skull', Icon: Skull },
-      { id: 'help', Icon: HelpCircle },
-      { id: 'alert', Icon: AlertTriangle },
       { id: 'flag', Icon: Flag },
-      { id: 'binoculars', Icon: Binoculars },
+      { id: 'alert', Icon: AlertTriangle },
+      { id: 'help', Icon: HelpCircle },
+      { id: 'flame', Icon: Flame },
+      { id: 'radiation', Icon: Radiation },
       { id: 'bomb', Icon: Bomb },
-      { id: 'car', Icon: Car },
-      { id: 'cctv', Icon: Cctv },
+      { id: 'skull', Icon: Skull },
+      { id: 'user_round', Icon: UserRound },
+      { id: 'house', Icon: House },
+      { id: 'warehouse', Icon: Warehouse },
       { id: 'church', Icon: Church },
       { id: 'coffee', Icon: Coffee },
-      { id: 'flame', Icon: Flame },
-      { id: 'helicopter', Icon: Plane },
-      { id: 'mic', Icon: Mic },
-      { id: 'paw', Icon: PawPrint },
-      { id: 'radiation', Icon: Radiation },
-      { id: 'warehouse', Icon: Warehouse },
+      { id: 'car', Icon: Car },
       { id: 'truck', Icon: Truck },
       { id: 'motorcycle', Icon: Bike },
-      { id: 'shield', Icon: Shield },
-      { id: 'house', Icon: House },
-      { id: 'speech', Icon: MessageCircle },
-      { id: 'users', Icon: Users },
+      { id: 'cctv', Icon: Cctv },
+      { id: 'mic', Icon: Mic },
       { id: 'dog', Icon: Dog },
+      { id: 'paw', Icon: PawPrint },
+      { id: 'siren', Icon: Siren },
+      { id: 'zap', Icon: Zap },
+      { id: 'shield_plus', Icon: ShieldPlus },
+      { id: 'binoculars', Icon: Binoculars },
     ],
     []
   );
@@ -142,14 +156,19 @@ export default function MissionPoisPage() {
 
                   <div className="rounded-2xl border p-3">
                     <div className="text-xs font-semibold text-gray-700">Couleur</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-2 grid grid-cols-8 gap-2">
                       {colorOptions.map((c) => (
                         <button
                           key={c}
                           type="button"
                           onClick={() => setEditDraft({ ...editDraft, color: c })}
-                          className={`h-9 w-9 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''}`}
-                          style={{ backgroundColor: c }}
+                          className={`h-7 w-7 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''}`}
+                          style={{
+                            backgroundColor: c,
+                            backgroundImage:
+                              'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
+                            borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
+                          }}
                           aria-label={c}
                         />
                       ))}
@@ -158,31 +177,31 @@ export default function MissionPoisPage() {
 
                   <div className="rounded-2xl border p-3">
                     <div className="text-xs font-semibold text-gray-700">Icône</div>
-                    <div className="mt-2 grid grid-cols-5 gap-2">
+                    <div className="mt-2 grid grid-cols-6 gap-2">
                       {iconOptions.map(({ id, Icon }) => (
                         <button
                           key={id}
                           type="button"
                           onClick={() => setEditDraft({ ...editDraft, icon: id })}
-                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border ${
+                          className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border ${
                             editDraft.icon === id ? 'ring-2 ring-blue-500' : ''
                           }`}
                           style={{
-                            backgroundColor: editDraft.color || '#f97316',
+                            backgroundColor: editDraft.color || '#ffffff',
                             backgroundImage:
                               'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
                             borderColor:
-                              (editDraft.color || '#f97316').toLowerCase() === '#ffffff'
+                              (editDraft.color || '#ffffff').toLowerCase() === '#ffffff'
                                 ? '#9ca3af'
                                 : 'rgba(0,0,0,0.12)',
                           }}
                           aria-label={id}
                         >
                           {(() => {
-                            const colorLower = (editDraft.color || '#f97316').toLowerCase();
+                            const colorLower = (editDraft.color || '#ffffff').toLowerCase();
                             const iconColor =
                               colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
-                            return <Icon size={20} color={iconColor} />;
+                            return <Icon size={18} color={iconColor} />;
                           })()}
                         </button>
                       ))}

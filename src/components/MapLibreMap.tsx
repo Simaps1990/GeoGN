@@ -3,43 +3,41 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type S
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   AlertTriangle,
+  Bike,
   Binoculars,
   Bomb,
-  Bike,
   Car,
-  Check,
   Cctv,
+  Check,
   Church,
   CircleDot,
   CircleDotDashed,
   Coffee,
   Compass,
   Crosshair,
-  Flame,
+  Dog,
   Flag,
+  Flame,
   HelpCircle,
   House,
   Layers,
   MapPin,
   Mic,
-  Navigation,
-  NavigationOff,
-  MessageCircle,
-  Timer,
-  Users,
-  Dog,
   PawPrint,
-  Plane,
   Radiation,
   Ruler,
-  Shield,
+  ShieldPlus,
+  Siren,
   Skull,
   Spline,
   Tag,
+  Timer,
   Truck,
   Undo2,
+  UserRound,
   Warehouse,
   X,
+  Zap,
 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
@@ -275,7 +273,7 @@ export default function MapLibreMap() {
 
   const [baseStyleIndex, setBaseStyleIndex] = useState(0);
 
-  const [trackingEnabled, setTrackingEnabled] = useState(true);
+  const [trackingEnabled] = useState(true);
 
   const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
 
@@ -320,26 +318,26 @@ export default function MapLibreMap() {
       { id: 'flag', Icon: Flag, label: 'Flag' },
       { id: 'alert', Icon: AlertTriangle, label: 'Alert' },
       { id: 'help', Icon: HelpCircle, label: 'Help' },
-      { id: 'skull', Icon: Skull, label: 'Skull' },
-      { id: 'binoculars', Icon: Binoculars, label: 'Binoculars' },
+      { id: 'flame', Icon: Flame, label: 'Flame' },
+      { id: 'radiation', Icon: Radiation, label: 'Radiation' },
       { id: 'bomb', Icon: Bomb, label: 'Bomb' },
-      { id: 'car', Icon: Car, label: 'Car' },
-      { id: 'cctv', Icon: Cctv, label: 'CCTV' },
+      { id: 'skull', Icon: Skull, label: 'Skull' },
+      { id: 'user_round', Icon: UserRound, label: 'User Round' },
+      { id: 'house', Icon: House, label: 'House' },
+      { id: 'warehouse', Icon: Warehouse, label: 'Warehouse' },
       { id: 'church', Icon: Church, label: 'Church' },
       { id: 'coffee', Icon: Coffee, label: 'Coffee' },
-      { id: 'flame', Icon: Flame, label: 'Flame' },
-      { id: 'helicopter', Icon: Plane, label: 'Helicopter' },
-      { id: 'mic', Icon: Mic, label: 'Mic' },
-      { id: 'paw', Icon: PawPrint, label: 'Paw' },
-      { id: 'radiation', Icon: Radiation, label: 'Radiation' },
-      { id: 'warehouse', Icon: Warehouse, label: 'Warehouse' },
+      { id: 'car', Icon: Car, label: 'Car' },
       { id: 'truck', Icon: Truck, label: 'Truck' },
       { id: 'motorcycle', Icon: Bike, label: 'Motorbike' },
-      { id: 'shield', Icon: Shield, label: 'Shield' },
-      { id: 'house', Icon: House, label: 'House' },
-      { id: 'speech', Icon: MessageCircle, label: 'Speech' },
-      { id: 'users', Icon: Users, label: 'Users' },
+      { id: 'cctv', Icon: Cctv, label: 'CCTV' },
+      { id: 'mic', Icon: Mic, label: 'Mic' },
       { id: 'dog', Icon: Dog, label: 'Dog' },
+      { id: 'paw', Icon: PawPrint, label: 'Paw' },
+      { id: 'siren', Icon: Siren, label: 'Siren' },
+      { id: 'zap', Icon: Zap, label: 'Lightning' },
+      { id: 'shield_plus', Icon: ShieldPlus, label: 'Shield Plus' },
+      { id: 'binoculars', Icon: Binoculars, label: 'Binoculars' },
     ],
     []
   );
@@ -3209,15 +3207,15 @@ export default function MapLibreMap() {
 
       {showValidation ? (
         <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-32px)] min-h-[400px] flex flex-col">
-            <div className="p-4 flex items-center justify-between">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl h-[calc(100vh-32px)] flex flex-col">
+            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
               <div className="text-base font-bold text-gray-900">Validation</div>
               <button type="button" onClick={cancelDraft} className="h-10 w-10 rounded-2xl border bg-white">
                 <X className="mx-auto" size={18} />
               </button>
             </div>
 
-            <div className="px-4 pb-4 overflow-y-auto flex-1">
+            <div className="px-4 pt-1 pb-4 overflow-y-auto flex-1">
               <div className="grid gap-2">
               <input
                 value={draftTitle}
