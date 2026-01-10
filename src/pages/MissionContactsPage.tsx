@@ -533,33 +533,6 @@ export default function MissionContactsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {canLeaveMission ? (
-                        <button
-                          type="button"
-                          disabled={busyKey === 'leaveMission'}
-                          onClick={async () => {
-                            if (!missionId || !userId) return;
-                            const ok = window.confirm('Quitter cette mission ?');
-                            if (!ok) return;
-                            setBusyKey('leaveMission');
-                            setError(null);
-                            try {
-                              await removeMissionMember(missionId, userId);
-                              clearMission();
-                              navigate('/home', { replace: true });
-                            } catch (e: any) {
-                              setError(e?.message ?? 'Erreur');
-                            } finally {
-                              setBusyKey(null);
-                            }
-                          }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                          title="Quitter la mission"
-                        >
-                          <LogOut size={16} />
-                        </button>
-                      ) : null}
-
                       {!hideBook && !isInContacts ? (
                         <button
                           type="button"
@@ -618,6 +591,33 @@ export default function MissionContactsPage() {
                             </button>
                           ) : null}
                         </>
+                      ) : null}
+
+                      {canLeaveMission ? (
+                        <button
+                          type="button"
+                          disabled={busyKey === 'leaveMission'}
+                          onClick={async () => {
+                            if (!missionId || !userId) return;
+                            const ok = window.confirm('Quitter cette mission ?');
+                            if (!ok) return;
+                            setBusyKey('leaveMission');
+                            setError(null);
+                            try {
+                              await removeMissionMember(missionId, userId);
+                              clearMission();
+                              navigate('/home', { replace: true });
+                            } catch (e: any) {
+                              setError(e?.message ?? 'Erreur');
+                            } finally {
+                              setBusyKey(null);
+                            }
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          title="Quitter la mission"
+                        >
+                          <LogOut size={16} />
+                        </button>
                       ) : null}
                     </div>
                   </div>

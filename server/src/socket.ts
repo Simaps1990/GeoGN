@@ -162,6 +162,27 @@ export function setupSocket(app: FastifyInstance) {
       ack?.({ ok: true });
     });
 
+    socket.on('mission:snapshot:request', async (payload: { missionId?: string }, ack?: (res: any) => void) => {
+      try {
+        const missionId = payload?.missionId ?? (socket as any as AuthedSocket).data.missionId;
+        if (!missionId) {
+          ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
+          return;
+        }
+
+        const ok = await requireMissionMember(userId, missionId);
+        if (!ok) {
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        await emitMissionSnapshot(socket, missionId);
+        ack?.({ ok: true });
+      } catch {
+        ack?.({ ok: false, error: 'SNAPSHOT_FAILED' });
+      }
+    });
+
     socket.on('position:clear', async (_payload: any, ack?: (res: any) => void) => {
       try {
         const missionId = (socket as any as AuthedSocket).data.missionId;

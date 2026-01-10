@@ -1087,6 +1087,7 @@ export default function MapLibreMap() {
     safeMoveToTop('trace-line');
     safeMoveToTop('others-traces-line');
     safeMoveToTop('others-points');
+    safeMoveToTop('others-points-inactive-dot');
     safeMoveToTop('others-labels');
     safeMoveToTop('me-dot');
     safeMoveToTop('zones-labels');
@@ -1258,7 +1259,7 @@ export default function MapLibreMap() {
         paint: {
           'circle-radius': 1.8,
           'circle-color': '#000000',
-          'circle-opacity': ['case', ['==', ['get', 'inactive'], true], 1, 0],
+          'circle-opacity': ['case', ['==', ['get', 'inactive'], 1], 1, 0],
         },
       });
     }
@@ -2159,6 +2160,9 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!currentBaseStyle) return;
 
+    const c = map.getCenter();
+    const view = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+
     map.setStyle(currentBaseStyle);
 
     const onStyleData = () => {
@@ -2166,6 +2170,11 @@ export default function MapLibreMap() {
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
       applyMyDynamicPaint(map);
+      try {
+        map.jumpTo({ center: [view.lng, view.lat], zoom: view.zoom, bearing: view.bearing, pitch: view.pitch });
+      } catch {
+        // ignore
+      }
     };
 
     map.once('styledata', onStyleData);
@@ -2278,6 +2287,17 @@ export default function MapLibreMap() {
     const socket = getSocket();
     socketRef.current = socket;
 
+    const ensureJoined = () => {
+      try {
+        socket.emit('mission:join', { missionId: selectedMissionId });
+      } catch {
+        // ignore
+      }
+    };
+
+    // Always (re)join on mount so we are in the right room (even if MissionLayout is not mounted).
+    ensureJoined();
+
     const pendingKey = user?.id ? `geogn.pendingPos.${selectedMissionId}.${user.id}` : null;
     if (pendingKey) {
       try {
@@ -2317,10 +2337,32 @@ export default function MapLibreMap() {
       });
     };
 
-    // Best effort: flush buffered points on connect/reconnect.
-    socket.on('connect', flushPending);
-    socket.on('reconnect', flushPending as any);
-    setTimeout(flushPending, 300);
+    const requestSnapshot = () => {
+      try {
+        socket.emit('mission:snapshot:request', { missionId: selectedMissionId });
+      } catch {
+        // ignore
+      }
+    };
+
+    // Best effort: re-join + request fresh snapshot + flush buffered points on connect/reconnect.
+    const onConnected = () => {
+      ensureJoined();
+      flushPending();
+      requestSnapshot();
+    };
+    socket.on('connect', onConnected);
+    socket.on('reconnect', onConnected as any);
+    setTimeout(onConnected, 300);
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!socket.connected) return;
+      ensureJoined();
+      requestSnapshot();
+      flushPending();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     const onSnapshot = (msg: any) => {
       if (!msg || msg.missionId !== selectedMissionId) return;
@@ -2415,6 +2457,7 @@ export default function MapLibreMap() {
 
     const onPosClear = (msg: any) => {
       if (!msg?.userId) return;
+      if (msg?.missionId && msg.missionId !== selectedMissionId) return;
       setOtherPositions((prev) => {
         const next = { ...prev };
         delete next[msg.userId];
@@ -2483,8 +2526,9 @@ export default function MapLibreMap() {
       socket.off('zone:created', onZoneCreated);
       socket.off('zone:updated', onZoneUpdated);
       socket.off('zone:deleted', onZoneDeleted);
-      socket.off('connect', flushPending);
-      socket.off('reconnect', flushPending as any);
+      socket.off('connect', onConnected);
+      socket.off('reconnect', onConnected as any);
+      document.removeEventListener('visibilitychange', onVisibility);
       persistPending();
     };
   }, [selectedMissionId, user?.id, memberColors, traceRetentionMs, maxTracePoints]);
@@ -2711,7 +2755,7 @@ export default function MapLibreMap() {
 
     const now = Date.now();
     const inactiveAfterMs = 60_000;
-    const inactiveColor = '#d1d5db'; // lighter gray
+    const inactiveColor = '#9ca3af';
     const features = Object.entries(otherPositions).map(([userId, p]) => {
       const memberColor = memberColors[userId];
       const isInactive = now - p.t > inactiveAfterMs;
@@ -2721,7 +2765,7 @@ export default function MapLibreMap() {
 
       return {
         type: 'Feature',
-        properties: { userId, color, name, inactive: isInactive },
+        properties: { userId, color, name, inactive: isInactive ? 1 : 0 },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       };
     });
@@ -2751,7 +2795,7 @@ export default function MapLibreMap() {
 
       features.push({
         type: 'Feature',
-        properties: { userId, color, inactive: isInactive },
+        properties: { userId, color, inactive: isInactive ? 1 : 0 },
         geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
       });
     }
@@ -2818,7 +2862,7 @@ export default function MapLibreMap() {
     <div className="relative w-full h-screen">
       <div ref={mapRef} className="w-full h-full" />
 
-      <div className="pointer-events-none absolute bottom-[calc(max(env(safe-area-inset-bottom),16px)+84px)] left-1/2 z-[1000] w-full -translate-x-1/2 max-w-md px-3 sm:max-w-lg md:max-w-xl">
+      <div className="pointer-events-none fixed bottom-[calc(max(env(safe-area-inset-bottom),16px)+104px)] left-1/2 z-[1000] w-full -translate-x-1/2 max-w-md px-3 sm:max-w-lg md:max-w-xl">
         <div id="map-scale-container" className="pointer-events-auto flex w-full justify-center" />
       </div>
 
@@ -3062,17 +3106,6 @@ export default function MapLibreMap() {
           </>
         ) : null}
 
-        {isMapRotated ? (
-          <button
-            type="button"
-            onClick={resetNorth}
-            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-            title="Boussole"
-          >
-            <Compass className="mx-auto text-gray-600" size={20} />
-          </button>
-        ) : null}
-
         {isAdmin ? (
           <button
             type="button"
@@ -3086,6 +3119,17 @@ export default function MapLibreMap() {
             title="Durée de la piste"
           >
             <Timer className="mx-auto text-gray-600" size={20} />
+          </button>
+        ) : null}
+
+        {isMapRotated ? (
+          <button
+            type="button"
+            onClick={resetNorth}
+            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
+            title="Boussole"
+          >
+            <Compass className="mx-auto text-gray-600" size={20} />
           </button>
         ) : null}
       </div>
@@ -3113,6 +3157,20 @@ export default function MapLibreMap() {
                 onChange={(e) => setTimerSecondsInput(e.target.value)}
                 className="h-11 w-full rounded-2xl border px-3 text-sm"
               />
+              {(() => {
+                const trimmed = timerSecondsInput.trim();
+                const parsed = trimmed ? Number(trimmed) : NaN;
+                if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) return null;
+                const total = Math.floor(parsed);
+                const h = Math.floor(total / 3600);
+                const m = Math.floor((total % 3600) / 60);
+                const s = total % 60;
+                const parts: string[] = [];
+                if (h > 0) parts.push(`${h} h`);
+                if (h > 0 || m > 0) parts.push(`${m} min`);
+                parts.push(`${s} s`);
+                return <div className="-mt-1 text-xs text-gray-500">({parts.join(' ')})</div>;
+              })()}
               {timerError ? <div className="text-sm text-red-600">{timerError}</div> : null}
 
               <div className="mt-1 grid grid-cols-2 gap-2">

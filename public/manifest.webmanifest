@@ -3,8 +3,8 @@
   "short_name": "GeoGN",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#f9fafb",
+  "background_color": "#111827",
+  "theme_color": "#111827",
   "icons": [
     {
       "src": "/icon/android-chrome-192x192.png",
