@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CircleDot, Spline, Grid2X2, Map as MapIcon } from 'lucide-react';
-import { deleteZone, getMission, listZones, updateZone, type ApiMission, type ApiZone } from '../lib/api';
+import { CircleDot, Spline, Grid2X2, Map as MapIcon, Pencil, Trash2 } from 'lucide-react';
+import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
   const { missionId } = useParams();
@@ -9,6 +9,8 @@ export default function MissionZonesPage() {
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [members, setMembers] = useState<ApiMissionMember[]>([]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -48,9 +50,10 @@ export default function MissionZonesPage() {
       try {
         const m = await getMission(missionId);
         if (!cancelled) setMission(m);
-        const z = await listZones(missionId);
+        const [z, mem] = await Promise.all([listZones(missionId), listMissionMembers(missionId)]);
         if (cancelled) return;
         setZones(z);
+        setMembers(mem);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -60,9 +63,32 @@ export default function MissionZonesPage() {
     };
   }, [missionId]);
 
+  const memberById = useMemo(() => {
+    const map = new Map<string, ApiMissionMember>();
+    for (const m of members) {
+      const id = m.user?.id;
+      if (id) map.set(id, m);
+    }
+    return map;
+  }, [members]);
+
   // Tant que la mission n'est pas chargée, ne pas afficher les contrôles d'édition
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
   const isAdmin = mission?.membership?.role === 'admin';
+
+  function enqueueOfflineAction(action: any) {
+    if (!missionId) return;
+    const key = `geogn.pendingActions.${missionId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const next = [...list, action].slice(-5000);
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  }
 
   async function setZoneGrid(zoneId: string, nextGrid: ApiZone['grid']) {
     if (!missionId) return;
@@ -79,8 +105,14 @@ export default function MissionZonesPage() {
       const updated = await updateZone(missionId, zoneId, { grid: nextGrid });
       setZones((prev) => prev.map((x) => (x.id === zoneId ? updated : x)));
     } catch (e: any) {
-      if (prevZone) setZones((prev) => prev.map((x) => (x.id === zoneId ? prevZone : x)));
-      setGridErrorByZoneId((prev) => ({ ...prev, [zoneId]: e?.message ?? 'Erreur' }));
+      const offline = !navigator.onLine;
+      if (offline) {
+        enqueueOfflineAction({ entity: 'zone', op: 'update', id: zoneId, payload: { grid: nextGrid }, t: Date.now() });
+        setGridErrorByZoneId((prev) => ({ ...prev, [zoneId]: 'Modifié hors-ligne (en attente de synchro)' }));
+      } else {
+        if (prevZone) setZones((prev) => prev.map((x) => (x.id === zoneId ? prevZone : x)));
+        setGridErrorByZoneId((prev) => ({ ...prev, [zoneId]: e?.message ?? 'Erreur' }));
+      }
     } finally {
       setBusyId(null);
     }
@@ -161,7 +193,21 @@ export default function MissionZonesPage() {
                           setEditingId(null);
                           setEditDraft(null);
                         } catch (e: any) {
-                          setEditError(e?.message ?? 'Erreur');
+                          const offline = !navigator.onLine;
+                          if (offline) {
+                            const payload = {
+                              title: nextTitle,
+                              comment: editDraft.comment.trim(),
+                              color: editDraft.color.trim(),
+                            };
+                            setZones((prev) => prev.map((x) => (x.id === z.id ? { ...x, ...payload } : x)));
+                            enqueueOfflineAction({ entity: 'zone', op: 'update', id: z.id, payload, t: Date.now() });
+                            setEditingId(null);
+                            setEditDraft(null);
+                            setEditError(null);
+                          } else {
+                            setEditError(e?.message ?? 'Erreur');
+                          }
                         } finally {
                           setBusyId(null);
                         }
@@ -203,37 +249,97 @@ export default function MissionZonesPage() {
                       <div className="mt-1 text-xs text-gray-600 break-words">
                         {z.comment?.trim() ? z.comment : z.type === 'circle' ? 'Zone circulaire' : z.type === 'polygon' ? 'Zone polygonale' : 'Zone'}
                       </div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">
+                        {(() => {
+                          const id = z.createdBy as string | undefined;
+                          if (!id) return 'Créé par inconnu';
+                          const m = memberById.get(id);
+                          const name = m?.user?.displayName || m?.user?.appUserId || id;
+                          return `Créé par ${name}`;
+                        })()}
+                      </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={!missionId}
-                    onClick={() => {
-                      if (!missionId) return;
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!missionId}
+                      onClick={() => {
+                        if (!missionId) return;
 
-                      let lng = 0;
-                      let lat = 0;
+                        let lng = 0;
+                        let lat = 0;
 
-                      if (z.type === 'circle' && z.circle?.center) {
-                        lng = z.circle.center.lng;
-                        lat = z.circle.center.lat;
-                      } else if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-                        const ring = z.polygon.coordinates[0];
-                        const pts = ring.slice(0, Math.max(0, ring.length - 1));
-                        if (pts.length) {
-                          lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-                          lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                        if (z.type === 'circle' && z.circle?.center) {
+                          lng = z.circle.center.lng;
+                          lat = z.circle.center.lat;
+                        } else if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+                          const ring = z.polygon.coordinates[0];
+                          const pts = ring.slice(0, Math.max(0, ring.length - 1));
+                          if (pts.length) {
+                            lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+                            lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                          }
                         }
-                      }
 
-                      sessionStorage.setItem('geogn.centerZone', JSON.stringify({ missionId, lng, lat, zoom: 15 }));
-                      navigate(`/mission/${missionId}/map`);
-                    }}
-                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                    title="Voir sur la carte"
-                  >
-                    <MapIcon size={18} />
-                  </button>
+                        sessionStorage.setItem('geogn.centerZone', JSON.stringify({ missionId, lng, lat, zoom: 15 }));
+                        navigate(`/mission/${missionId}/map`);
+                      }}
+                      className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      title="Voir sur la carte"
+                    >
+                      <MapIcon size={18} />
+                    </button>
+
+                    {editingId !== z.id && canEdit ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={!missionId || busyId === z.id}
+                          onClick={async () => {
+                            if (!missionId) return;
+                            setEditingId(z.id);
+                            setEditError(null);
+                            setEditDraft({
+                              title: z.title,
+                              comment: z.comment ?? '',
+                              color: z.color,
+                            });
+                          }}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          title="Modifier"
+                        >
+                          <Pencil size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!missionId || busyId === z.id}
+                          onClick={async () => {
+                            if (!missionId) return;
+                            const ok = window.confirm('Supprimer cette zone ?');
+                            if (!ok) return;
+                            setBusyId(z.id);
+                            try {
+                              await deleteZone(missionId, z.id);
+                              setZones((prev) => prev.filter((x) => x.id !== z.id));
+                            } catch {
+                              const offline = !navigator.onLine;
+                              if (offline) {
+                                setZones((prev) => prev.filter((x) => x.id !== z.id));
+                                enqueueOfflineAction({ entity: 'zone', op: 'delete', id: z.id, t: Date.now() });
+                              }
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                          title="Supprimer"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               )}
 
@@ -388,46 +494,6 @@ export default function MissionZonesPage() {
                     </div>
                   ) : null}
 
-                  {canEdit ? (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={!missionId || busyId === z.id}
-                        onClick={async () => {
-                          if (!missionId) return;
-                          setEditingId(z.id);
-                          setEditError(null);
-                          setEditDraft({
-                            title: z.title,
-                            comment: z.comment ?? '',
-                            color: z.color,
-                          });
-                        }}
-                        className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Modifier
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!missionId || busyId === z.id}
-                        onClick={async () => {
-                          if (!missionId) return;
-                          const ok = window.confirm('Supprimer cette zone ?');
-                          if (!ok) return;
-                          setBusyId(z.id);
-                          try {
-                            await deleteZone(missionId, z.id);
-                            setZones((prev) => prev.filter((x) => x.id !== z.id));
-                          } finally {
-                            setBusyId(null);
-                          }
-                        }}
-                        className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               )}
 

@@ -23,10 +23,13 @@ import {
   Layers,
   MapPin,
   Mic,
+  Navigation2,
   PawPrint,
+  Pencil,
   Radiation,
   Ruler,
   ShieldPlus,
+  Trash2,
   Siren,
   Skull,
   Spline,
@@ -38,6 +41,7 @@ import {
   Warehouse,
   X,
   Zap,
+  Share2,
 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,10 +50,14 @@ import { getSocket } from '../lib/socket';
 import {
   createPoi,
   createZone,
+  deletePoi,
+  deleteZone,
   getMission,
   listPois,
   listMissionMembers,
   listZones,
+  updatePoi,
+  updateZone,
   updateMission,
   type ApiMission,
   type ApiPoi,
@@ -172,6 +180,19 @@ function closeRing(ring: number[][]) {
   return [...ring, first];
 }
 
+function haversineMeters(a: { lng: number; lat: number }, b: { lng: number; lat: number }) {
+  const R = 6371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
   const ring = closeRing(ringInput);
   const ys: number[] = [];
@@ -208,8 +229,38 @@ function getZoneLabelPoint(z: ApiZone) {
   if (!bbox) return null;
   const cx = (bbox.minLng + bbox.maxLng) / 2;
   const height = bbox.maxLat - bbox.minLat;
-  const y = bbox.minLat - height * 0.04;
+  const y = bbox.minLat - height * 0.015;
   return { lng: cx, lat: y };
+}
+
+function pickZoneLabelColor(zoneColor: string | undefined | null) {
+  const c = (zoneColor || '').trim();
+  if (!c) return '#111827';
+  if (!c.startsWith('#')) return c;
+  const hex = c.slice(1);
+  const full =
+    hex.length === 3
+      ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+      : hex.length === 6
+        ? hex
+        : '';
+  if (!full) return c;
+
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  if (![r, g, b].every((v) => Number.isFinite(v))) return c;
+
+  // Relative luminance (sRGB)
+  const srgb = [r, g, b].map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  const L = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+
+  // If too light, keep a dark readable label.
+  if (L > 0.75) return '#111827';
+  return c;
 }
 
 function clipHorizontalLineToPolygon(lat: number, ringInput: number[][]) {
@@ -249,6 +300,7 @@ export default function MapLibreMap() {
   const watchIdRef = useRef<number | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
+  const pendingActionsRef = useRef<any[]>([]);
 
   const scaleControlRef = useRef<maplibregl.ScaleControl | null>(null);
   const scaleControlElRef = useRef<HTMLElement | null>(null);
@@ -271,6 +323,8 @@ export default function MapLibreMap() {
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
+  const [editingPoiId, setEditingPoiId] = useState<string | null>(null);
+
   const [baseStyleIndex, setBaseStyleIndex] = useState(0);
 
   const [trackingEnabled] = useState(true);
@@ -280,6 +334,14 @@ export default function MapLibreMap() {
   const [activeTool, setActiveTool] = useState<'none' | 'poi' | 'zone_circle' | 'zone_polygon'>('none');
   const [draftLngLat, setDraftLngLat] = useState<{ lng: number; lat: number } | null>(null);
   const [draftCircleRadius, setDraftCircleRadius] = useState(250);
+  const [draftCircleEdgeLngLat, setDraftCircleEdgeLngLat] = useState<{ lng: number; lat: number } | null>(null);
+  const [circleRadiusReady, setCircleRadiusReady] = useState(false);
+  const [polygonDraftCount, setPolygonDraftCount] = useState(0);
+
+  const activeToolRef = useRef(activeTool);
+  useEffect(() => {
+    activeToolRef.current = activeTool;
+  }, [activeTool]);
 
   const [showValidation, setShowValidation] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
@@ -289,6 +351,14 @@ export default function MapLibreMap() {
 
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedPoi) return;
+    const next = pois.find((p) => p.id === selectedPoi.id);
+    if (!next) return;
+    if (next === selectedPoi) return;
+    setSelectedPoi(next);
+  }, [pois, selectedPoi]);
 
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [scaleEnabled, setScaleEnabled] = useState(true);
@@ -409,6 +479,177 @@ export default function MapLibreMap() {
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
   const isAdmin = !!mission && mission.membership?.role === 'admin';
 
+  const getPendingActionsKey = (missionId: string) => `geogn.pendingActions.${missionId}`;
+
+  const persistPendingActions = (missionId: string) => {
+    try {
+      localStorage.setItem(getPendingActionsKey(missionId), JSON.stringify(pendingActionsRef.current.slice(-5000)));
+    } catch {
+      // ignore
+    }
+  };
+
+  const enqueueAction = (missionId: string, action: any) => {
+    // Compact: if we create a local entity and then update it before sync, merge into create.
+    // If we create and then delete before sync, drop both.
+    try {
+      if (action?.entity === 'poi') {
+        if (action.op === 'update') {
+          const idx = pendingActionsRef.current.findIndex(
+            (a) => a && a.entity === 'poi' && a.op === 'create' && a.localId && a.localId === action.id
+          );
+          if (idx >= 0) {
+            const existing = pendingActionsRef.current[idx];
+            existing.payload = { ...(existing.payload || {}), ...(action.payload || {}) };
+            persistPendingActions(missionId);
+            return;
+          }
+        }
+        if (action.op === 'delete') {
+          const idx = pendingActionsRef.current.findIndex(
+            (a) => a && a.entity === 'poi' && a.op === 'create' && a.localId && a.localId === action.id
+          );
+          if (idx >= 0) {
+            pendingActionsRef.current = pendingActionsRef.current.filter((_, i) => i !== idx);
+            persistPendingActions(missionId);
+            return;
+          }
+        }
+      }
+
+      if (action?.entity === 'zone') {
+        if (action.op === 'update') {
+          const idx = pendingActionsRef.current.findIndex(
+            (a) => a && a.entity === 'zone' && a.op === 'create' && a.localId && a.localId === action.id
+          );
+          if (idx >= 0) {
+            const existing = pendingActionsRef.current[idx];
+            existing.payload = { ...(existing.payload || {}), ...(action.payload || {}) };
+            persistPendingActions(missionId);
+            return;
+          }
+        }
+        if (action.op === 'delete') {
+          const idx = pendingActionsRef.current.findIndex(
+            (a) => a && a.entity === 'zone' && a.op === 'create' && a.localId && a.localId === action.id
+          );
+          if (idx >= 0) {
+            pendingActionsRef.current = pendingActionsRef.current.filter((_, i) => i !== idx);
+            persistPendingActions(missionId);
+            return;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    pendingActionsRef.current = [...pendingActionsRef.current, action].slice(-5000);
+    persistPendingActions(missionId);
+  };
+
+  const flushPendingActions = async (missionId: string) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+    const list = pendingActionsRef.current;
+    if (!Array.isArray(list) || list.length === 0) return;
+
+    let changed = false;
+    const idMap = new Map<string, string>();
+    const remaining: any[] = [];
+
+    for (const a of list) {
+      if (!a || !a.entity || !a.op) continue;
+      try {
+        if (a.entity === 'poi') {
+          const targetId = typeof a.id === 'string' ? (idMap.get(a.id) ?? a.id) : '';
+          if (a.op === 'create') {
+            const created = await createPoi(missionId, a.payload);
+            if (a.localId) {
+              idMap.set(a.localId, created.id);
+              setPois((prev) => prev.map((p) => (p.id === a.localId ? created : p)));
+            } else {
+              setPois((prev) => (prev.some((p) => p.id === created.id) ? prev : [created, ...prev]));
+            }
+            changed = true;
+            continue;
+          }
+          if (a.op === 'update') {
+            if (!targetId) continue;
+            if (targetId.startsWith('local-') && !idMap.get(targetId)) {
+              remaining.push(a);
+              continue;
+            }
+            const updated = await updatePoi(missionId, targetId, a.payload);
+            setPois((prev) => prev.map((p) => (p.id === targetId ? updated : p)));
+            changed = true;
+            continue;
+          }
+          if (a.op === 'delete') {
+            if (!targetId) continue;
+            if (targetId.startsWith('local-') && !idMap.get(targetId)) {
+              changed = true;
+              continue;
+            }
+            await deletePoi(missionId, targetId);
+            setPois((prev) => prev.filter((p) => p.id !== targetId));
+            changed = true;
+            continue;
+          }
+        }
+
+        if (a.entity === 'zone') {
+          const targetId = typeof a.id === 'string' ? (idMap.get(a.id) ?? a.id) : '';
+          if (a.op === 'create') {
+            const created = await createZone(missionId, a.payload);
+            if (a.localId) {
+              idMap.set(a.localId, created.id);
+              setZones((prev) => prev.map((z) => (z.id === a.localId ? created : z)));
+            } else {
+              setZones((prev) => (prev.some((z) => z.id === created.id) ? prev : [created, ...prev]));
+            }
+            changed = true;
+            continue;
+          }
+          if (a.op === 'update') {
+            if (!targetId) continue;
+            if (targetId.startsWith('local-') && !idMap.get(targetId)) {
+              remaining.push(a);
+              continue;
+            }
+            const updated = await updateZone(missionId, targetId, a.payload);
+            setZones((prev) => prev.map((z) => (z.id === targetId ? updated : z)));
+            changed = true;
+            continue;
+          }
+          if (a.op === 'delete') {
+            if (!targetId) continue;
+            if (targetId.startsWith('local-') && !idMap.get(targetId)) {
+              changed = true;
+              continue;
+            }
+            await deleteZone(missionId, targetId);
+            setZones((prev) => prev.filter((z) => z.id !== targetId));
+            changed = true;
+            continue;
+          }
+        }
+      } catch {
+        remaining.push(a);
+        const idx = list.indexOf(a);
+        if (idx >= 0) {
+          for (let i = idx + 1; i < list.length; i++) remaining.push(list[i]);
+        }
+        break;
+      }
+    }
+
+    if (changed || remaining.length !== list.length) {
+      pendingActionsRef.current = remaining;
+      persistPendingActions(missionId);
+    }
+  };
+
   async function onSaveTraceRetentionSeconds() {
     if (!selectedMissionId) return;
     if (!isAdmin) return;
@@ -439,6 +680,7 @@ export default function MapLibreMap() {
 
   useEffect(() => {
     if (!selectedMissionId) return;
+
     let cancelled = false;
     (async () => {
       try {
@@ -806,6 +1048,30 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!mapReady) return;
 
+    const onFlyTo = (e: any) => {
+      const lng = e?.detail?.lng;
+      const lat = e?.detail?.lat;
+      const zoom = e?.detail?.zoom;
+      if (typeof lng !== 'number' || typeof lat !== 'number') return;
+      try {
+        map.easeTo({ center: [lng, lat], zoom: typeof zoom === 'number' ? zoom : Math.max(map.getZoom(), 16), duration: 600 });
+        sessionStorage.setItem('geogn.skipMapViewOnce', '1');
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('geogn:map:flyTo', onFlyTo as any);
+    return () => {
+      window.removeEventListener('geogn:map:flyTo', onFlyTo as any);
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
     const raw = sessionStorage.getItem('geogn.centerZone');
     if (!raw) return;
     try {
@@ -928,7 +1194,7 @@ export default function MapLibreMap() {
     if (!mapReady) return;
     if (!map.getLayer('zones-labels')) return;
     try {
-      map.setLayoutProperty('zones-labels', 'text-offset', [0, 0.06]);
+      map.setLayoutProperty('zones-labels', 'text-offset', [0, 0.03]);
     } catch {
       // ignore
     }
@@ -1380,12 +1646,12 @@ export default function MapLibreMap() {
           visibility: labelsEnabled ? 'visible' : 'none',
           'text-field': ['coalesce', ['get', 'title'], ''],
           'text-size': 13,
-          'text-offset': [0, 0.1],
+          'text-offset': [0, 0.03],
           'text-anchor': 'top',
           'text-optional': true,
         },
         paint: {
-          'text-color': '#111827',
+          'text-color': ['coalesce', ['get', 'labelColor'], '#111827'],
           'text-halo-color': '#ffffff',
           'text-halo-width': 2,
         },
@@ -1564,7 +1830,7 @@ export default function MapLibreMap() {
         if (!p) continue;
         features.push({
           type: 'Feature',
-          properties: { id: z.id, title: z.title, color: z.color },
+          properties: { id: z.id, title: z.title, color: z.color, labelColor: pickZoneLabelColor(z.color) },
           geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
         });
       }
@@ -1785,6 +2051,25 @@ export default function MapLibreMap() {
           properties: { kind: 'point', color: draftColor },
           geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
         });
+
+        if (draftCircleEdgeLngLat) {
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'line', color: draftColor },
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [draftLngLat.lng, draftLngLat.lat],
+                [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat],
+              ],
+            },
+          });
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'point', color: draftColor },
+            geometry: { type: 'Point', coordinates: [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat] },
+          });
+        }
       }
 
       if (activeTool === 'zone_polygon') {
@@ -1829,6 +2114,7 @@ export default function MapLibreMap() {
     const coords = polygonDraftRef.current;
     if (coords.length === 0) return;
     polygonDraftRef.current = coords.slice(0, -1);
+    setPolygonDraftCount(polygonDraftRef.current.length);
     const next = polygonDraftRef.current;
     if (next.length === 0) {
       setDraftLngLat(null);
@@ -1847,13 +2133,80 @@ export default function MapLibreMap() {
     openValidation();
   }
 
+  function validateCircleDraft() {
+    if (activeTool !== 'zone_circle') return;
+    if (!draftLngLat) {
+      setActionError('Centre requis');
+      return;
+    }
+    if (!circleRadiusReady) {
+      setActionError('Rayon requis');
+      return;
+    }
+    openValidation();
+  }
+
   function cancelDraft() {
     setActiveTool('none');
     setDraftLngLat(null);
+    setDraftCircleEdgeLngLat(null);
+    setCircleRadiusReady(false);
     polygonDraftRef.current = [];
+    setPolygonDraftCount(0);
     setShowValidation(false);
+    setEditingPoiId(null);
     setActionError(null);
   }
+
+  useEffect(() => {
+    const mode = activeTool === 'zone_circle' || activeTool === 'zone_polygon';
+    try {
+      window.dispatchEvent(
+        new CustomEvent('geogn:zone:draftState', {
+          detail: {
+            activeTool,
+            active: mode,
+            circleRadiusReady,
+            polygonPoints: polygonDraftCount,
+            hasCenter: !!draftLngLat,
+          },
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [activeTool, circleRadiusReady, polygonDraftCount, draftLngLat]);
+
+  useEffect(() => {
+    const onCancel = () => {
+      if (activeTool !== 'zone_circle' && activeTool !== 'zone_polygon') return;
+
+      if (activeTool === 'zone_polygon') {
+        if (polygonDraftRef.current.length > 0) {
+          undoPolygonPoint();
+          return;
+        }
+        cancelDraft();
+        return;
+      }
+
+      cancelDraft();
+    };
+    const onValidate = () => {
+      if (activeTool === 'zone_polygon') {
+        validatePolygon();
+      } else if (activeTool === 'zone_circle') {
+        validateCircleDraft();
+      }
+    };
+
+    window.addEventListener('geogn:zone:draftCancel', onCancel as any);
+    window.addEventListener('geogn:zone:draftValidate', onValidate as any);
+    return () => {
+      window.removeEventListener('geogn:zone:draftCancel', onCancel as any);
+      window.removeEventListener('geogn:zone:draftValidate', onValidate as any);
+    };
+  }, [activeTool, circleRadiusReady, polygonDraftCount, draftLngLat]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1875,6 +2228,25 @@ export default function MapLibreMap() {
         properties: { kind: 'point', color: draftColor },
         geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
       });
+
+      if (draftCircleEdgeLngLat) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'line', color: draftColor },
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [draftLngLat.lng, draftLngLat.lat],
+              [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat],
+            ],
+          },
+        });
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'point', color: draftColor },
+          geometry: { type: 'Point', coordinates: [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat] },
+        });
+      }
     }
 
     if (activeTool === 'zone_polygon') {
@@ -1906,7 +2278,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features });
-  }, [activeTool, draftLngLat, draftCircleRadius, draftColor, mapReady]);
+  }, [activeTool, draftLngLat, draftCircleRadius, draftColor, draftCircleEdgeLngLat, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1927,14 +2299,33 @@ export default function MapLibreMap() {
       const lng = e.lngLat.lng;
       const lat = e.lngLat.lat;
 
-      if (activeTool === 'poi' || activeTool === 'zone_circle') {
+      if (activeTool === 'poi') {
         setDraftLngLat({ lng, lat });
         openValidation();
         return;
       }
 
+      if (activeTool === 'zone_circle') {
+        if (!draftLngLat) {
+          setDraftLngLat({ lng, lat });
+          setDraftCircleEdgeLngLat(null);
+          setCircleRadiusReady(false);
+          return;
+        }
+
+        const center = draftLngLat;
+        const edge = { lng, lat };
+        const computed = haversineMeters(center, edge);
+        const clamped = Math.max(50, Math.min(1500, Math.round(computed)));
+        setDraftCircleRadius(clamped);
+        setDraftCircleEdgeLngLat(edge);
+        setCircleRadiusReady(true);
+        return;
+      }
+
       if (activeTool === 'zone_polygon') {
         polygonDraftRef.current = [...polygonDraftRef.current, [lng, lat]];
+        setPolygonDraftCount(polygonDraftRef.current.length);
         setDraftLngLat({ lng, lat });
       }
     };
@@ -1944,7 +2335,7 @@ export default function MapLibreMap() {
     return () => {
       map.off('click', onClick);
     };
-  }, [activeTool, mapReady]);
+  }, [activeTool, mapReady, draftLngLat]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1957,7 +2348,7 @@ export default function MapLibreMap() {
     }
   }, [activeTool, mapReady]);
 
-  async function confirmCreate() {
+  async function submitDraft() {
     if (!selectedMissionId) return;
     if (!draftLngLat) {
       setActionError('Position requise');
@@ -1982,7 +2373,7 @@ export default function MapLibreMap() {
     const nextTitle = draftTitle.trim();
     const nextKey = nextTitle.toLowerCase();
     if (activeTool === 'poi') {
-      const dup = pois.some((p) => p.title.trim().toLowerCase() === nextKey);
+      const dup = pois.some((p) => p.id !== editingPoiId && p.title.trim().toLowerCase() === nextKey);
       if (dup) {
         setActionError('Ce titre est déjà utilisé');
         return;
@@ -2000,16 +2391,28 @@ export default function MapLibreMap() {
     setActionError(null);
     try {
       if (activeTool === 'poi') {
-        const created = await createPoi(selectedMissionId, {
-          type: 'autre',
-          title: nextTitle,
-          icon: draftIcon,
-          color: draftColor,
-          comment: draftComment.trim() || '-',
-          lng: draftLngLat.lng,
-          lat: draftLngLat.lat,
-        });
-        setPois((prev: ApiPoi[]) => [created, ...prev]);
+        if (editingPoiId) {
+          const updated = await updatePoi(selectedMissionId, editingPoiId, {
+            title: nextTitle,
+            icon: draftIcon,
+            color: draftColor,
+            comment: draftComment.trim() || '-',
+            lng: draftLngLat.lng,
+            lat: draftLngLat.lat,
+          });
+          setPois((prev: ApiPoi[]) => prev.map((p) => (p.id === editingPoiId ? updated : p)));
+        } else {
+          const created = await createPoi(selectedMissionId, {
+            type: 'autre',
+            title: nextTitle,
+            icon: draftIcon,
+            color: draftColor,
+            comment: draftComment.trim() || '-',
+            lng: draftLngLat.lng,
+            lat: draftLngLat.lat,
+          });
+          setPois((prev: ApiPoi[]) => [created, ...prev]);
+        }
       }
 
       if (activeTool === 'zone_circle') {
@@ -2045,11 +2448,107 @@ export default function MapLibreMap() {
       setDraftComment('');
       setDraftColor('');
       setDraftIcon('');
+      setEditingPoiId(null);
       setShowValidation(false);
       setActiveTool('none');
       setDraftLngLat(null);
       polygonDraftRef.current = [];
     } catch (e: any) {
+      // Offline fallback: queue the action and apply optimistic update locally.
+      const offline = !navigator.onLine || !socketRef.current?.connected;
+      if (offline && selectedMissionId) {
+        try {
+          if (activeTool === 'poi') {
+            if (editingPoiId) {
+              const payload = {
+                title: nextTitle,
+                icon: draftIcon,
+                color: draftColor,
+                comment: draftComment.trim() || '-',
+                lng: draftLngLat!.lng,
+                lat: draftLngLat!.lat,
+              };
+              // optimistic
+              setPois((prev) => prev.map((p) => (p.id === editingPoiId ? { ...p, ...payload } : p)));
+              enqueueAction(selectedMissionId, { entity: 'poi', op: 'update', id: editingPoiId, payload, t: Date.now() });
+            } else {
+              const localId = `local-${Date.now()}`;
+              const payload = {
+                type: 'autre',
+                title: nextTitle,
+                icon: draftIcon,
+                color: draftColor,
+                comment: draftComment.trim() || '-',
+                lng: draftLngLat!.lng,
+                lat: draftLngLat!.lat,
+              };
+              const optimistic: ApiPoi = {
+                id: localId,
+                type: 'autre',
+                title: payload.title,
+                icon: payload.icon,
+                color: payload.color,
+                comment: payload.comment,
+                lng: payload.lng,
+                lat: payload.lat,
+                createdBy: user?.id ?? 'offline',
+                createdAt: new Date().toISOString(),
+              };
+              setPois((prev) => [optimistic, ...prev]);
+              enqueueAction(selectedMissionId, { entity: 'poi', op: 'create', localId, payload, t: Date.now() });
+            }
+          }
+
+          if (activeTool === 'zone_circle' || activeTool === 'zone_polygon') {
+            const localId = `local-${Date.now()}`;
+            const payload: any = (activeTool === 'zone_circle')
+              ? {
+                  type: 'circle',
+                  title: nextTitle,
+                  comment: draftComment.trim() || '',
+                  color: draftColor,
+                  circle: { center: { lng: draftLngLat!.lng, lat: draftLngLat!.lat }, radiusMeters: draftCircleRadius },
+                }
+              : {
+                  type: 'polygon',
+                  title: nextTitle,
+                  comment: draftComment.trim() || '',
+                  color: draftColor,
+                  polygon: { type: 'Polygon', coordinates: [[...polygonDraftRef.current, polygonDraftRef.current[0]] ] },
+                };
+            const optimistic: ApiZone = {
+              id: localId,
+              title: payload.title,
+              comment: payload.comment,
+              color: payload.color,
+              type: payload.type,
+              circle: payload.type === 'circle' ? payload.circle : null,
+              polygon: payload.type === 'polygon' ? payload.polygon : null,
+              grid: null,
+              sectors: null,
+              createdBy: user?.id ?? 'offline',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            setZones((prev) => [optimistic, ...prev]);
+            enqueueAction(selectedMissionId, { entity: 'zone', op: 'create', localId, payload, t: Date.now() });
+          }
+
+          // close modal as success
+          setDraftTitle('');
+          setDraftComment('');
+          setDraftColor('');
+          setDraftIcon('');
+          setEditingPoiId(null);
+          setShowValidation(false);
+          setActiveTool('none');
+          setDraftLngLat(null);
+          polygonDraftRef.current = [];
+          return;
+        } catch {
+          // fallthrough
+        }
+      }
       setActionError(e?.message ?? 'Erreur');
     } finally {
       setActionBusy(false);
@@ -2310,12 +2809,14 @@ export default function MapLibreMap() {
   useEffect(() => {
     if (!selectedMissionId) return;
 
+    const missionId = selectedMissionId;
+
     const socket = getSocket();
     socketRef.current = socket;
 
     const ensureJoined = () => {
       try {
-        socket.emit('mission:join', { missionId: selectedMissionId });
+        socket.emit('mission:join', { missionId });
       } catch {
         // ignore
       }
@@ -2324,7 +2825,7 @@ export default function MapLibreMap() {
     // Always (re)join on mount so we are in the right room (even if MissionLayout is not mounted).
     ensureJoined();
 
-    const pendingKey = user?.id ? `geogn.pendingPos.${selectedMissionId}.${user.id}` : null;
+    const pendingKey = user?.id ? `geogn.pendingPos.${missionId}.${user.id}` : null;
     if (pendingKey) {
       try {
         const raw = localStorage.getItem(pendingKey);
@@ -2339,6 +2840,19 @@ export default function MapLibreMap() {
       } catch {
         // ignore
       }
+    }
+
+    // Load pending actions (POI/Zone create/update/delete)
+    try {
+      const raw = localStorage.getItem(getPendingActionsKey(missionId));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          pendingActionsRef.current = parsed;
+        }
+      }
+    } catch {
+      // ignore
     }
 
     const persistPending = () => {
@@ -2365,7 +2879,7 @@ export default function MapLibreMap() {
 
     const requestSnapshot = () => {
       try {
-        socket.emit('mission:snapshot:request', { missionId: selectedMissionId });
+        socket.emit('mission:snapshot:request', { missionId });
       } catch {
         // ignore
       }
@@ -2375,6 +2889,7 @@ export default function MapLibreMap() {
     const onConnected = () => {
       ensureJoined();
       flushPending();
+      void flushPendingActions(missionId);
       requestSnapshot();
     };
     socket.on('connect', onConnected);
@@ -2387,8 +2902,14 @@ export default function MapLibreMap() {
       ensureJoined();
       requestSnapshot();
       flushPending();
+      void flushPendingActions(missionId);
     };
     document.addEventListener('visibilitychange', onVisibility);
+
+    const onOnline = () => {
+      void flushPendingActions(missionId);
+    };
+    window.addEventListener('online', onOnline);
 
     const onSnapshot = (msg: any) => {
       if (!msg || msg.missionId !== selectedMissionId) return;
@@ -2537,30 +3058,10 @@ export default function MapLibreMap() {
     socket.on('poi:created', onPoiCreated);
     socket.on('poi:updated', onPoiUpdated);
     socket.on('poi:deleted', onPoiDeleted);
+
     socket.on('zone:created', onZoneCreated);
     socket.on('zone:updated', onZoneUpdated);
     socket.on('zone:deleted', onZoneDeleted);
-
-    return () => {
-      socket.off('mission:snapshot', onSnapshot);
-      socket.off('position:update', onPos);
-      socket.off('position:bulk', onPosBulk);
-      socket.off('position:clear', onPosClear);
-      socket.off('poi:created', onPoiCreated);
-      socket.off('poi:updated', onPoiUpdated);
-      socket.off('poi:deleted', onPoiDeleted);
-      socket.off('zone:created', onZoneCreated);
-      socket.off('zone:updated', onZoneUpdated);
-      socket.off('zone:deleted', onZoneDeleted);
-      socket.off('connect', onConnected);
-      socket.off('reconnect', onConnected as any);
-      document.removeEventListener('visibilitychange', onVisibility);
-      persistPending();
-    };
-  }, [selectedMissionId, user?.id, memberColors, traceRetentionMs, maxTracePoints]);
-
-  useEffect(() => {
-    if (!selectedMissionId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -2574,6 +3075,19 @@ export default function MapLibreMap() {
     })();
     return () => {
       cancelled = true;
+
+      socket.off('mission:snapshot', onSnapshot);
+      socket.off('position:update', onPos);
+      socket.off('position:bulk', onPosBulk);
+      socket.off('position:clear', onPosClear);
+
+      socket.off('poi:created', onPoiCreated);
+      socket.off('poi:updated', onPoiUpdated);
+      socket.off('poi:deleted', onPoiDeleted);
+
+      socket.off('zone:created', onZoneCreated);
+      socket.off('zone:updated', onZoneUpdated);
+      socket.off('zone:deleted', onZoneDeleted);
     };
   }, [selectedMissionId]);
 
@@ -2717,6 +3231,8 @@ export default function MapLibreMap() {
       el.title = p.title;
 
       el.onclick = () => {
+        const tool = activeToolRef.current;
+        if (tool === 'zone_circle' || tool === 'zone_polygon') return;
         setSelectedPoi(p);
       };
     };
@@ -2889,8 +3405,14 @@ export default function MapLibreMap() {
       </div>
 
       {selectedPoi && (
-        <div className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/25 backdrop-blur-sm">
-          <div className="mx-6 max-w-md w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl flex items-start gap-3">
+        <div
+          className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setSelectedPoi(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-xl flex items-start gap-3 px-4 py-3"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
               {(() => {
                 const Icon = getPoiIconComponent(selectedPoi.icon);
@@ -2911,14 +3433,133 @@ export default function MapLibreMap() {
               <div className="mt-1 text-xs text-gray-700 break-words">
                 {selectedPoi.comment || 'Aucune description'}
               </div>
+              <div className="mt-0.5 text-[11px] text-gray-500">
+                {(() => {
+                  const id = selectedPoi.createdBy as string | undefined;
+                  if (!id) return 'Créé par inconnu';
+                  const name = memberNames[id] || id;
+                  return `Créé par ${name}`;
+                })()}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelectedPoi(null)}
-              className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-700"
-            >
-              <X size={12} />
-            </button>
+            <div className="ml-2 flex flex-col items-end gap-2 self-start">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const q = encodeURIComponent(`${selectedPoi.lat},${selectedPoi.lng}`);
+                    const label = encodeURIComponent(selectedPoi.title || 'POI');
+                    const waze = `https://waze.com/ul?ll=${selectedPoi.lat}%2C${selectedPoi.lng}&navigate=yes`;
+                    const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                    const apple = `http://maps.apple.com/?ll=${selectedPoi.lat},${selectedPoi.lng}&q=${label}`;
+                    const choice = window.prompt(
+                      'Naviguer avec:\n1 = Waze\n2 = Google Maps\n3 = Plans (Apple)',
+                      '1'
+                    );
+                    if (!choice) return;
+                    let url = '';
+                    if (choice === '1') url = waze;
+                    else if (choice === '2') url = gmaps;
+                    else if (choice === '3') url = apple;
+                    if (url) {
+                      window.open(url, '_blank');
+                    }
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                  title="Naviguer vers le point"
+                >
+                  <Navigation2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const q = encodeURIComponent(`${selectedPoi.lat},${selectedPoi.lng}`);
+                    const label = encodeURIComponent(selectedPoi.title || 'POI');
+                    const waze = `https://waze.com/ul?ll=${selectedPoi.lat}%2C${selectedPoi.lng}&navigate=yes`;
+                    const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                    const apple = `http://maps.apple.com/?ll=${selectedPoi.lat},${selectedPoi.lng}&q=${label}`;
+                    const text = `Waze: ${waze}\nGoogle Maps: ${gmaps}\nPlans: ${apple}`;
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      window.alert('Liens de navigation copiés dans le presse-papier');
+                    } catch {
+                      window.prompt('Copie ces liens de navigation :', text);
+                    }
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                  title="Partager le point"
+                >
+                  <Share2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPoi(null)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm hover:bg-gray-50 hover:text-gray-900"
+                  title="Fermer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {canEdit ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedPoi) return;
+                      setEditingPoiId(selectedPoi.id);
+                      setActiveTool('poi');
+                      setDraftLngLat({ lng: selectedPoi.lng, lat: selectedPoi.lat });
+                      setDraftTitle(selectedPoi.title || '');
+                      setDraftComment((selectedPoi.comment || '').trim() === '-' ? '' : (selectedPoi.comment || ''));
+                      setDraftColor(selectedPoi.color || '#f97316');
+                      setDraftIcon(selectedPoi.icon || 'target');
+                      setActionError(null);
+                      setShowValidation(true);
+                    }}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                    title="Éditer le POI"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionBusy}
+                    onClick={async () => {
+                      if (!selectedMissionId || !selectedPoi) return;
+                      const ok = window.confirm('Supprimer ce POI ?');
+                      if (!ok) return;
+                      setActionBusy(true);
+                      setActionError(null);
+                      try {
+                        await deletePoi(selectedMissionId, selectedPoi.id);
+                        setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
+                        setSelectedPoi(null);
+                      } catch (e: any) {
+                        const offline = !navigator.onLine || !socketRef.current?.connected;
+                        if (offline) {
+                          setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
+                          enqueueAction(selectedMissionId, {
+                            entity: 'poi',
+                            op: 'delete',
+                            id: selectedPoi.id,
+                            t: Date.now(),
+                          });
+                          setSelectedPoi(null);
+                        } else {
+                          setActionError(e?.message ?? 'Erreur');
+                        }
+                      } finally {
+                        setActionBusy(false);
+                      }
+                    }}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                    title="Supprimer le POI"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
@@ -2951,7 +3592,9 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={() => setScaleEnabled((v) => !v)}
-          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
+            scaleEnabled ? 'ring-1 ring-inset ring-green-500/25' : ''
+          }`}
           title="Afficher l'échelle"
         >
           <Ruler className={scaleEnabled ? 'mx-auto text-green-600' : 'mx-auto text-gray-600'} size={20} />
@@ -2960,11 +3603,15 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={() => setLabelsEnabled((v) => !v)}
-          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
+          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
+            labelsEnabled ? 'ring-1 ring-inset ring-green-500/25' : ''
+          }`}
           title="Afficher les noms (POI + zones + utilisateurs)"
         >
           <Tag
-            className={`mx-auto ${labelsEnabled ? 'text-green-600' : 'text-gray-600'}`}
+            className={`mx-auto ${
+              labelsEnabled ? 'text-green-600' : 'text-gray-600'
+            }`}
             size={18}
           />
         </button>
@@ -2985,45 +3632,60 @@ export default function MapLibreMap() {
                 setDraftComment('');
                 setActiveTool('poi');
               }}
-              className={`h-12 w-12 rounded-2xl border shadow backdrop-blur ${
-                activeTool === 'poi' ? 'bg-blue-600 text-white' : 'bg-white/90 hover:bg-white'
+              className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
+                activeTool === 'poi' ? 'ring-1 ring-inset ring-green-500/25' : ''
               }`}
               title="Ajouter un POI"
             >
               <MapPin
                 className={
-                  activeTool === 'poi' ? 'mx-auto' : 'mx-auto text-gray-600'
+                  activeTool === 'poi' ? 'mx-auto text-green-600' : 'mx-auto text-gray-600'
                 }
                 size={20}
               />
             </button>
 
-            <div className="relative h-12 w-12">
-              <button
-                type="button"
-                onClick={() => {
-                  setActionError(null);
-                  setZoneMenuOpen((v) => !v);
-                }}
-                className={`h-12 w-12 rounded-2xl border shadow backdrop-blur inline-flex items-center justify-center transition-colors ${
-                  zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white/90 hover:bg-white text-gray-600'
-                }`}
-                title="Zones"
-              >
-                <CircleDotDashed
-                  className={
-                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                      ? 'mx-auto text-white'
-                      : 'mx-auto text-gray-600'
-                  }
-                  size={20}
-                />
-              </button>
+            <div
+              className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+                zoneMenuOpen ? 'h-[160px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+              }`}
+            >
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionError(null);
 
-              {zoneMenuOpen ? (
-                <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 rounded-2xl border bg-white/90 p-2 shadow backdrop-blur">
+                    if (activeTool === 'zone_circle' || activeTool === 'zone_polygon') {
+                      cancelDraft();
+                      setZoneMenuOpen(false);
+                      return;
+                    }
+
+                    setZoneMenuOpen((v) => !v);
+                  }}
+                  className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                      ? 'ring-1 ring-inset ring-green-500/25'
+                      : ''
+                  }`}
+                  title="Zones"
+                >
+                  <CircleDotDashed
+                    className={
+                      zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                        ? 'mx-auto text-green-600'
+                        : 'mx-auto text-gray-600'
+                    }
+                    size={20}
+                  />
+                </button>
+
+                <div
+                  className={`flex flex-col gap-2 transition-all duration-200 ${
+                    zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
+                  }`}
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -3036,17 +3698,12 @@ export default function MapLibreMap() {
                       setDraftColor('#22c55e');
                       setActiveTool('zone_circle');
                     }}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                      activeTool === 'zone_circle' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                      activeTool === 'zone_circle' ? 'ring-green-500/25' : 'ring-black/10'
                     }`}
                     title="Zone cercle"
                   >
-                    <CircleDot
-                      className={
-                        activeTool === 'zone_circle' ? 'text-white' : 'text-gray-600'
-                      }
-                      size={20}
-                    />
+                    <CircleDot className={activeTool === 'zone_circle' ? 'text-green-600' : 'text-gray-600'} size={20} />
                   </button>
                   <button
                     type="button"
@@ -3060,20 +3717,15 @@ export default function MapLibreMap() {
                       setDraftColor('#22c55e');
                       setActiveTool('zone_polygon');
                     }}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                      activeTool === 'zone_polygon' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50'
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                      activeTool === 'zone_polygon' ? 'ring-green-500/25' : 'ring-black/10'
                     }`}
                     title="Zone à la main"
                   >
-                    <Spline
-                      className={
-                        activeTool === 'zone_polygon' ? 'text-white' : 'text-gray-600'
-                      }
-                      size={20}
-                    />
+                    <Spline className={activeTool === 'zone_polygon' ? 'text-green-600' : 'text-gray-600'} size={20} />
                   </button>
                 </div>
-              ) : null}
+              </div>
             </div>
           </>
         ) : null}
@@ -3126,6 +3778,21 @@ export default function MapLibreMap() {
                 Ceci règle combien de temps la trace reste visible avant de commencer à s'effacer.
               </div>
 
+              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                {[{ label: "10'", value: 600 }, { label: "20'", value: 1200 }, { label: "30'", value: 1800 }, { label: '1h', value: 3600 }, { label: '2h', value: 7200 }].map(
+                  (p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setTimerSecondsInput(String(p.value))}
+                      className="h-8 rounded-2xl border bg-white px-3 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                    >
+                      {p.label}
+                    </button>
+                  )
+                )}
+              </div>
+
               <div className="mt-1 flex items-center justify-center gap-3">
                 <input
                   type="text"
@@ -3171,37 +3838,6 @@ export default function MapLibreMap() {
               </div>
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {activeTool !== 'none' && activeTool !== 'zone_polygon' && !showValidation ? (
-        <div className="absolute left-1/2 top-4 -translate-x-1/2 z-[1000] rounded-2xl border bg-white/90 px-4 py-2 text-sm shadow backdrop-blur">
-          {activeTool === 'poi'
-            ? 'Mode POI: clique sur la carte'
-            : activeTool === 'zone_circle'
-              ? 'Zone ronde: clique sur le centre'
-              : 'Zone libre: clique pour poser des points'}
-        </div>
-      ) : null}
-
-      {activeTool === 'zone_polygon' && !showValidation ? (
-        <div className="absolute left-1/2 top-4 -translate-x-1/2 z-[1100] flex gap-2">
-          <button
-            type="button"
-            onClick={undoPolygonPoint}
-            className="h-11 rounded-2xl bg-red-600 px-3 text-sm font-semibold text-white shadow inline-flex items-center gap-2 hover:bg-red-700"
-          >
-            <Undo2 size={16} />
-            Annuler
-          </button>
-          <button
-            type="button"
-            onClick={validatePolygon}
-            className="h-11 rounded-2xl bg-green-600 px-3 text-sm font-semibold text-white shadow inline-flex items-center gap-2 hover:bg-green-700"
-          >
-            <Check size={16} />
-            Valider
-          </button>
         </div>
       ) : null}
 
@@ -3342,7 +3978,7 @@ export default function MapLibreMap() {
               <button
                 type="button"
                 disabled={actionBusy}
-                onClick={() => void confirmCreate()}
+                onClick={() => void submitDraft()}
                 className="h-11 w-full rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
               >
                 Valider

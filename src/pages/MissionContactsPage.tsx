@@ -73,9 +73,11 @@ export default function MissionContactsPage() {
 
   const [contacts, setContacts] = useState<ApiContact[]>([]);
   const [addContactId, setAddContactId] = useState<string>('');
-  const [addRole, setAddRole] = useState<'admin' | 'member' | 'viewer'>('member');
+  const [addRole, setAddRole] = useState<'' | 'admin' | 'member' | 'viewer'>('');
   const [addContactOpen, setAddContactOpen] = useState(false);
+  const [addContactSearch, setAddContactSearch] = useState('');
   const addContactMenuRef = useRef<HTMLDivElement | null>(null);
+  const addContactSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const contactsByUserId = useMemo(() => {
     const map = new Map<string, ApiContact>();
@@ -155,6 +157,16 @@ export default function MissionContactsPage() {
     });
   }, [members, sortedContacts]);
 
+  const filteredAvailableContacts = useMemo(() => {
+    const term = addContactSearch.trim().toLowerCase();
+    if (!term) return availableContacts;
+    return availableContacts.filter((c) => {
+      const name = (c.alias?.trim() || c.contact?.displayName || '').toLowerCase();
+      const appId = (c.contact?.appUserId || '').toLowerCase();
+      return name.includes(term) || appId.includes(term);
+    });
+  }, [availableContacts, addContactSearch]);
+
   const selectedAddContact = useMemo(() => {
     return availableContacts.find((c) => c.id === addContactId) ?? null;
   }, [addContactId, availableContacts]);
@@ -176,9 +188,20 @@ export default function MissionContactsPage() {
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('touchstart', onDown);
+
+    // Donner directement le focus au champ de recherche quand le menu s'ouvre.
+    const id = window.setTimeout(() => {
+      try {
+        addContactSearchInputRef.current?.focus();
+      } catch {
+        // ignore
+      }
+    }, 10);
+
     return () => {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('touchstart', onDown);
+      window.clearTimeout(id);
     };
   }, [addContactOpen]);
 
@@ -361,7 +384,18 @@ export default function MissionContactsPage() {
                     <div className="p-3 text-sm text-gray-600">Aucun contact.</div>
                   ) : (
                     <div className="p-2">
-                      {availableContacts.map((c) => {
+                      <input
+                        ref={addContactSearchInputRef}
+                        type="text"
+                        value={addContactSearch}
+                        onChange={(e) => setAddContactSearch(e.target.value)}
+                        placeholder="Rechercher…"
+                        className="mb-2 h-9 w-full rounded-xl border px-3 text-sm outline-none focus:border-blue-500"
+                      />
+                      {filteredAvailableContacts.length === 0 ? (
+                        <div className="px-1 py-2 text-sm text-gray-500">Aucun résultat.</div>
+                      ) : null}
+                      {filteredAvailableContacts.map((c) => {
                         const name = c.alias?.trim() || c.contact?.displayName || 'Contact';
                         const id = c.contact?.appUserId || '-';
                         const active = c.id === addContactId;
@@ -418,17 +452,18 @@ export default function MissionContactsPage() {
 
             <button
               type="button"
-              disabled={busyKey === 'addMember' || !selectedAddContact?.contact?.appUserId}
+              disabled={busyKey === 'addMember' || !selectedAddContact?.contact?.appUserId || !addRole}
               onClick={async () => {
                 if (!missionId) return;
                 const appUserId = selectedAddContact?.contact?.appUserId;
                 if (!appUserId) return;
+                if (!addRole) return;
                 setBusyKey('addMember');
                 setError(null);
                 try {
                   await addMissionMemberByAppUserId(missionId, appUserId, addRole);
                   setAddContactId('');
-                  setAddRole('member');
+                  setAddRole('');
                   await refresh();
                 } catch (e: any) {
                   setError(e?.message ?? 'Erreur');

@@ -15,19 +15,23 @@ import {
   House,
   Map as MapIcon,
   Mic,
+  Navigation2,
   PawPrint,
+  Pencil,
   Radiation,
+  Share2,
   ShieldPlus,
   Siren,
   Skull,
   Target,
+  Trash2,
   Truck,
   UserRound,
   Warehouse,
   Dog,
   Zap,
 } from 'lucide-react';
-import { deletePoi, getMission, listPois, updatePoi, type ApiMission, type ApiPoi } from '../lib/api';
+import { deletePoi, getMission, listMissionMembers, listPois, updatePoi, type ApiMission, type ApiMissionMember, type ApiPoi } from '../lib/api';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
@@ -35,6 +39,8 @@ export default function MissionPoisPage() {
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [members, setMembers] = useState<ApiMissionMember[]>([]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -117,9 +123,10 @@ export default function MissionPoisPage() {
       try {
         const m = await getMission(missionId);
         if (!cancelled) setMission(m);
-        const p = await listPois(missionId);
+        const [p, mem] = await Promise.all([listPois(missionId), listMissionMembers(missionId)]);
         if (cancelled) return;
         setPois(p);
+        setMembers(mem);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -128,6 +135,15 @@ export default function MissionPoisPage() {
       cancelled = true;
     };
   }, [missionId]);
+
+  const memberById = useMemo(() => {
+    const map = new Map<string, ApiMissionMember>();
+    for (const m of members) {
+      const id = m.user?.id;
+      if (id) map.set(id, m);
+    }
+    return map;
+  }, [members]);
 
   // Tant que la mission n'est pas chargée, masquer les contrôles d'édition
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
@@ -294,69 +310,131 @@ export default function MissionPoisPage() {
                       <div>
                         <div className="text-sm font-semibold text-gray-900">{p.title}</div>
                         <div className="mt-1 text-xs text-gray-600">{p.comment}</div>
+                        <div className="mt-0.5 text-[11px] text-gray-500">
+                          {(() => {
+                            const id = p.createdBy as string | undefined;
+                            if (!id) return 'Créé par inconnu';
+                            const m = memberById.get(id);
+                            const name = m?.user?.displayName || m?.user?.appUserId || id;
+                            return `Créé par ${name}`;
+                          })()}
+                        </div>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!missionId}
-                      onClick={() => {
-                        if (!missionId) return;
-                        sessionStorage.setItem(
-                          'geogn.centerPoi',
-                          JSON.stringify({ missionId, lng: p.lng, lat: p.lat, zoom: 17 })
-                        );
-                        navigate(`/mission/${missionId}/map`);
-                      }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                      title="Voir sur la carte"
-                    >
-                      <MapIcon size={18} />
-                    </button>
+                    <div className="ml-2 flex flex-col items-end gap-1 self-start">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const q = encodeURIComponent(`${p.lat},${p.lng}`);
+                            const label = encodeURIComponent(p.title || 'POI');
+                            const waze = `https://waze.com/ul?ll=${p.lat}%2C${p.lng}&navigate=yes`;
+                            const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                            const apple = `http://maps.apple.com/?ll=${p.lat},${p.lng}&q=${label}`;
+                            const choice = window.prompt(
+                              'Naviguer avec:\n1 = Waze\n2 = Google Maps\n3 = Plans (Apple)',
+                              '1'
+                            );
+                            if (!choice) return;
+                            let url = '';
+                            if (choice === '1') url = waze;
+                            else if (choice === '2') url = gmaps;
+                            else if (choice === '3') url = apple;
+                            if (url) {
+                              window.open(url, '_blank');
+                            }
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                          title="Naviguer vers le point"
+                        >
+                          <Navigation2 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const q = encodeURIComponent(`${p.lat},${p.lng}`);
+                            const label = encodeURIComponent(p.title || 'POI');
+                            const waze = `https://waze.com/ul?ll=${p.lat}%2C${p.lng}&navigate=yes`;
+                            const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                            const apple = `http://maps.apple.com/?ll=${p.lat},${p.lng}&q=${label}`;
+                            const text = `Waze: ${waze}\nGoogle Maps: ${gmaps}\nPlans: ${apple}`;
+                            try {
+                              await navigator.clipboard.writeText(text);
+                              window.alert('Liens de navigation copiés dans le presse-papier');
+                            } catch {
+                              window.prompt('Copie ces liens de navigation :', text);
+                            }
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                          title="Partager le point"
+                        >
+                          <Share2 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!missionId}
+                          onClick={() => {
+                            if (!missionId) return;
+                            sessionStorage.setItem(
+                              'geogn.centerPoi',
+                              JSON.stringify({ missionId, lng: p.lng, lat: p.lat, zoom: 17 })
+                            );
+                            navigate(`/mission/${missionId}/map`);
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          title="Afficher sur la carte"
+                        >
+                          <MapIcon size={14} />
+                        </button>
+                      </div>
+                      {editingId !== p.id && canEdit ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={!missionId || busyId === p.id}
+                            onClick={async () => {
+                              if (!missionId) return;
+                              setEditingId(p.id);
+                              setEditError(null);
+                              setEditDraft({
+                                title: p.title,
+                                icon: p.icon,
+                                color: p.color,
+                                comment: p.comment,
+                              });
+                            }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            title="Éditer le POI"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!missionId || busyId === p.id}
+                            onClick={async () => {
+                              if (!missionId) return;
+                              const ok = window.confirm('Supprimer ce POI ?');
+                              if (!ok) return;
+                              setBusyId(p.id);
+                              try {
+                                await deletePoi(missionId, p.id);
+                                setPois((prev) => prev.filter((x) => x.id !== p.id));
+                              } finally {
+                                setBusyId(null);
+                              }
+                            }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                            title="Supprimer le POI"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </>
               )}
 
-              {editingId !== p.id && canEdit ? (
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    disabled={!missionId || busyId === p.id}
-                    onClick={async () => {
-                      if (!missionId) return;
-                      setEditingId(p.id);
-                      setEditError(null);
-                      setEditDraft({
-                        title: p.title,
-                        icon: p.icon,
-                        color: p.color,
-                        comment: p.comment,
-                      });
-                    }}
-                    className="h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Modifier
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!missionId || busyId === p.id}
-                    onClick={async () => {
-                      if (!missionId) return;
-                      const ok = window.confirm('Supprimer ce POI ?');
-                      if (!ok) return;
-                      setBusyId(p.id);
-                      try {
-                        await deletePoi(missionId, p.id);
-                        setPois((prev) => prev.filter((x) => x.id !== p.id));
-                      } finally {
-                        setBusyId(null);
-                      }
-                    }}
-                    className="h-10 rounded-xl border bg-white px-3 text-sm text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                  >
-                    Supprimer
-                  </button>
-                </div>
-              ) : null}
             </div>
           ))}
         </div>
