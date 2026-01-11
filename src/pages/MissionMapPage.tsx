@@ -108,7 +108,7 @@ export default function MissionMapPage() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('geogn:zone:draftCancel'));
                 }}
-                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-red-500/90 to-red-400/90 px-5 text-sm font-semibold text-white shadow-sm hover:from-red-500 hover:to-red-400"
+                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-red-400/90 to-red-500/90 px-5 text-sm font-semibold text-white shadow-sm hover:from-red-300/90 hover:to-red-500/90"
               >
                 Annuler
               </button>
@@ -118,7 +118,7 @@ export default function MissionMapPage() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('geogn:zone:draftValidate'));
                 }}
-                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-emerald-500/90 to-emerald-400/90 px-5 text-sm font-semibold text-white shadow-sm hover:from-emerald-500 hover:to-emerald-400 disabled:opacity-100 disabled:from-emerald-500/90 disabled:to-emerald-400/90"
+                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-emerald-400/90 to-emerald-500/90 px-5 text-sm font-semibold text-white shadow-sm hover:from-emerald-300/90 hover:to-emerald-500/90 disabled:opacity-100 disabled:from-emerald-400/90 disabled:to-emerald-500/90"
               >
                 Valider
               </button>
