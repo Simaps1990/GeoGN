@@ -1690,7 +1690,7 @@ export default function MapLibreMap() {
         type: 'fill',
         source: 'draft-zone',
         filter: ['==', ['get', 'kind'], 'fill'],
-        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0.18 },
+        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#2563eb'], 'fill-opacity': 0.18 },
       });
     }
     if (!map.getLayer('draft-zone-outline')) {
@@ -1699,7 +1699,7 @@ export default function MapLibreMap() {
         type: 'line',
         source: 'draft-zone',
         filter: ['any', ['==', ['get', 'kind'], 'fill'], ['==', ['get', 'kind'], 'line']],
-        paint: { 'line-color': ['coalesce', ['get', 'color'], '#22c55e'], 'line-width': 3, 'line-dasharray': [2, 1] },
+        paint: { 'line-color': ['coalesce', ['get', 'color'], '#2563eb'], 'line-width': 3, 'line-dasharray': [2, 1] },
       });
     }
     if (!map.getLayer('draft-zone-points')) {
@@ -1708,7 +1708,7 @@ export default function MapLibreMap() {
         type: 'circle',
         source: 'draft-zone',
         filter: ['==', ['get', 'kind'], 'point'],
-        paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#22c55e'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+        paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#2563eb'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
       });
     }
 
@@ -2323,7 +2323,7 @@ export default function MapLibreMap() {
         const center = draftLngLat;
         const edge = { lng, lat };
         const computed = haversineMeters(center, edge);
-        const clamped = Math.max(50, Math.min(1500, Math.round(computed)));
+        const clamped = Math.max(50, Math.round(computed));
         setDraftCircleRadius(clamped);
         setDraftCircleEdgeLngLat(edge);
         setCircleRadiusReady(true);
@@ -3619,24 +3619,24 @@ export default function MapLibreMap() {
           type="button"
           onClick={() => setScaleEnabled((v) => !v)}
           className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
-            scaleEnabled ? 'ring-1 ring-inset ring-green-500/25' : ''
+            scaleEnabled ? 'ring-1 ring-inset ring-blue-500/25' : ''
           }`}
           title="Afficher l'échelle"
         >
-          <Ruler className={scaleEnabled ? 'mx-auto text-green-600' : 'mx-auto text-gray-600'} size={20} />
+          <Ruler className={scaleEnabled ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
         </button>
 
         <button
           type="button"
           onClick={() => setLabelsEnabled((v) => !v)}
           className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
-            labelsEnabled ? 'ring-1 ring-inset ring-green-500/25' : ''
+            labelsEnabled ? 'ring-1 ring-inset ring-blue-500/25' : ''
           }`}
           title="Afficher les noms (POI + zones + utilisateurs)"
         >
           <Tag
             className={`mx-auto ${
-              labelsEnabled ? 'text-green-600' : 'text-gray-600'
+              labelsEnabled ? 'text-blue-600' : 'text-gray-600'
             }`}
             size={18}
           />
@@ -3659,13 +3659,13 @@ export default function MapLibreMap() {
                 setActiveTool('poi');
               }}
               className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
-                activeTool === 'poi' ? 'ring-1 ring-inset ring-green-500/25' : ''
+                activeTool === 'poi' ? 'ring-1 ring-inset ring-blue-500/25' : ''
               }`}
               title="Ajouter un POI"
             >
               <MapPin
                 className={
-                  activeTool === 'poi' ? 'mx-auto text-green-600' : 'mx-auto text-gray-600'
+                  activeTool === 'poi' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'
                 }
                 size={20}
               />
@@ -3692,7 +3692,7 @@ export default function MapLibreMap() {
                   }}
                   className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
                     zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                      ? 'ring-1 ring-inset ring-green-500/25'
+                      ? 'ring-1 ring-inset ring-blue-500/25'
                       : ''
                   }`}
                   title="Zones"
@@ -3700,7 +3700,7 @@ export default function MapLibreMap() {
                   <CircleDotDashed
                     className={
                       zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                        ? 'mx-auto text-green-600'
+                        ? 'mx-auto text-blue-600'
                         : 'mx-auto text-gray-600'
                     }
                     size={20}
@@ -3721,15 +3721,15 @@ export default function MapLibreMap() {
                         return;
                       }
                       cancelDraft();
-                      setDraftColor('#22c55e');
+                      setDraftColor('#2563eb');
                       setActiveTool('zone_circle');
                     }}
                     className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      activeTool === 'zone_circle' ? 'ring-green-500/25' : 'ring-black/10'
+                      activeTool === 'zone_circle' ? 'ring-blue-500/25' : 'ring-black/10'
                     }`}
                     title="Zone cercle"
                   >
-                    <CircleDot className={activeTool === 'zone_circle' ? 'text-green-600' : 'text-gray-600'} size={20} />
+                    <CircleDot className={activeTool === 'zone_circle' ? 'text-blue-600' : 'text-gray-600'} size={20} />
                   </button>
                   <button
                     type="button"
@@ -3740,15 +3740,15 @@ export default function MapLibreMap() {
                         return;
                       }
                       cancelDraft();
-                      setDraftColor('#22c55e');
+                      setDraftColor('#2563eb');
                       setActiveTool('zone_polygon');
                     }}
                     className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      activeTool === 'zone_polygon' ? 'ring-green-500/25' : 'ring-black/10'
+                      activeTool === 'zone_polygon' ? 'ring-blue-500/25' : 'ring-black/10'
                     }`}
                     title="Zone à la main"
                   >
-                    <Spline className={activeTool === 'zone_polygon' ? 'text-green-600' : 'text-gray-600'} size={20} />
+                    <Spline className={activeTool === 'zone_polygon' ? 'text-blue-600' : 'text-gray-600'} size={20} />
                   </button>
                 </div>
               </div>
@@ -3957,21 +3957,6 @@ export default function MapLibreMap() {
                   placeholder="Commentaire"
                   className="h-11 w-full rounded-2xl border px-3 text-sm"
                 />
-              ) : null}
-
-              {activeTool === 'zone_circle' ? (
-                <div className="rounded-2xl border p-3">
-                  <div className="text-xs font-semibold text-gray-700">Rayon: {draftCircleRadius} m</div>
-                  <input
-                    type="range"
-                    min={50}
-                    max={1500}
-                    step={25}
-                    value={draftCircleRadius}
-                    onChange={(e) => setDraftCircleRadius(Number(e.target.value))}
-                    className="mt-2 w-full"
-                  />
-                </div>
               ) : null}
 
               {activeTool !== 'poi' ? (
