@@ -368,7 +368,7 @@ export default function MapLibreMap() {
   }, [pois, selectedPoi]);
 
   const [labelsEnabled, setLabelsEnabled] = useState(false);
-  const [scaleEnabled, setScaleEnabled] = useState(true);
+  const [scaleEnabled, setScaleEnabled] = useState(false);
 
   const poiColorOptions = useMemo(
     () => [
@@ -2607,14 +2607,8 @@ export default function MapLibreMap() {
       try {
         (el as any).style.transform = 'scale(1.05)';
         (el as any).style.transformOrigin = 'center bottom';
-
-        const scaleEl = (el as any).querySelector?.('.maplibregl-ctrl-scale') as HTMLElement | null;
-        if (scaleEl) {
-          scaleEl.style.height = '16px';
-          scaleEl.style.lineHeight = '16px';
-          scaleEl.style.padding = '0 10px';
-          scaleEl.style.fontSize = '10px';
-        }
+        // Initialiser la visibilité de l'échelle en fonction de scaleEnabled au moment de la création
+        (el as HTMLElement).style.display = scaleEnabled ? '' : 'none';
       } catch {
         // ignore
       }
