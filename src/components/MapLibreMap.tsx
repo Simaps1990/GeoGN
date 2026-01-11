@@ -3539,8 +3539,14 @@ export default function MapLibreMap() {
           className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4"
           onClick={() => setNavPickerPoi(null)}
         >
-          <div className="rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3 p-3">
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 text-sm font-semibold text-gray-900">
+              Selectionnez votre moyen de navigation
+            </div>
+            <div className="flex items-center justify-center gap-4 p-4">
               <button
                 type="button"
                 onClick={() => {
@@ -3548,10 +3554,10 @@ export default function MapLibreMap() {
                   window.open(waze, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
                 title="Waze"
               >
-                <img src="/icon/waze.png" alt="Waze" className="h-8 w-8 object-contain" />
+                <img src="/icon/waze.png" alt="Waze" className="h-12 w-12 object-contain" />
               </button>
               <button
                 type="button"
@@ -3561,10 +3567,10 @@ export default function MapLibreMap() {
                   window.open(gmaps, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
                 title="Google Maps"
               >
-                <img src="/icon/maps.png" alt="Google Maps" className="h-8 w-8 object-contain" />
+                <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
               </button>
               <button
                 type="button"
@@ -3574,10 +3580,10 @@ export default function MapLibreMap() {
                   window.open(apple, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
                 title="Plans (Apple)"
               >
-                <img src="/icon/apple.png" alt="Plans (Apple)" className="h-8 w-8 object-contain" />
+                <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />
               </button>
             </div>
           </div>
