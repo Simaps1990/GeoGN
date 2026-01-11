@@ -19,7 +19,6 @@ import {
   PawPrint,
   Pencil,
   Radiation,
-  Share2,
   ShieldPlus,
   Siren,
   Skull,
@@ -39,6 +38,8 @@ export default function MissionPoisPage() {
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [navPickerPoi, setNavPickerPoi] = useState<ApiPoi | null>(null);
 
   const [members, setMembers] = useState<ApiMissionMember[]>([]);
 
@@ -71,6 +72,15 @@ export default function MissionPoisPage() {
     ],
     []
   );
+
+  useEffect(() => {
+    if (!navPickerPoi) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNavPickerPoi(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navPickerPoi]);
 
   const iconOptions = useMemo(
     () => [
@@ -326,49 +336,12 @@ export default function MissionPoisPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            const q = encodeURIComponent(`${p.lat},${p.lng}`);
-                            const label = encodeURIComponent(p.title || 'POI');
-                            const waze = `https://waze.com/ul?ll=${p.lat}%2C${p.lng}&navigate=yes`;
-                            const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
-                            const apple = `http://maps.apple.com/?ll=${p.lat},${p.lng}&q=${label}`;
-                            const choice = window.prompt(
-                              'Naviguer avec:\n1 = Waze\n2 = Google Maps\n3 = Plans (Apple)',
-                              '1'
-                            );
-                            if (!choice) return;
-                            let url = '';
-                            if (choice === '1') url = waze;
-                            else if (choice === '2') url = gmaps;
-                            else if (choice === '3') url = apple;
-                            if (url) {
-                              window.open(url, '_blank');
-                            }
+                            setNavPickerPoi(p);
                           }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
                           title="Naviguer vers le point"
                         >
                           <Navigation2 size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const q = encodeURIComponent(`${p.lat},${p.lng}`);
-                            const label = encodeURIComponent(p.title || 'POI');
-                            const waze = `https://waze.com/ul?ll=${p.lat}%2C${p.lng}&navigate=yes`;
-                            const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
-                            const apple = `http://maps.apple.com/?ll=${p.lat},${p.lng}&q=${label}`;
-                            const text = `Waze: ${waze}\nGoogle Maps: ${gmaps}\nPlans: ${apple}`;
-                            try {
-                              await navigator.clipboard.writeText(text);
-                              window.alert('Liens de navigation copiés dans le presse-papier');
-                            } catch {
-                              window.prompt('Copie ces liens de navigation :', text);
-                            }
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                          title="Partager le point"
-                        >
-                          <Share2 size={14} />
                         </button>
                         <button
                           type="button"
@@ -439,6 +412,59 @@ export default function MissionPoisPage() {
           ))}
         </div>
       )}
+
+      {navPickerPoi ? (
+        <div
+          className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setNavPickerPoi(null)}
+        >
+          <div
+            className="rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 p-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const waze = `https://waze.com/ul?ll=${navPickerPoi.lat}%2C${navPickerPoi.lng}&navigate=yes`;
+                  window.open(waze, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Waze"
+              >
+                <img src="/icon/waze.png" alt="Waze" className="h-8 w-8 object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const q = encodeURIComponent(`${navPickerPoi.lat},${navPickerPoi.lng}`);
+                  const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                  window.open(gmaps, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Google Maps"
+              >
+                <img src="/icon/maps.png" alt="Google Maps" className="h-8 w-8 object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const label = encodeURIComponent(navPickerPoi.title || 'POI');
+                  const apple = `http://maps.apple.com/?ll=${navPickerPoi.lat},${navPickerPoi.lng}&q=${label}`;
+                  window.open(apple, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Plans (Apple)"
+              >
+                <img src="/icon/apple.png" alt="Plans (Apple)" className="h-8 w-8 object-contain" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

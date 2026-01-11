@@ -8,7 +8,6 @@ import {
   Bomb,
   Car,
   Cctv,
-  Check,
   Church,
   CircleDot,
   CircleDotDashed,
@@ -36,12 +35,10 @@ import {
   Tag,
   Timer,
   Truck,
-  Undo2,
   UserRound,
   Warehouse,
   X,
   Zap,
-  Share2,
 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
@@ -320,8 +317,18 @@ export default function MapLibreMap() {
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
+  const [navPickerPoi, setNavPickerPoi] = useState<ApiPoi | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => {
+    if (!navPickerPoi) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNavPickerPoi(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navPickerPoi]);
 
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null);
 
@@ -3447,49 +3454,12 @@ export default function MapLibreMap() {
                 <button
                   type="button"
                   onClick={() => {
-                    const q = encodeURIComponent(`${selectedPoi.lat},${selectedPoi.lng}`);
-                    const label = encodeURIComponent(selectedPoi.title || 'POI');
-                    const waze = `https://waze.com/ul?ll=${selectedPoi.lat}%2C${selectedPoi.lng}&navigate=yes`;
-                    const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
-                    const apple = `http://maps.apple.com/?ll=${selectedPoi.lat},${selectedPoi.lng}&q=${label}`;
-                    const choice = window.prompt(
-                      'Naviguer avec:\n1 = Waze\n2 = Google Maps\n3 = Plans (Apple)',
-                      '1'
-                    );
-                    if (!choice) return;
-                    let url = '';
-                    if (choice === '1') url = waze;
-                    else if (choice === '2') url = gmaps;
-                    else if (choice === '3') url = apple;
-                    if (url) {
-                      window.open(url, '_blank');
-                    }
+                    setNavPickerPoi(selectedPoi);
                   }}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
                   title="Naviguer vers le point"
                 >
                   <Navigation2 size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const q = encodeURIComponent(`${selectedPoi.lat},${selectedPoi.lng}`);
-                    const label = encodeURIComponent(selectedPoi.title || 'POI');
-                    const waze = `https://waze.com/ul?ll=${selectedPoi.lat}%2C${selectedPoi.lng}&navigate=yes`;
-                    const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
-                    const apple = `http://maps.apple.com/?ll=${selectedPoi.lat},${selectedPoi.lng}&q=${label}`;
-                    const text = `Waze: ${waze}\nGoogle Maps: ${gmaps}\nPlans: ${apple}`;
-                    try {
-                      await navigator.clipboard.writeText(text);
-                      window.alert('Liens de navigation copiés dans le presse-papier');
-                    } catch {
-                      window.prompt('Copie ces liens de navigation :', text);
-                    }
-                  }}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                  title="Partager le point"
-                >
-                  <Share2 size={14} />
                 </button>
                 <button
                   type="button"
@@ -3563,6 +3533,56 @@ export default function MapLibreMap() {
           </div>
         </div>
       )}
+
+      {navPickerPoi ? (
+        <div
+          className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setNavPickerPoi(null)}
+        >
+          <div className="rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 p-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const waze = `https://waze.com/ul?ll=${navPickerPoi.lat}%2C${navPickerPoi.lng}&navigate=yes`;
+                  window.open(waze, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Waze"
+              >
+                <img src="/icon/waze.png" alt="Waze" className="h-8 w-8 object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const q = encodeURIComponent(`${navPickerPoi.lat},${navPickerPoi.lng}`);
+                  const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                  window.open(gmaps, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Google Maps"
+              >
+                <img src="/icon/maps.png" alt="Google Maps" className="h-8 w-8 object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const label = encodeURIComponent(navPickerPoi.title || 'POI');
+                  const apple = `http://maps.apple.com/?ll=${navPickerPoi.lat},${navPickerPoi.lng}&q=${label}`;
+                  window.open(apple, '_blank');
+                  setNavPickerPoi(null);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Plans (Apple)"
+              >
+                <img src="/icon/apple.png" alt="Plans (Apple)" className="h-8 w-8 object-contain" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-3 touch-none"
