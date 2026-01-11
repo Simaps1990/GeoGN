@@ -341,7 +341,7 @@ export default function MissionPoisPage() {
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
                           title="Naviguer vers le point"
                         >
-                          <Navigation2 size={14} />
+                          <Navigation2 size={16} />
                         </button>
                         <button
                           type="button"
@@ -357,7 +357,7 @@ export default function MissionPoisPage() {
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                           title="Afficher sur la carte"
                         >
-                          <MapIcon size={14} />
+                          <MapIcon size={16} />
                         </button>
                       </div>
                       {editingId !== p.id && canEdit ? (
@@ -379,7 +379,7 @@ export default function MissionPoisPage() {
                             className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                             title="Éditer le POI"
                           >
-                            <Pencil size={14} />
+                            <Pencil size={16} />
                           </button>
                           <button
                             type="button"
@@ -399,7 +399,7 @@ export default function MissionPoisPage() {
                             className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
                             title="Supprimer le POI"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       ) : null}
