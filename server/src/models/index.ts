@@ -8,3 +8,4 @@ export { ZoneModel } from './zone.js';
 export { PositionModel } from './position.js';
 export { TraceModel } from './trace.js';
 export { PoiModel } from './poi.js';
+export { PersonCaseModel } from './personCase.js';

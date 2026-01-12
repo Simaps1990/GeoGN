@@ -89,6 +89,38 @@ export type ApiMissionJoinRequest = {
   requestedBy: { id: string; appUserId: string; displayName: string } | null;
 };
 
+export type ApiPersonCase = {
+  id: string;
+  missionId: string;
+  createdBy: string;
+  lastKnown: {
+    type: 'address' | 'poi';
+    query: string;
+    poiId?: string;
+    lng?: number;
+    lat?: number;
+    when: string | null;
+  };
+  nextClue: {
+    type: 'address' | 'poi';
+    query: string;
+    poiId?: string;
+    lng?: number;
+    lat?: number;
+    when: string | null;
+  } | null;
+  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+  age: number | null;
+  sex: 'unknown' | 'female' | 'male';
+  healthStatus: 'stable' | 'fragile' | 'critique';
+  diseases: string[];
+  injuries: { id: string; locations: string[] }[];
+  diseasesFreeText: string;
+  injuriesFreeText: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type AuthResponse = {
   accessToken: string;
   refreshToken: string;
@@ -567,6 +599,52 @@ export async function listZones(missionId: string) {
     throw new Error(body?.error ?? 'LIST_ZONES_FAILED');
   }
   return (await res.json()) as ApiZone[];
+}
+
+export async function getPersonCase(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/person-case`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'GET_PERSON_CASE_FAILED');
+  }
+  return (await res.json()) as { case: ApiPersonCase | null };
+}
+
+export async function upsertPersonCase(
+  missionId: string,
+  input: {
+    lastKnown: { type: 'address' | 'poi'; query: string; poiId?: string; lng?: number; lat?: number; when?: string };
+    nextClue?: { type: 'address' | 'poi'; query: string; poiId?: string; lng?: number; lat?: number; when?: string };
+    mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+    age?: number;
+    sex: 'unknown' | 'female' | 'male';
+    healthStatus: 'stable' | 'fragile' | 'critique';
+    diseases?: string[];
+    injuries?: { id: string; locations?: string[] }[];
+    diseasesFreeText?: string;
+    injuriesFreeText?: string;
+  }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/person-case`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPSERT_PERSON_CASE_FAILED');
+  }
+  return (await res.json()) as { case: ApiPersonCase };
+}
+
+export async function deletePersonCase(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/person-case`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_PERSON_CASE_FAILED');
+  }
+  return (await res.json()) as { ok: true };
 }
 
 export async function deletePoi(missionId: string, poiId: string) {

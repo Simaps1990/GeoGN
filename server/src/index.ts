@@ -9,6 +9,7 @@ import { missionsRoutes } from './routes/missions.js';
 import { invitesRoutes } from './routes/invites.js';
 import { joinRequestsRoutes } from './routes/joinRequests.js';
 import { poisRoutes } from './routes/pois.js';
+import { personCasesRoutes } from './routes/personCases.js';
 import { zonesRoutes } from './routes/zones.js';
 import { setupSocket } from './socket.js';
 
@@ -28,6 +29,7 @@ await missionsRoutes(app);
 await invitesRoutes(app);
 await joinRequestsRoutes(app);
 await poisRoutes(app);
+await personCasesRoutes(app);
 await zonesRoutes(app);
 
 app.get('/health', async () => ({ ok: true }));

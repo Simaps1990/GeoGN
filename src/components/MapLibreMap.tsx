@@ -8,6 +8,8 @@ import {
   Bomb,
   Car,
   Cctv,
+  ChevronDown,
+  ChevronUp,
   Church,
   CircleDot,
   CircleDotDashed,
@@ -27,6 +29,7 @@ import {
   Pencil,
   Radiation,
   Ruler,
+  Settings,
   ShieldPlus,
   Trash2,
   Siren,
@@ -48,16 +51,20 @@ import {
   createPoi,
   createZone,
   deletePoi,
+  deletePersonCase,
   deleteZone,
+  getPersonCase,
   getMission,
   listPois,
   listMissionMembers,
   listZones,
+  upsertPersonCase,
   updatePoi,
   updateZone,
   updateMission,
   type ApiMission,
   type ApiPoi,
+  type ApiPersonCase,
   type ApiZone,
 } from '../lib/api';
 
@@ -84,6 +91,32 @@ function getRasterStyle(tiles: string[], attribution: string) {
   };
 
   return style;
+}
+
+function weatherStatusLabel(code: number | null | undefined) {
+  if (typeof code !== 'number') return 'Indisponible';
+  if (code === 0) return 'Ensoleillé';
+  if (code === 1) return 'Peu nuageux';
+  if (code === 2) return 'Nuageux';
+  if (code === 3) return 'Couvert';
+  if (code === 45 || code === 48) return 'Brouillard';
+  if ([51, 53, 55, 56, 57].includes(code)) return 'Bruine';
+  if ([61, 63, 65, 66, 67].includes(code)) return 'Pluie';
+  if ([71, 73, 75, 77].includes(code)) return 'Neige';
+  if ([80, 81, 82].includes(code)) return 'Averses';
+  if ([85, 86].includes(code)) return 'Averses de neige';
+  if (code === 95) return 'Orage';
+  if (code === 96 || code === 99) return 'Orage (grêle)';
+  return 'Météo variable';
+}
+
+function formatHoursToHM(hours: number) {
+  const totalMinutes = Math.max(0, Math.round(hours * 60));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h <= 0) return `${m} min`;
+  if (m <= 0) return `${h} h`;
+  return `${h} h ${m} min`;
 }
 
 function cloneStyle<T>(style: T): T {
@@ -181,13 +214,66 @@ function haversineMeters(a: { lng: number; lat: number }, b: { lng: number; lat:
   const R = 6371_000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
+  const dLon = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
   const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLng / 2);
+  const sinDLng = Math.sin(dLon / 2);
   const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function buildCorridorEllipseRing(
+  a: { lng: number; lat: number },
+  b: { lng: number; lat: number },
+  options?: { baseWidthKm?: number; dispersionScaleKm?: number }
+): number[][] | null {
+  const latMid = (a.lat + b.lat) / 2;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const kmPerDegLat = 111.32;
+  const kmPerDegLon = kmPerDegLat * Math.cos(toRad(latMid));
+  if (!Number.isFinite(kmPerDegLon) || kmPerDegLon <= 0) return null;
+
+  const ax = a.lng * kmPerDegLon;
+  const ay = a.lat * kmPerDegLat;
+  const bx = b.lng * kmPerDegLon;
+  const by = b.lat * kmPerDegLat;
+
+  const cx = (ax + bx) / 2;
+  const cy = (ay + by) / 2;
+
+  const dx = bx - ax;
+  const dy = by - ay;
+  const dKm = Math.sqrt(dx * dx + dy * dy);
+  if (!Number.isFinite(dKm) || dKm < 0.05) return null; // < 50 m → pas de couloir
+
+  const longitudinalFactor = 1.3;
+  const aKm = (dKm / 2) * longitudinalFactor;
+
+  const baseWidthKm = options?.baseWidthKm ?? 0.3;
+  const dispersionScaleKm = options?.dispersionScaleKm ?? 0.7;
+  const kDisp = 1; // placeholder simple pour v1
+  let bKm = Math.max(dKm * 0.2, baseWidthKm + (kDisp - 1) * dispersionScaleKm);
+  bKm = Math.max(0.2, Math.min(5, bKm));
+
+  const bearing = Math.atan2(dx, dy); // axe majeur orienté A→B
+  const cosB = Math.cos(bearing);
+  const sinB = Math.sin(bearing);
+
+  const steps = 64;
+  const ring: number[][] = [];
+  for (let i = 0; i < steps; i += 1) {
+    const t = (2 * Math.PI * i) / steps;
+    const xLocal = aKm * Math.cos(t);
+    const yLocal = bKm * Math.sin(t);
+    const x = cx + xLocal * cosB - yLocal * sinB;
+    const y = cy + xLocal * sinB + yLocal * cosB;
+    const lng = x / kmPerDegLon;
+    const lat = y / kmPerDegLat;
+    ring.push([lng, lat]);
+  }
+  if (ring.length) ring.push(ring[0]);
+  return ring;
 }
 
 function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
@@ -320,6 +406,8 @@ export default function MapLibreMap() {
   const [navPickerPoi, setNavPickerPoi] = useState<ApiPoi | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
+  // Compteur de version du style de carte pour forcer la resynchro des overlays (dont la zone d'estimation)
+  const [styleVersion, setStyleVersion] = useState(0);
 
   useEffect(() => {
     if (!navPickerPoi) return;
@@ -337,6 +425,7 @@ export default function MapLibreMap() {
   const [trackingEnabled] = useState(true);
 
   const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
 
   const [activeTool, setActiveTool] = useState<'none' | 'poi' | 'zone_circle' | 'zone_polygon'>('none');
   const [draftLngLat, setDraftLngLat] = useState<{ lng: number; lat: number } | null>(null);
@@ -369,6 +458,784 @@ export default function MapLibreMap() {
 
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [scaleEnabled, setScaleEnabled] = useState(false);
+
+  const [personPanelOpen, setPersonPanelOpen] = useState(false);
+  const [personPanelCollapsed, setPersonPanelCollapsed] = useState(false);
+  const [personLoading, setPersonLoading] = useState(false);
+  const [personError, setPersonError] = useState<string | null>(null);
+  const [personCase, setPersonCase] = useState<ApiPersonCase | null>(null);
+  const [personEdit, setPersonEdit] = useState(false);
+  const [hasPersonCase, setHasPersonCase] = useState<boolean | null>(null);
+  const [estimationNowMs, setEstimationNowMs] = useState<number>(() => Date.now());
+  const [personDraft, setPersonDraft] = useState<{
+    lastKnownQuery: string;
+    lastKnownType: 'address' | 'poi';
+    lastKnownPoiId?: string;
+    lastKnownLng?: number;
+    lastKnownLat?: number;
+    lastKnownWhen: string;
+    nextClueQuery: string;
+    nextClueType: 'address' | 'poi';
+    nextCluePoiId?: string;
+    nextClueLng?: number;
+    nextClueLat?: number;
+    nextClueWhen: string;
+    mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+    age: string;
+    sex: 'unknown' | 'female' | 'male';
+    healthStatus: 'stable' | 'fragile' | 'critique';
+    diseases: string[];
+    diseasesFreeText: string;
+    injuries: { id: string; locations: string[] }[];
+    injuriesFreeText: string;
+  }>({
+    lastKnownQuery: '',
+    lastKnownType: 'address',
+    lastKnownPoiId: undefined,
+    lastKnownLng: undefined,
+    lastKnownLat: undefined,
+    lastKnownWhen: '',
+    nextClueQuery: '',
+    nextClueType: 'address',
+    nextCluePoiId: undefined,
+    nextClueLng: undefined,
+    nextClueLat: undefined,
+    nextClueWhen: '',
+    mobility: 'none',
+    age: '',
+    sex: 'unknown',
+    healthStatus: 'stable',
+    diseases: [],
+    diseasesFreeText: '',
+    injuries: [],
+    injuriesFreeText: '',
+  });
+
+  const [diseasesOpen, setDiseasesOpen] = useState(false);
+  const [injuriesOpen, setInjuriesOpen] = useState(false);
+
+  const diseaseOptions = useMemo(
+    () => [
+      'diabete',
+      'cardiaque',
+      'asthme',
+      'epilepsie',
+      'alzheimer',
+      'parkinson',
+      'insuffisance_respiratoire',
+      'insuffisance_renale',
+      'grossesse',
+      'handicap_moteur',
+      'handicap_mental',
+      'depression',
+      'anxiete',
+      'addiction',
+      'traitement',
+    ],
+    []
+  );
+
+  const injuryOptions = useMemo(
+    () => [
+      'fracture',
+      'entorse',
+      'luxation',
+      'plaie',
+      'brulure',
+      'hematome',
+      'traumatisme_cranien',
+      'hypothermie',
+      'deshydratation',
+      'malaise',
+    ],
+    []
+  );
+
+  const bodyPartOptions = useMemo(
+    () => [
+      { id: 'head', label: 'Tête' },
+      { id: 'face', label: 'Visage' },
+      { id: 'neck', label: 'Cou' },
+      { id: 'chest', label: 'Thorax' },
+      { id: 'back', label: 'Dos' },
+      { id: 'abdomen', label: 'Abdomen' },
+      { id: 'pelvis', label: 'Bassin' },
+      { id: 'left_arm', label: 'Bras gauche' },
+      { id: 'right_arm', label: 'Bras droit' },
+      { id: 'left_hand', label: 'Main gauche' },
+      { id: 'right_hand', label: 'Main droite' },
+      { id: 'left_leg', label: 'Jambe gauche' },
+      { id: 'right_leg', label: 'Jambe droite' },
+      { id: 'left_foot', label: 'Pied gauche' },
+      { id: 'right_foot', label: 'Pied droit' },
+    ],
+    []
+  );
+
+  const [lastKnownSuggestionsOpen, setLastKnownSuggestionsOpen] = useState(false);
+  const [lastKnownAddressSuggestions, setLastKnownAddressSuggestions] = useState<
+    { label: string; lng: number; lat: number }[]
+  >([]);
+  const [nextClueSuggestionsOpen, setNextClueSuggestionsOpen] = useState(false);
+  const [nextClueAddressSuggestions, setNextClueAddressSuggestions] = useState<
+    { label: string; lng: number; lat: number }[]
+  >([]);
+
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [weather, setWeather] = useState<
+    | {
+        temperatureC: number | null;
+        windSpeedKmh: number | null;
+        precipitationMm: number | null;
+        weatherCode: number | null;
+        when: string;
+        source: string;
+      }
+    | null
+  >(null);
+  const [showEstimationHeatmap, setShowEstimationHeatmap] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem('showEstimationHeatmap');
+      if (raw === 'false') return false;
+      if (raw === 'true') return true;
+    } catch {
+      // ignore
+    }
+    return true;
+  });
+  const showEstimationHeatmapRef = useRef(showEstimationHeatmap);
+  const personPanelOpenRef = useRef(false);
+
+  useEffect(() => {
+    showEstimationHeatmapRef.current = showEstimationHeatmap;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('showEstimationHeatmap', showEstimationHeatmap ? 'true' : 'false');
+      } catch {
+        // ignore
+      }
+    }
+  }, [showEstimationHeatmap]);
+
+  useEffect(() => {
+    personPanelOpenRef.current = personPanelOpen;
+
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+    applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpen);
+  }, [personPanelOpen, showEstimationHeatmap, mapReady]);
+
+  const lastKnownPoiSuggestions = useMemo(() => {
+    const q = personDraft.lastKnownQuery.trim().toLowerCase();
+    if (!q) return [] as ApiPoi[];
+    return pois
+      .filter((p) => (p.title ?? '').toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [personDraft.lastKnownQuery, pois]);
+
+  const nextCluePoiSuggestions = useMemo(() => {
+    const q = personDraft.nextClueQuery.trim().toLowerCase();
+    if (!q) return [] as ApiPoi[];
+    return pois
+      .filter((p) => (p.title ?? '').toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [personDraft.nextClueQuery, pois]);
+
+  useEffect(() => {
+    const q = personDraft.lastKnownQuery.trim();
+    if (!lastKnownSuggestionsOpen) return;
+    if (!q) {
+      setLastKnownAddressSuggestions([]);
+      return;
+    }
+
+    // If POIs already match, we still allow address suggestions, but we can keep it lighter.
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      (async () => {
+        try {
+          const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=5`;
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const data = await res.json().catch(() => null);
+          if (cancelled) return;
+          const feats = Array.isArray(data?.features) ? data.features : [];
+          const next = feats
+            .map((f: any) => {
+              const label = f?.properties?.label;
+              const coords = f?.geometry?.coordinates;
+              const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
+              const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
+              if (!label || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+              return { label: String(label), lng, lat };
+            })
+            .filter(Boolean);
+          setLastKnownAddressSuggestions(next as any);
+        } catch {
+          if (!cancelled) setLastKnownAddressSuggestions([]);
+        }
+      })();
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [personDraft.lastKnownQuery, lastKnownSuggestionsOpen]);
+
+  useEffect(() => {
+    const q = personDraft.nextClueQuery.trim();
+    if (!nextClueSuggestionsOpen) return;
+    if (!q) {
+      setNextClueAddressSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      (async () => {
+        try {
+          const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=5`;
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const data = await res.json().catch(() => null);
+          if (cancelled) return;
+          const feats = Array.isArray(data?.features) ? data.features : [];
+          const next = feats
+            .map((f: any) => {
+              const label = f?.properties?.label;
+              const coords = f?.geometry?.coordinates;
+              const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
+              const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
+              if (!label || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+              return { label: String(label), lng, lat };
+            })
+            .filter(Boolean);
+          setNextClueAddressSuggestions(next as any);
+        } catch {
+          if (!cancelled) setNextClueAddressSuggestions([]);
+        }
+      })();
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [personDraft.nextClueQuery, nextClueSuggestionsOpen]);
+
+  useEffect(() => {
+    if (!personPanelOpen) return;
+    if (!personCase) {
+      setWeather(null);
+      setWeatherError(null);
+      setWeatherLoading(false);
+      return;
+    }
+
+    const lng = typeof personCase.lastKnown.lng === 'number' ? personCase.lastKnown.lng : null;
+    const lat = typeof personCase.lastKnown.lat === 'number' ? personCase.lastKnown.lat : null;
+    if (lng === null || lat === null) {
+      setWeather(null);
+      return;
+    }
+
+    let cancelled = false;
+    setWeatherLoading(true);
+    setWeatherError(null);
+    (async () => {
+      try {
+        const url =
+          `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(String(lat))}` +
+          `&longitude=${encodeURIComponent(String(lng))}` +
+          `&current=temperature_2m,precipitation,weather_code,wind_speed_10m`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('METEO_FAILED');
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        const cur = data?.current;
+        setWeather({
+          temperatureC: typeof cur?.temperature_2m === 'number' ? cur.temperature_2m : null,
+          windSpeedKmh: typeof cur?.wind_speed_10m === 'number' ? cur.wind_speed_10m : null,
+          precipitationMm: typeof cur?.precipitation === 'number' ? cur.precipitation : null,
+          weatherCode: typeof cur?.weather_code === 'number' ? cur.weather_code : null,
+          when: typeof cur?.time === 'string' ? cur.time : new Date().toISOString(),
+          source: 'open-meteo',
+        });
+      } catch (e: any) {
+        if (cancelled) return;
+        setWeather(null);
+        setWeatherError(e?.message ?? 'METEO_FAILED');
+      } finally {
+        if (!cancelled) setWeatherLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [personPanelOpen, personCase?.lastKnown?.lng, personCase?.lastKnown?.lat, personCase?.lastKnown?.when]);
+
+  useEffect(() => {
+    if (!personPanelOpen) return;
+    // Force a recalculation on open, then every 10 seconds while open.
+    setEstimationNowMs(Date.now());
+    const t = window.setInterval(() => {
+      setEstimationNowMs(Date.now());
+    }, 10_000);
+    return () => window.clearInterval(t);
+  }, [personPanelOpen]);
+
+  const estimation = useMemo(() => {
+    if (!personCase) return null;
+
+    const now = estimationNowMs;
+    const whenMs = personCase.lastKnown.when ? new Date(personCase.lastKnown.when).getTime() : NaN;
+    const hoursSince = Number.isFinite(whenMs) ? Math.max(0, (now - whenMs) / 36e5) : null;
+
+    const mobilityBaseKmh = (() => {
+      switch (personCase.mobility) {
+        case 'car':
+          return 45;
+        case 'motorcycle':
+          return 35;
+        case 'scooter':
+          return 25;
+        case 'bike':
+          return 15;
+        default:
+          return 4.5;
+      }
+    })();
+
+    const ageFactor = (() => {
+      const age = typeof personCase.age === 'number' ? personCase.age : null;
+      if (age === null) return 1;
+      const table = [
+        { min: 0, max: 5, factor: 0.45 },
+        { min: 6, max: 12, factor: 0.7 },
+        { min: 13, max: 15, factor: 0.85 },
+        { min: 16, max: 19, factor: 0.95 },
+        { min: 20, max: 39, factor: 1 },
+        { min: 40, max: 49, factor: 0.98 },
+        { min: 50, max: 59, factor: 0.92 },
+        { min: 60, max: 69, factor: 0.85 },
+        { min: 70, max: 79, factor: 0.78 },
+        { min: 80, max: 89, factor: 0.68 },
+        { min: 90, max: 120, factor: 0.55 },
+      ];
+      const found = table.find((row) => age >= row.min && age <= row.max);
+      return found ? found.factor : 1;
+    })();
+
+    const injuryFactor = (() => {
+      const ids = Array.isArray(personCase.injuries) ? personCase.injuries.map((x) => x.id) : [];
+      if (!ids.length) return 1;
+
+      const map: Record<string, number> = {
+        fracture: 0.4, // moderate
+        entorse: 0.65,
+        luxation: 0.55,
+        plaie: 0.75,
+        brulure: 0.7,
+        hematome: 0.85,
+        traumatisme_cranien: 0.55,
+        hypothermie: 0.5,
+        dehydration: 0.6,
+        malaise: 0.5,
+      };
+
+      const factors = ids
+        .map((id) => map[id])
+        .filter((v): v is number => typeof v === 'number');
+      if (!factors.length) return 1;
+
+      const minF = Math.min(...factors);
+      const n = factors.length;
+      const decayPerExtra = 0.95;
+      const combined = minF * Math.pow(decayPerExtra, n - 1);
+      return Math.max(0.2, Math.min(1, combined));
+    })();
+
+    const diseaseFactor = (() => {
+      const ids = Array.isArray(personCase.diseases) ? personCase.diseases : [];
+      if (!ids.length) return 1;
+
+      const map: Record<string, number> = {
+        cardiaque: 0.75,
+        insuffisance_respiratoire: 0.75,
+        asthme: 0.75,
+        parkinson: 0.65,
+        handicap_moteur: 0.65,
+        diabete: 0.8,
+        insuffisance_renale: 0.8,
+        epilepsie: 0.8,
+        grossesse: 0.75,
+        alzheimer: 1,
+        handicap_mental: 1,
+        depression: 1,
+        anxiete: 1,
+        addiction: 1,
+      };
+
+      const factors = ids
+        .map((id) => map[id])
+        .filter((v): v is number => typeof v === 'number');
+      if (!factors.length) return 1;
+
+      const minF = Math.min(...factors);
+      const n = factors.length;
+      const decayPerExtra = 0.97;
+      const combined = minF * Math.pow(decayPerExtra, n - 1);
+      return Math.max(0.35, Math.min(1, combined));
+    })();
+
+    const when = personCase.lastKnown.when ? new Date(personCase.lastKnown.when) : null;
+    const localHour = when ? when.getHours() : null;
+    const month = when ? when.getMonth() : null; // 0 = jan, ... 11 = dec
+    const isNight = (() => {
+      if (localHour === null || month === null) return false;
+      // hiver (nov–fév) : nuit [18–7]
+      if (month === 10 || month === 11 || month === 0 || month === 1) {
+        return localHour >= 18 || localHour < 7;
+      }
+      // été (mai–août) : nuit [22–6]
+      if (month === 4 || month === 5 || month === 6 || month === 7) {
+        return localHour >= 22 || localHour < 6;
+      }
+      // intersaison : nuit [21–6]
+      return localHour >= 21 || localHour < 6;
+    })();
+
+    const locomotorInjuryPresent = Array.isArray(personCase.injuries)
+      ? personCase.injuries.some((x) => ['fracture', 'entorse', 'luxation'].includes(x.id))
+      : false;
+
+    const hasDehydrationInjury = Array.isArray(personCase.injuries)
+      ? personCase.injuries.some((x) => x.id === 'dehydration')
+      : false;
+
+    const weatherFactor = (() => {
+      if (!weather) return 1;
+      const t = weather.temperatureC;
+      const w = weather.windSpeedKmh;
+      const r = weather.precipitationMm;
+
+      if (typeof t !== 'number') return 1;
+
+      if (t <= 10) {
+        const rain = typeof r === 'number' && r > 0;
+        const windy = typeof w === 'number' && w >= 25;
+        if (!rain && !windy) return 1; // dry_low_wind
+        if ((rain && !windy) || (!rain && windy)) return 0.9; // rain_or_moderate_wind
+        if (rain && windy && !isNight) return 0.75; // rain_and_wind
+        if (rain && windy && isNight) return 0.6; // rain_and_wind_and_night
+        return 0.9;
+      }
+
+      if (t >= 26) {
+        if (t < 32) return 0.9; // hot_and_sunny
+        if (t >= 32 && hasDehydrationInjury) return 0.6; // very_hot_and_dehydration
+        return 0.75; // very_hot_and_exertion
+      }
+
+      return 1;
+    })();
+
+    const nightFactor = (() => {
+      if (!isNight) return 1;
+      const r = weather?.precipitationMm;
+      let f = typeof r === 'number' && r > 0 ? 0.75 : 0.85;
+      if (locomotorInjuryPresent) f *= 0.9;
+      return f;
+    })();
+
+    const terrainFactor = 1; // phase 1: urban_flat
+
+    const gravityFactor = (() => {
+      switch (personCase.healthStatus) {
+        case 'critique':
+          return 0.7;
+        case 'fragile':
+          return 0.85;
+        default:
+          return 1;
+      }
+    })();
+
+    const rawKmh =
+      mobilityBaseKmh *
+      ageFactor *
+      injuryFactor *
+      diseaseFactor *
+      weatherFactor *
+      nightFactor *
+      terrainFactor *
+      gravityFactor;
+
+    const clampedKmh = (() => {
+      const v = rawKmh;
+      if (personCase.mobility === 'bike') {
+        return Math.max(2, Math.min(25, v));
+      }
+      if (personCase.mobility === 'car' || personCase.mobility === 'motorcycle' || personCase.mobility === 'scooter') {
+        return Math.max(15, Math.min(70, v));
+      }
+      return Math.max(0.3, Math.min(6.5, v));
+    })();
+
+    const effectiveHours = (() => {
+      if (hoursSince === null) return 0; // heure manquante → pas de distance défendable
+      const t = hoursSince;
+      const clamped = Math.max(0.25, Math.min(72, t));
+      return clamped;
+    })();
+
+    const d50KmRaw = clampedKmh * effectiveHours;
+    const maxPossible = clampedKmh * effectiveHours;
+    const d50Km = effectiveHours === 0 ? 0 : Math.max(0, Math.min(maxPossible, d50KmRaw));
+
+    let kDisp = 2.2;
+    const timeDispBoost = (() => {
+      if (hoursSince === null) return 0;
+      const h = Math.max(0, Math.min(24, hoursSince));
+      // Increases dispersion with time, fast early then saturates.
+      return Math.min(1.4, Math.log1p(h) / 1.2);
+    })();
+    kDisp += timeDispBoost;
+    const dis = Array.isArray(personCase.diseases) ? personCase.diseases : [];
+    const hasAlzheimerOrMental = dis.includes('alzheimer') || dis.includes('handicap_mental');
+    if (hasAlzheimerOrMental) kDisp += 0.3;
+    if (isNight) kDisp += 0.1;
+    const injIds = Array.isArray(personCase.injuries) ? personCase.injuries.map((x) => x.id) : [];
+    const hasCollapseRisk = injIds.includes('malaise') || injIds.includes('traumatisme_cranien');
+    if (hasCollapseRisk) kDisp -= 0.15;
+    kDisp = Math.max(1.6, Math.min(4.2, kDisp));
+
+    const probableKm = d50Km;
+    const maxKm = d50Km * kDisp;
+
+    const risk = (() => {
+      let s = 0;
+      if (personCase.healthStatus === 'fragile') s += 1;
+      if (personCase.healthStatus === 'critique') s += 2;
+      if (injuryFactor <= 0.55) s += 2;
+      if (diseaseFactor <= 0.75) s += 1;
+      const t = weather?.temperatureC;
+      if (typeof t === 'number' && t <= 5) s += 1;
+      const r = weather?.precipitationMm;
+      if (typeof r === 'number' && r >= 2) s += 1;
+      return s;
+    })();
+
+    const needs: string[] = [];
+    if (weather && typeof weather.temperatureC === 'number' && weather.temperatureC <= 5) needs.push('Se protéger du froid (abri, vêtements secs)');
+    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) needs.push('Trouver un abri / se mettre au sec');
+    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'dehydration')) needs.push('Hydratation urgente');
+    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'hypothermie')) needs.push('Réchauffement progressif + abri');
+    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'fracture')) needs.push('Limiter les déplacements (douleur/immobilisation)');
+    if (Array.isArray(personCase.diseases) && personCase.diseases.includes('diabete')) needs.push('Sucre/prise alimentaire régulière');
+    if (Array.isArray(personCase.diseases) && personCase.diseases.includes('asthme')) needs.push('Éviter effort + air froid/humide');
+
+    const likelyPlaces: string[] = [];
+    likelyPlaces.push('Abris proches (bâtiments, hangars, porches, arrêts)');
+    if (risk >= 3) likelyPlaces.push('Points d’aide (pharmacie, médecin, pompiers, commerces)');
+    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) likelyPlaces.push('Zones couvertes (centres commerciaux, parkings couverts)');
+    likelyPlaces.push('Points d’eau / commerces (si déshydratation / chaleur)');
+
+    const reasoning: string[] = [];
+    reasoning.push(
+      `Mobilité: ${personCase.mobility} (base ~${mobilityBaseKmh.toFixed(0)} km/h) x âge ${(ageFactor * 100).toFixed(0)}% x blessures ${(injuryFactor * 100).toFixed(0)}% x pathologies ${(diseaseFactor * 100).toFixed(0)}% x météo+nuit ${(weatherFactor * nightFactor * 100).toFixed(0)}% x gravité ${(gravityFactor * 100).toFixed(0)}% → ~${clampedKmh.toFixed(1)} km/h.`
+    );
+    reasoning.push(
+      `Temps depuis le dernier indice: ${hoursSince === null ? 'inconnu (heure manquante : distance non fiable)' : `${hoursSince.toFixed(1)} h`} → temps de déplacement effectif estimé ~${effectiveHours.toFixed(1)} h (pauses + fatigue).`
+    );
+    const hasSecondClue =
+      typeof personDraft.nextClueLng === 'number' && typeof personDraft.nextClueLat === 'number';
+    if (hasSecondClue) {
+      reasoning.push(
+        "Un second indice permet de restreindre la zone probable dans un couloir de déplacement entre les deux points."
+      );
+    }
+    if (personCase.mobility === 'car' || personCase.mobility === 'motorcycle' || personCase.mobility === 'scooter') {
+      reasoning.push(
+        "Attention: mode motorisé sans routage (OSRM / GraphHopper) – distance estimée très grossière à vol d'oiseau."
+      );
+    }
+    if (weather && typeof weather.temperatureC === 'number') {
+      reasoning.push(
+        `Météo: ${weather.temperatureC.toFixed(1)}°C, vent ${weather.windSpeedKmh ?? '—'} km/h, pluie ${weather.precipitationMm ?? '—'} mm.`
+      );
+    }
+
+    const effectiveKmh = clampedKmh;
+
+    return {
+      hoursSince,
+      effectiveKmh,
+      probableKm,
+      maxKm,
+      risk,
+      needs,
+      likelyPlaces,
+      reasoning,
+    };
+  }, [
+    personCase,
+    weather,
+    estimationNowMs,
+    personDraft.nextClueLng,
+    personDraft.nextClueLat,
+    personDraft.nextClueWhen,
+  ]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const src = map.getSource('person-estimation') as GeoJSONSource | undefined;
+    if (!src) return;
+
+    if (!personCase || !estimation) {
+      src.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    const lng = typeof personCase.lastKnown.lng === 'number' ? personCase.lastKnown.lng : null;
+    const lat = typeof personCase.lastKnown.lat === 'number' ? personCase.lastKnown.lat : null;
+    if (lng === null || lat === null) {
+      src.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    const earthRadiusKm = 6371;
+    const centerLatRad = (lat * Math.PI) / 180;
+    const centerLonRad = (lng * Math.PI) / 180;
+
+    function offsetPoint(distanceKm: number, bearingDeg: number): [number, number] {
+      const dByR = distanceKm / earthRadiusKm;
+      const bearing = (bearingDeg * Math.PI) / 180;
+      const lat2 =
+        Math.asin(
+          Math.sin(centerLatRad) * Math.cos(dByR) +
+            Math.cos(centerLatRad) * Math.sin(dByR) * Math.cos(bearing)
+        );
+      const lon1 = centerLonRad;
+      const lon2 =
+        lon1 +
+        Math.atan2(
+          Math.sin(bearing) * Math.sin(dByR) * Math.cos(centerLatRad),
+          Math.cos(dByR) - Math.sin(centerLatRad) * Math.sin(lat2)
+        );
+      return [(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+    }
+
+    function buildCircle(distanceKm: number, steps = 180): [number, number][] {
+      const coords: [number, number][] = [];
+      for (let i = 0; i < steps; i += 1) {
+        const bearing = (360 / steps) * i;
+        coords.push(offsetPoint(distanceKm, bearing));
+      }
+      // fermer le polygone
+      if (coords.length) coords.push(coords[0]);
+      return coords;
+    }
+
+    const inner = Math.max(0, estimation.probableKm || 0);
+    const outer = Math.max(inner, estimation.maxKm || 0);
+
+    const features: any[] = [];
+
+    if (outer > 0) {
+      const outerRing = buildCircle(outer);
+
+      if (inner > 0) {
+        const innerRing = buildCircle(inner);
+
+        // Disque intérieur plein (zone probable) : opacité fixe 50%
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'inner', alpha: 0.5, t: 0 },
+          geometry: { type: 'Polygon', coordinates: [innerRing] },
+        });
+
+        // Anneaux extérieurs entre inner et outer avec alpha décroissant de ~0.5 vers ~0.1
+        const bands = 8;
+        for (let i = 0; i < bands; i += 1) {
+          const t0 = i / bands;
+          const t1 = (i + 1) / bands;
+          const r0 = inner + (outer - inner) * t0;
+          const r1 = inner + (outer - inner) * t1;
+          const ringInner = buildCircle(r0);
+          const ringOuter = buildCircle(r1);
+
+          // tFrac mesure la position relative entre inner (0) et outer (1)
+          const tFrac = (i + 1) / bands;
+          // alpha diminue progressivement de 0.5 (au contact de inner) vers 0.1 à l'extrémité
+          const alpha = 0.5 - (0.5 - 0.1) * tFrac;
+
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'band', alpha, t: tFrac },
+            geometry: { type: 'Polygon', coordinates: [ringOuter, ringInner] },
+          });
+        }
+      } else {
+        // Pas de rayon probable défini: un seul disque jusqu'au max avec alpha 50% au centre
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'inner', alpha: 0.5, t: 0 },
+          geometry: { type: 'Polygon', coordinates: [outerRing] },
+        });
+      }
+    }
+
+    src.setData({ type: 'FeatureCollection', features });
+  }, [mapReady, personCase, estimation, styleVersion]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const src = map.getSource('person-estimation-corridor') as GeoJSONSource | undefined;
+    if (!src) return;
+
+    const last = personCase?.lastKnown;
+    const aLng = typeof last?.lng === 'number' ? last!.lng : null;
+    const aLat = typeof last?.lat === 'number' ? last!.lat : null;
+    const bLng = typeof personDraft.nextClueLng === 'number' ? personDraft.nextClueLng : null;
+    const bLat = typeof personDraft.nextClueLat === 'number' ? personDraft.nextClueLat : null;
+
+    if (aLng === null || aLat === null || bLng === null || bLat === null) {
+      src.setData({ type: 'FeatureCollection', features: [] } as any);
+      return;
+    }
+
+    const ring = buildCorridorEllipseRing(
+      { lng: aLng, lat: aLat },
+      { lng: bLng, lat: bLat },
+      { baseWidthKm: 0.3, dispersionScaleKm: 0.7 }
+    );
+    if (!ring) {
+      src.setData({ type: 'FeatureCollection', features: [] } as any);
+      return;
+    }
+
+    src.setData({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [ring] },
+          properties: {},
+        },
+      ],
+    } as any);
+  }, [mapReady, personCase?.lastKnown?.lng, personCase?.lastKnown?.lat, personDraft.nextClueLng, personDraft.nextClueLat]);
 
   const poiColorOptions = useMemo(
     () => [
@@ -425,13 +1292,146 @@ export default function MapLibreMap() {
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
 
+  const [mission, setMission] = useState<ApiMission | null>(null);
+
+  // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
+  // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
+  const isAdmin = !!mission && mission.membership?.role === 'admin';
+  const canEdit = isAdmin;
+  const canOpenPersonPanel = isAdmin || hasPersonCase === true;
+
+  const mobilityLabel = (m: ApiPersonCase['mobility']) => {
+    switch (m) {
+      case 'none':
+        return 'À pied';
+      case 'bike':
+        return 'Vélo';
+      case 'scooter':
+        return 'Trottinette';
+      case 'motorcycle':
+        return 'Moto';
+      case 'car':
+        return 'Voiture';
+      default:
+        return String(m);
+    }
+  };
+
+  // Précharger l'existence d'une fiche personne pour pouvoir masquer l'icône aux non-admin
+  useEffect(() => {
+    if (!selectedMissionId) {
+      setHasPersonCase(null);
+      return;
+    }
+    if (!mission) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getPersonCase(selectedMissionId);
+        if (cancelled) return;
+        setHasPersonCase(!!res.case);
+      } catch {
+        if (cancelled) return;
+        setHasPersonCase(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMissionId, mission?.id]);
+
+  useEffect(() => {
+    if (!personPanelOpen) return;
+    if (!selectedMissionId) return;
+    if (!mission) return;
+
+    let cancelled = false;
+    setPersonLoading(true);
+    setPersonError(null);
+    (async () => {
+      try {
+        const res = await getPersonCase(selectedMissionId);
+        if (cancelled) return;
+        const c = res.case;
+        setPersonCase(c);
+        setHasPersonCase(!!c);
+        if (!c) {
+          // Pas encore de fiche : les éditeurs peuvent en créer, les visualisateurs restent en lecture seule.
+          if (canEdit) {
+            setPersonEdit(true);
+            setPersonDraft({
+              lastKnownQuery: '',
+              lastKnownType: 'address',
+              lastKnownPoiId: undefined,
+              lastKnownLng: undefined,
+              lastKnownLat: undefined,
+              lastKnownWhen: '',
+              nextClueQuery: '',
+              nextClueType: 'address',
+              nextCluePoiId: undefined,
+              nextClueLng: undefined,
+              nextClueLat: undefined,
+              nextClueWhen: '',
+              mobility: 'none',
+              age: '',
+              sex: 'unknown',
+              healthStatus: 'stable',
+              diseases: [],
+              diseasesFreeText: '',
+              injuries: [],
+              injuriesFreeText: '',
+            });
+          } else {
+            setPersonEdit(false);
+          }
+          return;
+        }
+        setPersonEdit(false);
+        setPersonDraft({
+          lastKnownQuery: c.lastKnown.query,
+          lastKnownType: c.lastKnown.type,
+          lastKnownPoiId: c.lastKnown.poiId,
+          lastKnownLng: typeof c.lastKnown.lng === 'number' ? c.lastKnown.lng : undefined,
+          lastKnownLat: typeof c.lastKnown.lat === 'number' ? c.lastKnown.lat : undefined,
+          lastKnownWhen: c.lastKnown.when ? c.lastKnown.when.slice(0, 16) : '',
+          nextClueQuery: c.nextClue?.query ?? '',
+          nextClueType: c.nextClue?.type ?? 'address',
+          nextCluePoiId: c.nextClue?.poiId,
+          nextClueLng: typeof c.nextClue?.lng === 'number' ? c.nextClue!.lng : undefined,
+          nextClueLat: typeof c.nextClue?.lat === 'number' ? c.nextClue!.lat : undefined,
+          nextClueWhen: c.nextClue?.when ? c.nextClue.when.slice(0, 16) : '',
+          mobility: c.mobility,
+          age: c.age === null || typeof c.age !== 'number' ? '' : String(c.age),
+          sex: c.sex,
+          healthStatus: c.healthStatus,
+          diseases: Array.isArray(c.diseases) ? c.diseases : [],
+          diseasesFreeText: c.diseasesFreeText ?? '',
+          injuries: Array.isArray(c.injuries)
+            ? c.injuries.map((x) => ({ id: x.id, locations: Array.isArray(x.locations) ? x.locations : [] }))
+            : [],
+          injuriesFreeText: c.injuriesFreeText ?? '',
+        });
+      } catch (e: any) {
+        if (cancelled) return;
+        setPersonError(e?.message ?? 'Erreur');
+        if (canEdit) setPersonEdit(true);
+      } finally {
+        if (!cancelled) setPersonLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [personPanelOpen, selectedMissionId, mission, canEdit]);
+
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
   const tracesLoadedRef = useRef(false);
   const autoCenterMissionIdRef = useRef<string | null>(null);
   const autoCenterDoneRef = useRef(false);
-
-  const [mission, setMission] = useState<ApiMission | null>(null);
 
   const [timerModalOpen, setTimerModalOpen] = useState(false);
   const [timerSecondsInput, setTimerSecondsInput] = useState('');
@@ -480,11 +1480,6 @@ export default function MapLibreMap() {
     const approxPoints = Math.ceil(traceRetentionMs / 1000);
     return Math.max(2000, approxPoints + 200);
   }, [traceRetentionMs]);
-
-  // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
-  // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
-  const canEdit = !!mission && mission.membership?.role !== 'viewer';
-  const isAdmin = !!mission && mission.membership?.role === 'admin';
 
   const getPendingActionsKey = (missionId: string) => `geogn.pendingActions.${missionId}`;
 
@@ -1359,6 +2354,30 @@ export default function MapLibreMap() {
     map.easeTo({ bearing: 0, pitch: 0 });
   }
 
+  let pendingHeatmapUpdate = false;
+  function applyHeatmapVisibility(map: MapLibreMapInstance, visible: boolean) {
+    if (pendingHeatmapUpdate) return;
+    pendingHeatmapUpdate = true;
+    requestAnimationFrame(() => {
+      pendingHeatmapUpdate = false;
+      const layerIds = [
+        'person-estimation-heatmap',
+        'person-estimation-outer-fill',
+        'person-estimation-inner-fill',
+      ];
+      const visibility = visible ? 'visible' : 'none';
+      for (const id of layerIds) {
+        try {
+          const layer = map.getLayer(id as any);
+          if (!layer) continue;
+          map.setLayoutProperty(id, 'visibility', visibility as any);
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+
   function enforceLayerOrder(map: MapLibreMapInstance) {
     const safeMoveToTop = (id: string) => {
       if (!map.getLayer(id)) return;
@@ -1382,6 +2401,10 @@ export default function MapLibreMap() {
     safeMoveToTop('others-labels');
     safeMoveToTop('me-dot');
     safeMoveToTop('zones-labels');
+    safeMoveToTop('person-estimation-outer-fill');
+    safeMoveToTop('person-estimation-inner-fill');
+    safeMoveToTop('person-estimation-corridor-outline');
+    safeMoveToTop('person-estimation-corridor-fill');
   }
 
   function ensureOverlays(map: MapLibreMapInstance) {
@@ -1668,6 +2691,18 @@ export default function MapLibreMap() {
     if (!map.getSource('draft-zone')) {
       map.addSource('draft-zone', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
+    if (!map.getSource('person-estimation')) {
+      map.addSource('person-estimation', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('person-estimation-corridor')) {
+      map.addSource('person-estimation-corridor', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!map.getSource('person-estimation')) {
+      map.addSource('person-estimation', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
     if (!map.getSource('draft-poi')) {
       map.addSource('draft-poi', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
@@ -1709,6 +2744,82 @@ export default function MapLibreMap() {
         source: 'draft-zone',
         filter: ['==', ['get', 'kind'], 'point'],
         paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'color'], '#2563eb'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+      });
+    }
+
+    if (!map.getLayer('person-estimation-heatmap')) {
+      map.addLayer({
+        id: 'person-estimation-heatmap',
+        type: 'heatmap',
+        source: 'person-estimation',
+        paint: {
+          // Heatmap conservée pour l'avenir mais n'est plus la visualisation principale.
+          'heatmap-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            10,
+            18,
+            12,
+            28,
+            14,
+            40,
+            16,
+            60,
+          ],
+          'heatmap-weight': ['coalesce', ['get', 'weight'], 0.0],
+          'heatmap-intensity': 1.25,
+          'heatmap-opacity': 0.0,
+          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 1, 'rgba(0,0,0,0)'],
+        },
+      });
+    }
+
+    // Zone d'estimation en dégradé radial : une seule couche de remplissage, alpha + couleur portés par chaque feature
+    if (!map.getLayer('person-estimation-inner-fill')) {
+      map.addLayer({
+        id: 'person-estimation-inner-fill',
+        type: 'fill',
+        source: 'person-estimation',
+        paint: {
+          // Couleur en dégradé radial: rouge (centre) -> orange -> jaune vers l'extérieur
+          'fill-color': [
+            'interpolate',
+            ['linear'],
+            ['coalesce', ['get', 't'], 0],
+            0.0,
+            '#dc2626', // rouge
+            0.5,
+            '#f97316', // orange
+            1.0,
+            '#eab308', // jaune
+          ],
+          'fill-opacity': ['coalesce', ['get', 'alpha'], 0.0],
+        },
+      });
+    }
+
+    if (!map.getLayer('person-estimation-corridor-fill')) {
+      map.addLayer({
+        id: 'person-estimation-corridor-fill',
+        type: 'fill',
+        source: 'person-estimation-corridor',
+        paint: {
+          'fill-color': '#3b82f6',
+          'fill-opacity': 0.18,
+        },
+      });
+    }
+    if (!map.getLayer('person-estimation-corridor-outline')) {
+      map.addLayer({
+        id: 'person-estimation-corridor-outline',
+        type: 'line',
+        source: 'person-estimation-corridor',
+        paint: {
+          'line-color': '#2563eb',
+          'line-width': 1.5,
+          'line-opacity': 0.6,
+        },
       });
     }
 
@@ -2592,10 +3703,26 @@ export default function MapLibreMap() {
       ensureOverlays(map);
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
+      applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpenRef.current);
       setMapReady(true);
     };
 
+    const onStyleData = () => {
+      if (!mapReady) return;
+      // Après un changement de style (setStyle), toutes les couches custom sont perdues.
+      // On recrée donc les overlays (zones, POI, estimation, etc.), on remet l'ordre,
+      // puis on réapplique la visibilité de la heatmap.
+      ensureOverlays(map);
+      resyncAllOverlays(map);
+      enforceLayerOrder(map);
+      applyGridLabelStyle(map);
+      applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpenRef.current);
+      // Forcer un bump de version pour que les effets React réinjectent les données dans les sources.
+      setStyleVersion((v) => v + 1);
+    };
+
     map.on('load', onLoad);
+    map.on('styledata', onStyleData);
     mapInstanceRef.current = map;
 
     // Échelle réelle (mètres / km) placée au-dessus du footer
@@ -2607,6 +3734,8 @@ export default function MapLibreMap() {
       try {
         (el as any).style.transform = 'scale(1.05)';
         (el as any).style.transformOrigin = 'center bottom';
+        // Remonter légèrement l'échelle pour qu'elle passe au-dessus du mini popup heatmap
+        (el as HTMLElement).style.marginBottom = '60px';
         // Initialiser la visibilité de l'échelle en fonction de scaleEnabled au moment de la création
         (el as HTMLElement).style.display = scaleEnabled ? '' : 'none';
       } catch {
@@ -2633,6 +3762,8 @@ export default function MapLibreMap() {
     map.on('load', updateRotated);
 
     return () => {
+      map.off('load', onLoad);
+      map.off('styledata', onStyleData);
       map.off('rotate', updateRotated);
       map.off('pitch', updateRotated);
       map.off('load', updateRotated);
@@ -3585,7 +4716,7 @@ export default function MapLibreMap() {
       ) : null}
 
       <div
-        className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-3 touch-none"
+        className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-2 touch-none"
         onPointerDown={(e) => e.stopPropagation()}
         onPointerMove={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
@@ -3607,33 +4738,6 @@ export default function MapLibreMap() {
           title="Changer le fond de carte"
         >
           <Layers className="mx-auto text-gray-600" size={20} />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setScaleEnabled((v) => !v)}
-          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
-            scaleEnabled ? 'ring-1 ring-inset ring-blue-500/25' : ''
-          }`}
-          title="Afficher l'échelle"
-        >
-          <Ruler className={scaleEnabled ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setLabelsEnabled((v) => !v)}
-          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white ${
-            labelsEnabled ? 'ring-1 ring-inset ring-blue-500/25' : ''
-          }`}
-          title="Afficher les noms (POI + zones + utilisateurs)"
-        >
-          <Tag
-            className={`mx-auto ${
-              labelsEnabled ? 'text-blue-600' : 'text-gray-600'
-            }`}
-            size={18}
-          />
         </button>
 
         {canEdit ? (
@@ -3747,23 +4851,121 @@ export default function MapLibreMap() {
                 </div>
               </div>
             </div>
-          </>
-        ) : null}
 
-        {isAdmin ? (
-          <button
-            type="button"
-            onClick={() => {
-              const rs = mission?.traceRetentionSeconds ?? 3600;
-              setTimerSecondsInput(String(rs));
-              setTimerError(null);
-              setTimerModalOpen(true);
-            }}
-            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur inline-flex items-center justify-center hover:bg-white"
-            title="Durée de la piste"
-          >
-            <Timer className="mx-auto text-gray-600" size={20} />
-          </button>
+            <div
+              className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+                settingsMenuOpen ? 'h-[274px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+              }`}
+            >
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionError(null);
+
+                    setSettingsMenuOpen((v) => !v);
+                  }}
+                  className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+                    settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                      ? 'ring-1 ring-inset ring-blue-500/25'
+                      : ''
+                  }`}
+                  title="Settings"
+                >
+                  <Settings
+                    className={
+                      settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                        ? 'mx-auto text-blue-600'
+                        : 'mx-auto text-gray-600'
+                    }
+                    size={20}
+                  />
+                </button>
+
+                <div
+                  className={`flex flex-col gap-2 transition-all duration-200 ${
+                    settingsMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setScaleEnabled((v) => !v)}
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                      scaleEnabled ? 'ring-blue-500/25' : 'ring-black/10'
+                    }`}
+                    title="Règle"
+                  >
+                    <Ruler className={scaleEnabled ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLabelsEnabled((v) => !v)}
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                      labelsEnabled ? 'ring-blue-500/25' : 'ring-black/10'
+                    }`}
+                    title="Tag"
+                  >
+                    <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
+                  </button>
+
+                  {canOpenPersonPanel ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const map = mapInstanceRef.current;
+
+                        // If already open in mini mode -> close.
+                        if (personPanelOpen && personPanelCollapsed) {
+                          setPersonPanelOpen(false);
+                          setPersonPanelCollapsed(false);
+                          if (map && mapReady) applyHeatmapVisibility(map, false);
+                          return;
+                        }
+
+                        // If already open in expanded mode -> collapse to mini.
+                        if (personPanelOpen && !personPanelCollapsed) {
+                          setPersonEdit(false);
+                          setPersonPanelCollapsed(true);
+                          if (map && mapReady) {
+                            applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
+                          }
+                          return;
+                        }
+                        // Otherwise (closed) -> ouvrir directement en mini recap, les données se chargeront.
+                        setPersonEdit(false);
+                        setPersonPanelCollapsed(true);
+                        setPersonPanelOpen(true);
+                        if (map && mapReady) {
+                          applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
+                        }
+                      }}
+                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                        personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
+                      }`}
+                      title="Activité"
+                    >
+                      <PawPrint className={personPanelOpen ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rs = mission?.traceRetentionSeconds ?? 3600;
+                      setTimerSecondsInput(String(rs));
+                      setTimerError(null);
+                      setTimerModalOpen(true);
+                    }}
+                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
+                    title="Minuteur"
+                  >
+                    <Timer className="text-gray-600" size={20} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
         ) : null}
 
         {isMapRotated ? (
@@ -3777,6 +4979,707 @@ export default function MapLibreMap() {
           </button>
         ) : null}
       </div>
+
+      {personPanelOpen && personPanelCollapsed && !personEdit ? (
+        <div
+          className="fixed inset-x-3 bottom-[calc(max(env(safe-area-inset-bottom),16px)+80px)] z-[1250]"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
+          <div className="rounded-3xl border bg-white/80 shadow-xl backdrop-blur p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs text-gray-700">
+                  <span className="font-semibold text-gray-800">Météo:</span>{' '}
+                  {weatherLoading
+                    ? 'Chargement…'
+                    : weatherError
+                      ? 'Indisponible'
+                      : weather
+                        ? `${weatherStatusLabel(weather.weatherCode)} · ${typeof weather.temperatureC === 'number' ? `${weather.temperatureC.toFixed(1)}°C` : '—'} · Vent ${typeof weather.windSpeedKmh === 'number' ? `${weather.windSpeedKmh.toFixed(0)} km/h` : '—'}`
+                        : '—'}
+                </div>
+                <div className="mt-1 text-xs text-gray-700">
+                  {estimation ? (
+                    <span>
+                      <span className="font-semibold">Zone</span>
+                      {`: De ${estimation.probableKm.toFixed(1)} km à ${estimation.maxKm.toFixed(1)} km de rayon`}
+                    </span>
+                  ) : (
+                    personLoading
+                      ? 'Chargement…'
+                      : '—'
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPersonPanelCollapsed(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                  title="Déployer"
+                >
+                  <ChevronUp size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : personPanelOpen ? (
+        <div
+          className="absolute inset-0 z-[1250] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setPersonPanelOpen(false)}
+        >
+          <div
+            className={
+              personEdit || !personCase
+                ? 'flex h-[calc(100vh-24px)] w-[calc(100vw-24px)] flex-col rounded-3xl bg-white p-4 shadow-xl'
+                : 'w-full max-w-3xl max-h-[calc(100vh-48px)] flex flex-col rounded-3xl bg-white p-4 shadow-xl'
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-base font-bold text-gray-900">Projection</div>
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                  {!personEdit && personCase ? (
+                    <button
+                      type="button"
+                      onClick={() => setPersonPanelCollapsed(true)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                      title="Réduire"
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                  ) : null}
+                  {canEdit && !personEdit && personCase ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPersonPanelCollapsed(false);
+                        setPersonEdit(true);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                      title="Modifier la fiche"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  ) : null}
+                  {canEdit && !personEdit && personCase ? (
+                    <button
+                      type="button"
+                      disabled={personLoading || !selectedMissionId}
+                      onClick={async () => {
+                        if (!selectedMissionId || !personCase) return;
+                        const ok = window.confirm('Supprimer la fiche personne ?');
+                        if (!ok) return;
+                        setPersonLoading(true);
+                        setPersonError(null);
+                        try {
+                          await deletePersonCase(selectedMissionId);
+                          setPersonCase(null);
+                          setHasPersonCase(false);
+                          setPersonEdit(true);
+                          setPersonDraft({
+                            lastKnownQuery: '',
+                            lastKnownType: 'address',
+                            lastKnownPoiId: undefined,
+                            lastKnownLng: undefined,
+                            lastKnownLat: undefined,
+                            lastKnownWhen: '',
+                            nextClueQuery: '',
+                            nextClueType: 'address',
+                            nextCluePoiId: undefined,
+                            nextClueLng: undefined,
+                            nextClueLat: undefined,
+                            nextClueWhen: '',
+                            mobility: 'none',
+                            age: '',
+                            sex: 'unknown',
+                            healthStatus: 'stable',
+                            diseases: [],
+                            diseasesFreeText: '',
+                            injuries: [],
+                            injuriesFreeText: '',
+                          });
+                          setShowEstimationHeatmap(false);
+                          const map = mapInstanceRef.current;
+                          if (map && mapReady) applyHeatmapVisibility(map, false);
+                        } catch (e: any) {
+                          setPersonError(e?.message ?? 'Erreur');
+                        } finally {
+                          setPersonLoading(false);
+                        }
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                      title="Supprimer la fiche"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  ) : null}
+                </div>
+
+                {null}
+              </div>
+            </div>
+
+            <div className="mt-3 grid flex-1 gap-3 overflow-y-auto pr-1">
+              {personLoading ? <div className="text-sm text-gray-600">Chargement…</div> : null}
+              {personError ? <div className="text-sm text-red-600">{personError}</div> : null}
+
+              {!personEdit && personCase ? (
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Dernier indice</div>
+                    <div className="mt-1 text-sm text-gray-900">
+                      {personCase.lastKnown.type === 'poi' ? 'POI' : 'Adresse'}: {personCase.lastKnown.query}
+                    </div>
+                    {personCase.lastKnown.when ? (
+                      <div className="mt-1 text-xs text-gray-600">Heure: {new Date(personCase.lastKnown.when).toLocaleString()}</div>
+                    ) : null}
+                    <div className="mt-1 text-xs text-gray-600">Déplacement: {mobilityLabel(personCase.mobility)}</div>
+                  </div>
+
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Profil</div>
+                    <div className="mt-1 text-sm text-gray-900">
+                      Âge: {personCase.age ?? '—'}
+                      {' · '}Sexe: {personCase.sex}
+                      {' · '}État: {personCase.healthStatus}
+                    </div>
+                    {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
+                      <div className="mt-1 text-xs text-gray-600">Maladies: {personCase.diseases.join(', ')}</div>
+                    ) : null}
+                    {Array.isArray(personCase.injuries) && personCase.injuries.length ? (
+                      <div className="mt-1 text-xs text-gray-600">
+                        Blessures: {personCase.injuries.map((x) => x.id).join(', ')}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Météo (sur le dernier point)</div>
+                    {weatherLoading ? <div className="mt-1 text-sm text-gray-600">Chargement météo…</div> : null}
+                    {weatherError ? <div className="mt-1 text-sm text-red-600">Météo indisponible</div> : null}
+                    {!weatherLoading && !weatherError && weather ? (
+                      <div className="mt-1 text-sm text-gray-900">
+                        {weatherStatusLabel(weather.weatherCode)}
+                        {' · '}{typeof weather.temperatureC === 'number' ? `${weather.temperatureC.toFixed(1)}°C` : '—'}
+                        {' · '}Vent {typeof weather.windSpeedKmh === 'number' ? `${weather.windSpeedKmh.toFixed(0)} km/h` : '—'}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {estimation ? (
+                    <div className="rounded-2xl border p-3 md:col-span-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-semibold text-gray-700">Estimation</div>
+                      </div>
+                      <div className="mt-1 text-sm text-gray-900">
+                        Rayon probable: ~{estimation.probableKm.toFixed(1)} km
+                        <br />
+                        Max: ~{estimation.maxKm.toFixed(1)} km
+                      </div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        Vitesse estimée: ~{estimation.effectiveKmh.toFixed(1)} km/h
+                        {estimation.hoursSince === null ? '' : (
+                          <>
+                            <br />
+                            Temps écoulé: {formatHoursToHM(estimation.hoursSince)}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        {estimation.needs.length ? (
+                          <div>
+                            <div className="text-[11px] font-semibold text-gray-600">Besoins prioritaires</div>
+                            <div className="mt-1 grid gap-1">
+                              {estimation.needs.map((n) => (
+                                <div key={n} className="text-xs text-gray-700">
+                                  - {n}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {estimation.likelyPlaces.length ? (
+                          <div>
+                            <div className="text-[11px] font-semibold text-gray-600">Lieux probables</div>
+                            <div className="mt-1 grid gap-1">
+                              {estimation.likelyPlaces.map((p) => (
+                                <div key={p} className="text-xs text-gray-700">
+                                  - {p}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                </div>
+              ) : canEdit ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative">
+                      <div className="text-xs font-semibold text-gray-700">Adresse ou POI</div>
+                      <input
+                        type="text"
+                        value={personDraft.lastKnownQuery}
+                        onChange={(e) =>
+                          setPersonDraft((p) => ({
+                            ...p,
+                            lastKnownQuery: e.target.value,
+                            lastKnownType: 'address',
+                            lastKnownPoiId: undefined,
+                            lastKnownLng: undefined,
+                            lastKnownLat: undefined,
+                          }))
+                        }
+                        onFocus={() => setLastKnownSuggestionsOpen(true)}
+                        onBlur={() => window.setTimeout(() => setLastKnownSuggestionsOpen(false), 150)}
+                        placeholder="Tape un POI ou une adresse"
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                      />
+
+                      {lastKnownSuggestionsOpen &&
+                      (lastKnownPoiSuggestions.length > 0 || lastKnownAddressSuggestions.length > 0) ? (
+                        <div className="absolute left-0 right-0 top-[72px] z-10 rounded-2xl border bg-white shadow">
+                          {lastKnownPoiSuggestions.length > 0 ? (
+                            <div className="border-b p-2">
+                              <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">POI</div>
+                              <div className="grid gap-1">
+                                {lastKnownPoiSuggestions.map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                    onClick={() => {
+                                      setPersonDraft((prev) => ({
+                                        ...prev,
+                                        lastKnownType: 'poi',
+                                        lastKnownQuery: p.title,
+                                        lastKnownPoiId: p.id,
+                                        lastKnownLng: p.lng,
+                                        lastKnownLat: p.lat,
+                                      }));
+                                      setLastKnownSuggestionsOpen(false);
+                                    }}
+                                  >
+                                    {p.title}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {lastKnownAddressSuggestions.length > 0 ? (
+                            <div className="p-2">
+                              <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">Adresse</div>
+                              <div className="grid gap-1">
+                                {lastKnownAddressSuggestions.map((a) => (
+                                  <button
+                                    key={`${a.label}-${a.lng}-${a.lat}`}
+                                    type="button"
+                                    className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                    onClick={() => {
+                                      setPersonDraft((prev) => ({
+                                        ...prev,
+                                        lastKnownType: 'address',
+                                        lastKnownQuery: a.label,
+                                        lastKnownPoiId: undefined,
+                                        lastKnownLng: a.lng,
+                                        lastKnownLat: a.lat,
+                                      }));
+                                      setLastKnownSuggestionsOpen(false);
+                                    }}
+                                  >
+                                    {a.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">Date / heure</div>
+                      <input
+                        type="datetime-local"
+                        value={personDraft.lastKnownWhen}
+                        onChange={(e) =>
+                          setPersonDraft((p) => ({
+                            ...p,
+                            lastKnownWhen: e.target.value,
+                          }))
+                        }
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border p-3">
+                    <div className="text-xs font-semibold text-gray-700">Indice suivant (optionnel)</div>
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      <div className="relative">
+                        <div className="text-[11px] font-medium text-gray-600">Adresse ou POI</div>
+                        <input
+                          type="text"
+                          value={personDraft.nextClueQuery}
+                          onChange={(e) =>
+                            setPersonDraft((p) => ({
+                              ...p,
+                              nextClueQuery: e.target.value,
+                              nextClueType: 'address',
+                              nextCluePoiId: undefined,
+                              nextClueLng: undefined,
+                              nextClueLat: undefined,
+                            }))
+                          }
+                          onFocus={() => setNextClueSuggestionsOpen(true)}
+                          onBlur={() => window.setTimeout(() => setNextClueSuggestionsOpen(false), 150)}
+                          placeholder="Adresse ou POI (optionnel)"
+                          className="h-9 w-full rounded-2xl border px-2 text-xs"
+                        />
+
+                        {nextClueSuggestionsOpen &&
+                        (nextCluePoiSuggestions.length > 0 || nextClueAddressSuggestions.length > 0) ? (
+                          <div className="absolute left-0 right-0 top-[52px] z-10 rounded-2xl border bg-white shadow">
+                            {nextCluePoiSuggestions.length > 0 ? (
+                              <div className="border-b p-2">
+                                <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">POI</div>
+                                <div className="grid gap-1">
+                                  {nextCluePoiSuggestions.map((p) => (
+                                    <button
+                                      key={p.id}
+                                      type="button"
+                                      className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                      onClick={() => {
+                                        setPersonDraft((prev) => ({
+                                          ...prev,
+                                          nextClueType: 'poi',
+                                          nextClueQuery: p.title,
+                                          nextCluePoiId: p.id,
+                                          nextClueLng: p.lng,
+                                          nextClueLat: p.lat,
+                                        }));
+                                        setNextClueSuggestionsOpen(false);
+                                      }}
+                                    >
+                                      {p.title}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {nextClueAddressSuggestions.length > 0 ? (
+                              <div className="p-2">
+                                <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">Adresse</div>
+                                <div className="grid gap-1">
+                                  {nextClueAddressSuggestions.map((a) => (
+                                    <button
+                                      key={`${a.label}-${a.lng}-${a.lat}`}
+                                      type="button"
+                                      className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                      onClick={() => {
+                                        setPersonDraft((prev) => ({
+                                          ...prev,
+                                          nextClueType: 'address',
+                                          nextClueQuery: a.label,
+                                          nextCluePoiId: undefined,
+                                          nextClueLng: a.lng,
+                                          nextClueLat: a.lat,
+                                        }));
+                                        setNextClueSuggestionsOpen(false);
+                                      }}
+                                    >
+                                      {a.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium text-gray-600">Date / heure</div>
+                        <input
+                          type="datetime-local"
+                          value={personDraft.nextClueWhen}
+                          onChange={(e) =>
+                            setPersonDraft((p) => ({
+                              ...p,
+                              nextClueWhen: e.target.value,
+                            }))
+                          }
+                          className="mt-1 h-9 w-full rounded-2xl border px-2 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-gray-700">Mode de déplacement</div>
+                    <select
+                      value={personDraft.mobility}
+                      onChange={(e) => setPersonDraft((p) => ({ ...p, mobility: e.target.value as any }))}
+                      className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                    >
+                      <option value="none">À pied</option>
+                      <option value="bike">Vélo</option>
+                      <option value="scooter">Scooter</option>
+                      <option value="motorcycle">Moto</option>
+                      <option value="car">Voiture</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">Âge</div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={120}
+                        value={personDraft.age}
+                        onChange={(e) => setPersonDraft((p) => ({ ...p, age: e.target.value }))}
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">Sexe</div>
+                      <select
+                        value={personDraft.sex}
+                        onChange={(e) => setPersonDraft((p) => ({ ...p, sex: e.target.value as any }))}
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                      >
+                        <option value="unknown">Inconnu</option>
+                        <option value="female">Femme</option>
+                        <option value="male">Homme</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">État</div>
+                      <select
+                        value={personDraft.healthStatus}
+                        onChange={(e) => setPersonDraft((p) => ({ ...p, healthStatus: e.target.value as any }))}
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                      >
+                        <option value="stable">Stable</option>
+                        <option value="fragile">Fragile</option>
+                        <option value="critique">Critique</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left"
+                        onClick={() => setDiseasesOpen((v) => !v)}
+                      >
+                        <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
+                        <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
+                      </button>
+                      {diseasesOpen ? (
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {diseaseOptions.map((id) => {
+                            const checked = personDraft.diseases.includes(id);
+                            const raw = id.replace(/_/g, ' ');
+                            const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+                            return (
+                              <div key={id} className="rounded-2xl border p-2">
+                                <label className="flex items-center gap-2 text-sm text-gray-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? Array.from(new Set([...personDraft.diseases, id]))
+                                        : personDraft.diseases.filter((x) => x !== id);
+                                      setPersonDraft((p) => ({ ...p, diseases: next }));
+                                    }}
+                                  />
+                                  <span className="font-normal">{label}</span>
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="rounded-2xl border p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left"
+                        onClick={() => setInjuriesOpen((v) => !v)}
+                      >
+                        <div className="text-xs font-semibold text-gray-700">Blessures</div>
+                        <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
+                      </button>
+                      {injuriesOpen ? (
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {injuryOptions.map((injuryId) => {
+                            const injury = personDraft.injuries.find((x) => x.id === injuryId);
+                            const checked = !!injury;
+                            return (
+                              <div key={injuryId} className="rounded-2xl border p-2">
+                                <label className="flex items-center gap-2 text-sm text-gray-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setPersonDraft((p) => ({
+                                          ...p,
+                                          injuries: [...p.injuries, { id: injuryId, locations: [] }],
+                                        }));
+                                      } else {
+                                        setPersonDraft((p) => ({
+                                          ...p,
+                                          injuries: p.injuries.filter((x) => x.id !== injuryId),
+                                        }));
+                                      }
+                                    }}
+                                  />
+                                  <span className="font-normal">
+                                    {injuryId
+                                      .replace(/_/g, ' ')
+                                      .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                  </span>
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={personLoading}
+                      onClick={() => {
+                        if (personCase) {
+                          setPersonEdit(false);
+                          setPersonDraft({
+                            lastKnownQuery: personCase.lastKnown.query,
+                            lastKnownType: personCase.lastKnown.type,
+                            lastKnownPoiId: personCase.lastKnown.poiId,
+                            lastKnownLng:
+                              typeof personCase.lastKnown.lng === 'number' ? personCase.lastKnown.lng : undefined,
+                            lastKnownLat:
+                              typeof personCase.lastKnown.lat === 'number' ? personCase.lastKnown.lat : undefined,
+                            lastKnownWhen: personCase.lastKnown.when
+                              ? personCase.lastKnown.when.slice(0, 16)
+                              : '',
+                            nextClueQuery: '',
+                            nextClueType: 'address',
+                            nextCluePoiId: undefined,
+                            nextClueLng: undefined,
+                            nextClueLat: undefined,
+                            nextClueWhen: '',
+                            mobility: personCase.mobility,
+                            age: personCase.age === null ? '' : String(personCase.age),
+                            sex: personCase.sex,
+                            healthStatus: personCase.healthStatus,
+                            diseases: Array.isArray(personCase.diseases) ? personCase.diseases : [],
+                            diseasesFreeText: personCase.diseasesFreeText ?? '',
+                            injuries: Array.isArray(personCase.injuries)
+                              ? personCase.injuries.map((x) => ({
+                                  id: x.id,
+                                  locations: Array.isArray(x.locations) ? x.locations : [],
+                                }))
+                              : [],
+                            injuriesFreeText: personCase.injuriesFreeText ?? '',
+                          });
+                        } else {
+                          setPersonPanelOpen(false);
+                        }
+                      }}
+                      className="h-11 rounded-2xl border bg-white text-sm font-semibold text-gray-700 disabled:opacity-50"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      disabled={personLoading || !selectedMissionId}
+                      onClick={async () => {
+                        if (!selectedMissionId) return;
+                        setPersonLoading(true);
+                        setPersonError(null);
+                        try {
+                          const ageTrimmed = personDraft.age.trim();
+                          const ageParsed = ageTrimmed ? Number(ageTrimmed) : undefined;
+                          const payload = {
+                            lastKnown: {
+                              type: personDraft.lastKnownType,
+                              query: personDraft.lastKnownQuery,
+                              poiId: personDraft.lastKnownPoiId,
+                              lng: personDraft.lastKnownLng,
+                              lat: personDraft.lastKnownLat,
+                              when: personDraft.lastKnownWhen
+                                ? new Date(personDraft.lastKnownWhen).toISOString()
+                                : undefined,
+                            },
+                            nextClue:
+                              personDraft.nextClueLng !== undefined && personDraft.nextClueLat !== undefined
+                                ? {
+                                    type: personDraft.nextClueType,
+                                    query: personDraft.nextClueQuery,
+                                    poiId: personDraft.nextCluePoiId,
+                                    lng: personDraft.nextClueLng,
+                                    lat: personDraft.nextClueLat,
+                                    when: personDraft.nextClueWhen
+                                      ? new Date(personDraft.nextClueWhen).toISOString()
+                                      : undefined,
+                                  }
+                                : undefined,
+                            mobility: personDraft.mobility,
+                            age: Number.isFinite(ageParsed as any) ? Math.floor(ageParsed as number) : undefined,
+                            sex: personDraft.sex,
+                            healthStatus: personDraft.healthStatus,
+                            diseases: personDraft.diseases,
+                            injuries: personDraft.injuries,
+                            diseasesFreeText: personDraft.diseasesFreeText,
+                            injuriesFreeText: personDraft.injuriesFreeText,
+                          };
+                          const saved = await upsertPersonCase(selectedMissionId, payload);
+                          setPersonCase(saved.case);
+                          setPersonEdit(false);
+                        } catch (e: any) {
+                          setPersonError(e?.message ?? 'Erreur');
+                        } finally {
+                          setPersonLoading(false);
+                        }
+                      }}
+                      className="h-11 rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
+                    >
+                      Enregistrer
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border p-3">
+                  <div className="text-sm font-semibold text-gray-900">Aucune fiche personne</div>
+                  <div className="mt-1 text-sm text-gray-600">Vous avez un accès en lecture seule.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {timerModalOpen ? (
         <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 px-4 pt-6 pb-28">
