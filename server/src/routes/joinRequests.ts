@@ -8,18 +8,23 @@ import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
 
 const MEMBER_COLOR_PALETTE = [
-  '#3b82f6',
-  '#22c55e',
-  '#f97316',
   '#ef4444',
+  '#f97316',
+  '#fde047',
+  '#4ade80',
+  '#596643',
+  '#60a5fa',
+  '#1e3a8a',
   '#a855f7',
-  '#14b8a6',
-  '#eab308',
-  '#64748b',
   '#ec4899',
+  '#6b3f35',
+  '#a19579',
   '#000000',
-  '#ffffff',
 ];
+
+function isAllowedMemberColor(color: string) {
+  return MEMBER_COLOR_PALETTE.includes(color.toLowerCase());
+}
 
 function pickColor(used: Set<string>) {
   const available = MEMBER_COLOR_PALETTE.filter((c) => !used.has(c));
@@ -139,7 +144,10 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       }
 
       const existingColor = existingMember?.color ? String((existingMember as any).color).trim() : '';
-      const memberColor = existingColor || (await pickMissionMemberColor(new mongoose.Types.ObjectId(missionId)));
+      const memberColor =
+        existingColor && isAllowedMemberColor(existingColor)
+          ? existingColor
+          : await pickMissionMemberColor(new mongoose.Types.ObjectId(missionId));
 
       await MissionMemberModel.updateOne(
         { missionId: new mongoose.Types.ObjectId(missionId), userId: user._id },
@@ -343,7 +351,7 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
 
         const existingMember = await MissionMemberModel.findOne({ missionId: joinMissionId, userId: joinRequestedBy }).lean();
         const existingColor = existingMember?.color ? String(existingMember.color).trim() : '';
-        const memberColor = existingColor || (await pickMissionMemberColor(joinMissionId));
+        const memberColor = existingColor && isAllowedMemberColor(existingColor) ? existingColor : await pickMissionMemberColor(joinMissionId);
 
         await MissionMemberModel.updateOne(
           { missionId: joinMissionId, userId: joinRequestedBy },

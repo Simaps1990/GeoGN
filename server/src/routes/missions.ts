@@ -15,17 +15,18 @@ type UpdateMissionBody = {
 };
 
 const MEMBER_COLOR_PALETTE = [
-  '#3b82f6',
-  '#22c55e',
-  '#f97316',
   '#ef4444',
+  '#f97316',
+  '#fde047',
+  '#4ade80',
+  '#596643',
+  '#60a5fa',
+  '#1e3a8a',
   '#a855f7',
-  '#14b8a6',
-  '#eab308',
-  '#64748b',
   '#ec4899',
+  '#6b3f35',
+  '#a19579',
   '#000000',
-  '#ffffff',
 ];
 
 function pickColor(used: Set<string>) {
