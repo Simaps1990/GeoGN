@@ -412,6 +412,7 @@ export default function MapLibreMap() {
   const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
+  const [hiddenUserIds, setHiddenUserIds] = useState<Record<string, true>>({});
   // Compteur de version du style de carte pour forcer la resynchro des overlays (dont la zone d'estimation)
   const [styleVersion, setStyleVersion] = useState(0);
 
@@ -1321,6 +1322,41 @@ export default function MapLibreMap() {
   const { selectedMissionId } = useMission();
 
   const [mission, setMission] = useState<ApiMission | null>(null);
+
+  useEffect(() => {
+    if (!selectedMissionId) {
+      setHiddenUserIds({});
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(`geogn.hiddenMembers.${selectedMissionId}`);
+      const parsed = raw ? (JSON.parse(raw) as any) : [];
+      const ids = Array.isArray(parsed) ? (parsed.filter((x) => typeof x === 'string' && x.trim()) as string[]) : [];
+      const map: Record<string, true> = {};
+      for (const id of ids) map[id] = true;
+      setHiddenUserIds(map);
+    } catch {
+      setHiddenUserIds({});
+    }
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    const onHiddenChanged = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      const missionId = ce?.detail?.missionId;
+      if (!missionId || !selectedMissionId || missionId !== selectedMissionId) return;
+      const list = Array.isArray(ce?.detail?.hiddenUserIds) ? (ce.detail.hiddenUserIds as any[]) : [];
+      const map: Record<string, true> = {};
+      for (const id of list) {
+        if (typeof id === 'string' && id.trim()) map[id] = true;
+      }
+      setHiddenUserIds(map);
+    };
+    window.addEventListener('geogn:hiddenMembers:changed', onHiddenChanged as any);
+    return () => {
+      window.removeEventListener('geogn:hiddenMembers:changed', onHiddenChanged as any);
+    };
+  }, [selectedMissionId]);
 
   // Rôles
   const role = mission?.membership?.role ?? null; // 'admin' | 'member' | 'viewer' | null
@@ -3040,12 +3076,14 @@ export default function MapLibreMap() {
     }
 
     if (othersSource) {
-      const features = Object.entries(otherPositions).map(([userId, p]) => {
+      const features = Object.entries(otherPositions)
+        .filter(([userId]) => !hiddenUserIds[userId])
+        .map(([userId, p]) => {
         const memberColor = memberColors[userId];
         const color = memberColor ?? '#4b5563';
         const name = memberNames[userId] ?? '';
 
-        return {
+          return {
           type: 'Feature',
           properties: {
             userId,
@@ -3054,8 +3092,8 @@ export default function MapLibreMap() {
             name,
           },
           geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-        };
-      });
+          };
+        });
 
       othersSource.setData({
         type: 'FeatureCollection',
@@ -3067,6 +3105,7 @@ export default function MapLibreMap() {
       const features: any[] = [];
       const now = Date.now();
       for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+        if (hiddenUserIds[userId]) continue;
         const filtered = pts.filter((p) => now - p.t <= traceRetentionMs);
         if (filtered.length < 2) continue;
         const memberColor = memberColors[userId];
@@ -4647,25 +4686,27 @@ export default function MapLibreMap() {
     const now = Date.now();
     const inactiveAfterMs = 30_000;
     const inactiveColor = '#9ca3af';
-    const features = Object.entries(otherPositions).map(([userId, p]) => {
+    const features = Object.entries(otherPositions)
+      .filter(([userId]) => !hiddenUserIds[userId])
+      .map(([userId, p]) => {
       const memberColor = memberColors[userId];
       const isInactive = now - p.t > inactiveAfterMs;
       // Inactif: gris plus clair. Sinon, couleur de mission.
       const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
       const name = memberNames[userId] ?? '';
 
-      return {
+        return {
         type: 'Feature',
         properties: { userId, color, name, inactive: isInactive ? 1 : 0 },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-      };
-    });
+        };
+      });
 
     src.setData({
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberColors, memberNames, mapReady, othersActivityTick]);
+  }, [otherPositions, memberColors, memberNames, mapReady, othersActivityTick, hiddenUserIds]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -4679,6 +4720,7 @@ export default function MapLibreMap() {
     const features: any[] = [];
     const segmentGapMs = 30_000;
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+      if (hiddenUserIds[userId]) continue;
       if (pts.length < 2) continue;
       const memberColor = memberColors[userId];
       const lastT = pts[pts.length - 1]?.t ?? 0;
@@ -4715,7 +4757,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
-  }, [otherPositions, memberColors, mapReady, traceRetentionMs, othersActivityTick]);
+  }, [otherPositions, memberColors, mapReady, traceRetentionMs, othersActivityTick, hiddenUserIds]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;

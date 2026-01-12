@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BookPlus, Check, ChevronDown, Copy, LogOut, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { BookPlus, Check, ChevronDown, Copy, Eye, EyeOff, LogOut, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
 import {
@@ -78,6 +78,55 @@ export default function MissionContactsPage() {
   const [addContactSearch, setAddContactSearch] = useState('');
   const addContactMenuRef = useRef<HTMLDivElement | null>(null);
   const addContactSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [hiddenMemberIds, setHiddenMemberIds] = useState<Record<string, true>>({});
+
+  const hiddenMembersStorageKey = useMemo(() => {
+    return missionId ? `geogn.hiddenMembers.${missionId}` : null;
+  }, [missionId]);
+
+  useEffect(() => {
+    if (!hiddenMembersStorageKey) {
+      setHiddenMemberIds({});
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(hiddenMembersStorageKey);
+      const parsed = raw ? (JSON.parse(raw) as any) : [];
+      const ids = Array.isArray(parsed) ? (parsed.filter((x) => typeof x === 'string' && x.trim()) as string[]) : [];
+      const map: Record<string, true> = {};
+      for (const id of ids) map[id] = true;
+      setHiddenMemberIds(map);
+    } catch {
+      setHiddenMemberIds({});
+    }
+  }, [hiddenMembersStorageKey]);
+
+  function toggleHiddenMember(userId: string) {
+    if (!missionId) return;
+    if (!userId) return;
+    setHiddenMemberIds((prev) => {
+      const next = { ...prev };
+      if (next[userId]) delete next[userId];
+      else next[userId] = true;
+      try {
+        const list = Object.keys(next);
+        window.localStorage.setItem(`geogn.hiddenMembers.${missionId}`, JSON.stringify(list));
+      } catch {
+        // ignore
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent('geogn:hiddenMembers:changed', {
+            detail: { missionId, hiddenUserIds: Object.keys(next) },
+          })
+        );
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
 
   const contactsByUserId = useMemo(() => {
     const map = new Map<string, ApiContact>();
@@ -552,6 +601,7 @@ export default function MissionContactsPage() {
               const canLeaveMission = isSelf && !isSingleMember && !(m.role === 'admin' && adminsCount === 1);
               const isInContacts = userId ? contactsByUserId.has(userId) : false;
               const addBusy = busyKey === (userId ? `addContact:${userId}` : '');
+              const isHidden = !!(userId && hiddenMemberIds[userId]);
 
               return (
                 <div
@@ -586,6 +636,21 @@ export default function MissionContactsPage() {
 
                       {mission?.membership?.role === 'admin' && m.user?.id ? (
                         <>
+                          <button
+                            type="button"
+                            disabled={!userId}
+                            onClick={() => {
+                              if (!userId) return;
+                              toggleHiddenMember(userId);
+                            }}
+                            className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                              isHidden ? 'text-gray-500' : 'text-blue-700'
+                            }`}
+                            title={isHidden ? 'Afficher sur la carte' : 'Masquer sur la carte'}
+                          >
+                            {isHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+
                           <button
                             type="button"
                             disabled={busyKey === `memberEdit:${m.user.id}`}
