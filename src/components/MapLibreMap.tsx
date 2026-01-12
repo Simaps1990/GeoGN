@@ -5363,7 +5363,7 @@ export default function MapLibreMap() {
                             lastKnownWhen: e.target.value,
                           }))
                         }
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs"
+                        className="mt-1 h-10 w-full max-w-[220px] rounded-2xl border px-3 text-xs mx-auto"
                       />
                     </div>
                   </div>
@@ -5464,7 +5464,7 @@ export default function MapLibreMap() {
                               nextClueWhen: e.target.value,
                             }))
                           }
-                          className="mt-1 h-9 w-full rounded-2xl border px-2 text-xs"
+                          className="mt-1 h-9 w-full max-w-[220px] rounded-2xl border px-2 text-xs mx-auto"
                         />
                       </div>
                     </div>
