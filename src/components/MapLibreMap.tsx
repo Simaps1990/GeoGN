@@ -4948,7 +4948,7 @@ export default function MapLibreMap() {
         <div
           className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
             settingsMenuOpen
-              ? `${isAdmin ? 'h-[274px]' : 'h-[214px]'} ring-1 ring-inset ring-black/10`
+              ? `${isAdmin ? 'h-[274px]' : 'h-[216px]'} ring-1 ring-inset ring-black/10`
               : 'h-12 ring-0'
           }`}
         >
