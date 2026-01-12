@@ -1447,6 +1447,14 @@ export default function MapLibreMap() {
   // Toast discret pour informer qu'aucune projection n'est active
   const [noProjectionToast, setNoProjectionToast] = useState(false);
 
+  useEffect(() => {
+    if (!noProjectionToast) return;
+    const t = window.setTimeout(() => {
+      setNoProjectionToast(false);
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [noProjectionToast]);
+
   const [isMapRotated, setIsMapRotated] = useState(false);
 
   const traceRetentionMs = useMemo(() => {
@@ -4867,146 +4875,145 @@ export default function MapLibreMap() {
                 </div>
               </div>
             </div>
+          </>
+        ) : null}
+
+        <div
+          className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+            settingsMenuOpen ? 'h-[274px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+          }`}
+        >
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActionError(null);
+
+                setSettingsMenuOpen((v) => !v);
+                if (!isAdmin) {
+                  setSettingsNotification(false);
+                }
+              }}
+              className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+                settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                  ? 'ring-1 ring-inset ring-blue-500/25'
+                  : ''
+              }`}
+              title="Settings"
+            >
+              <Settings
+                className={
+                  settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                    ? 'mx-auto text-blue-600'
+                    : 'mx-auto text-gray-600'
+                }
+                size={20}
+              />
+              {!isAdmin && settingsNotification ? (
+                <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+              ) : null}
+            </button>
 
             <div
-              className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-                settingsMenuOpen ? 'h-[274px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+              className={`flex flex-col gap-2 transition-all duration-200 ${
+                settingsMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
               }`}
             >
-              <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setScaleEnabled((v) => !v)}
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                  scaleEnabled ? 'ring-blue-500/25' : 'ring-black/10'
+                }`}
+                title="Règle"
+              >
+                <Ruler className={scaleEnabled ? 'text-blue-600' : 'text-gray-600'} size={20} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLabelsEnabled((v) => !v)}
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                  labelsEnabled ? 'ring-blue-500/25' : 'ring-black/10'
+                }`}
+                title="Tag"
+              >
+                <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const map = mapInstanceRef.current;
+
+                  if (!personCase) {
+                    if (!isAdmin) {
+                      setNoProjectionToast(true);
+                      return;
+                    }
+                    setPersonEdit(true);
+                    setPersonPanelCollapsed(false);
+                    setPersonPanelOpen(true);
+                    return;
+                  }
+
+                  if (!isAdmin) {
+                    setProjectionNotification(false);
+                    setSettingsNotification(false);
+                  }
+
+                  if (personPanelOpen && personPanelCollapsed) {
+                    setPersonPanelOpen(false);
+                    setPersonPanelCollapsed(false);
+                    if (map && mapReady) applyHeatmapVisibility(map, false);
+                    return;
+                  }
+
+                  if (personPanelOpen && !personPanelCollapsed) {
+                    setPersonEdit(false);
+                    setPersonPanelCollapsed(true);
+                    if (map && mapReady) {
+                      applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
+                    }
+                    return;
+                  }
+
+                  setPersonEdit(false);
+                  setPersonPanelCollapsed(true);
+                  setPersonPanelOpen(true);
+                  if (map && mapReady) {
+                    applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
+                  }
+                }}
+                className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                  personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
+                } ${!isAdmin && !personCase ? 'opacity-60' : ''}`}
+                title="Activité"
+              >
+                <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                {!isAdmin && projectionNotification ? (
+                  <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+                ) : null}
+              </button>
+
+              {isAdmin ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setActionError(null);
-
-                    setSettingsMenuOpen((v) => !v);
-                    if (!isAdmin) {
-                      setSettingsNotification(false);
-                    }
+                    const rs = mission?.traceRetentionSeconds ?? 3600;
+                    setTimerSecondsInput(String(rs));
+                    setTimerError(null);
+                    setTimerModalOpen(true);
                   }}
-                  className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                    settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
-                      ? 'ring-1 ring-inset ring-blue-500/25'
-                      : ''
-                  }`}
-                  title="Settings"
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
+                  title="Minuteur"
                 >
-                  <Settings
-                    className={
-                      settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
-                        ? 'mx-auto text-blue-600'
-                        : 'mx-auto text-gray-600'
-                    }
-                    size={20}
-                  />
-                  {!isAdmin && settingsNotification ? (
-                    <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
-                  ) : null}
+                  <Timer className="text-gray-600" size={20} />
                 </button>
-
-                <div
-                  className={`flex flex-col gap-2 transition-all duration-200 ${
-                    settingsMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setScaleEnabled((v) => !v)}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      scaleEnabled ? 'ring-blue-500/25' : 'ring-black/10'
-                    }`}
-                    title="Règle"
-                  >
-                    <Ruler className={scaleEnabled ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setLabelsEnabled((v) => !v)}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      labelsEnabled ? 'ring-blue-500/25' : 'ring-black/10'
-                    }`}
-                    title="Tag"
-                  >
-                    <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const map = mapInstanceRef.current;
-
-                      if (!personCase) {
-                        if (!isAdmin) {
-                          window.alert('Aucune projection active pour cette mission.');
-                          return;
-                        }
-                        setPersonEdit(true);
-                        setPersonPanelCollapsed(false);
-                        setPersonPanelOpen(true);
-                        return;
-                      }
-
-                      if (!isAdmin) {
-                        setProjectionNotification(false);
-                        setSettingsNotification(false);
-                      }
-
-                      if (personPanelOpen && personPanelCollapsed) {
-                        setPersonPanelOpen(false);
-                        setPersonPanelCollapsed(false);
-                        if (map && mapReady) applyHeatmapVisibility(map, false);
-                        return;
-                      }
-
-                      if (personPanelOpen && !personPanelCollapsed) {
-                        setPersonEdit(false);
-                        setPersonPanelCollapsed(true);
-                        if (map && mapReady) {
-                          applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
-                        }
-                        return;
-                      }
-
-                      setPersonEdit(false);
-                      setPersonPanelCollapsed(true);
-                      setPersonPanelOpen(true);
-                      if (map && mapReady) {
-                        applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
-                      }
-                    }}
-                    className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-                    } ${!personCase ? 'opacity-60' : ''}`}
-                    title="Activité"
-                  >
-                    <PawPrint
-                      className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'}
-                      size={20}
-                    />
-                    {!isAdmin && projectionNotification ? (
-                      <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
-                    ) : null}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const rs = mission?.traceRetentionSeconds ?? 3600;
-                      setTimerSecondsInput(String(rs));
-                      setTimerError(null);
-                      setTimerModalOpen(true);
-                    }}
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
-                    title="Minuteur"
-                  >
-                    <Timer className="text-gray-600" size={20} />
-                  </button>
-                </div>
-              </div>
+              ) : null}
             </div>
-          </>
-        ) : null}
+          </div>
+        </div>
 
         {isMapRotated ? (
           <button
@@ -5363,7 +5370,7 @@ export default function MapLibreMap() {
                             lastKnownWhen: e.target.value,
                           }))
                         }
-                        className="mt-1 h-10 w-full max-w-[220px] rounded-2xl border px-3 text-xs mx-auto"
+                        className="mt-1 h-10 w-full max-w-[180px] rounded-2xl border px-3 text-xs mx-auto"
                       />
                     </div>
                   </div>
@@ -5464,7 +5471,7 @@ export default function MapLibreMap() {
                               nextClueWhen: e.target.value,
                             }))
                           }
-                          className="mt-1 h-9 w-full max-w-[220px] rounded-2xl border px-2 text-xs mx-auto"
+                          className="mt-1 h-9 w-full max-w-[180px] rounded-2xl border px-2 text-xs mx-auto"
                         />
                       </div>
                     </div>
@@ -5930,11 +5937,19 @@ export default function MapLibreMap() {
                 type="button"
                 disabled={actionBusy}
                 onClick={() => void submitDraft()}
-                className="h-11 w-full rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
+                className="h-11 w-full rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow"
               >
                 Valider
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {noProjectionToast ? (
+        <div className="pointer-events-none fixed inset-0 z-[1400] flex items-center justify-center p-4">
+          <div className="pointer-events-auto max-w-sm rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
+            Aucune projection active pour cette mission.
           </div>
         </div>
       ) : null}
