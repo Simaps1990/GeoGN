@@ -403,20 +403,25 @@ export default function MapLibreMap() {
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
-  const [navPickerPoi, setNavPickerPoi] = useState<ApiPoi | null>(null);
+  const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
   // Compteur de version du style de carte pour forcer la resynchro des overlays (dont la zone d'estimation)
   const [styleVersion, setStyleVersion] = useState(0);
 
   useEffect(() => {
-    if (!navPickerPoi) return;
+    if (!navPickerTarget) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setNavPickerPoi(null);
+      if (e.key === 'Escape') setNavPickerTarget(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navPickerPoi]);
+  }, [navPickerTarget]);
+
+  const isAndroid = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    return /android/i.test(navigator.userAgent);
+  }, []);
 
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null);
 
@@ -448,6 +453,31 @@ export default function MapLibreMap() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  function zoneNavTarget(z: ApiZone): { lng: number; lat: number; title: string } | null {
+    if (z.type === 'circle' && z.circle?.center) {
+      return { lng: z.circle.center.lng, lat: z.circle.center.lat, title: z.title || 'Zone' };
+    }
+    if (z.type === 'polygon' && z.polygon?.type === 'Polygon' && Array.isArray(z.polygon.coordinates)) {
+      const ring = Array.isArray(z.polygon.coordinates[0]) ? z.polygon.coordinates[0] : [];
+      if (!ring.length) return null;
+      let sumLng = 0;
+      let sumLat = 0;
+      let n = 0;
+      for (const pt of ring) {
+        if (!Array.isArray(pt) || pt.length < 2) continue;
+        const lng = Number(pt[0]);
+        const lat = Number(pt[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        sumLng += lng;
+        sumLat += lat;
+        n += 1;
+      }
+      if (n === 0) return null;
+      return { lng: sumLng / n, lat: sumLat / n, title: z.title || 'Zone' };
+    }
+    return null;
+  }
+
   useEffect(() => {
     if (!selectedPoi) return;
     const next = pois.find((p) => p.id === selectedPoi.id);
@@ -465,7 +495,6 @@ export default function MapLibreMap() {
   const [personError, setPersonError] = useState<string | null>(null);
   const [personCase, setPersonCase] = useState<ApiPersonCase | null>(null);
   const [personEdit, setPersonEdit] = useState(false);
-  const [hasPersonCase, setHasPersonCase] = useState<boolean | null>(null);
   const [estimationNowMs, setEstimationNowMs] = useState<number>(() => Date.now());
   const [personDraft, setPersonDraft] = useState<{
     lastKnownQuery: string;
@@ -1315,31 +1344,6 @@ export default function MapLibreMap() {
     return 'Inconnu';
   };
 
-  // Précharger l'existence d'une fiche personne pour pouvoir masquer l'icône aux non-admin
-  useEffect(() => {
-    if (!selectedMissionId) {
-      setHasPersonCase(null);
-      return;
-    }
-    if (!mission) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await getPersonCase(selectedMissionId);
-        if (cancelled) return;
-        setHasPersonCase(!!res.case);
-      } catch {
-        if (cancelled) return;
-        setHasPersonCase(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedMissionId, mission?.id]);
-
   // Lorsqu'une fiche apparaît pour la mission, déclencher une notification pour les non-admin
   useEffect(() => {
     if (!personCase) return;
@@ -1347,6 +1351,34 @@ export default function MapLibreMap() {
     setProjectionNotification(true);
     setSettingsNotification(true);
   }, [personCase, isAdmin]);
+
+  // Précharger la fiche personne pour tous les rôles afin que les non-admin puissent voir le suivi actif
+  // (pastilles + ouverture Paw + heatmap) sans devoir ouvrir le panneau.
+  useEffect(() => {
+    if (!selectedMissionId) {
+      if (!personPanelOpen) setPersonCase(null);
+      return;
+    }
+    if (!mission) return;
+    if (personPanelOpen) return;
+    if (personEdit) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getPersonCase(selectedMissionId);
+        if (cancelled) return;
+        setPersonCase(res.case);
+      } catch {
+        if (cancelled) return;
+        setPersonCase(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMissionId, mission?.id, personPanelOpen, personEdit]);
 
   useEffect(() => {
     if (!personPanelOpen) return;
@@ -1362,7 +1394,6 @@ export default function MapLibreMap() {
         if (cancelled) return;
         const c = res.case;
         setPersonCase(c);
-        setHasPersonCase(!!c);
         if (!c) {
           // Pas encore de fiche : seuls les admins peuvent en créer, les visualisateurs restent en lecture seule.
           if (canEditPerson) {
@@ -4603,7 +4634,7 @@ export default function MapLibreMap() {
                 <button
                   type="button"
                   onClick={() => {
-                    setNavPickerPoi(selectedPoi);
+                    setNavPickerTarget({ lng: selectedPoi.lng, lat: selectedPoi.lat, title: selectedPoi.title || 'POI' });
                   }}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
                   title="Naviguer vers le point"
@@ -4683,10 +4714,10 @@ export default function MapLibreMap() {
         </div>
       )}
 
-      {navPickerPoi ? (
+      {navPickerTarget ? (
         <div
           className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setNavPickerPoi(null)}
+          onClick={() => setNavPickerTarget(null)}
         >
           <div
             className="w-full max-w-md rounded-3xl bg-white shadow-xl"
@@ -4699,9 +4730,9 @@ export default function MapLibreMap() {
               <button
                 type="button"
                 onClick={() => {
-                  const waze = `https://waze.com/ul?ll=${navPickerPoi.lat}%2C${navPickerPoi.lng}&navigate=yes`;
+                  const waze = `https://waze.com/ul?ll=${navPickerTarget.lat}%2C${navPickerTarget.lng}&navigate=yes`;
                   window.open(waze, '_blank');
-                  setNavPickerPoi(null);
+                  setNavPickerTarget(null);
                 }}
                 className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
                 title="Waze"
@@ -4711,29 +4742,31 @@ export default function MapLibreMap() {
               <button
                 type="button"
                 onClick={() => {
-                  const q = encodeURIComponent(`${navPickerPoi.lat},${navPickerPoi.lng}`);
+                  const q = encodeURIComponent(`${navPickerTarget.lat},${navPickerTarget.lng}`);
                   const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
                   window.open(gmaps, '_blank');
-                  setNavPickerPoi(null);
+                  setNavPickerTarget(null);
                 }}
                 className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
                 title="Google Maps"
               >
                 <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const label = encodeURIComponent(navPickerPoi.title || 'POI');
-                  const apple = `http://maps.apple.com/?ll=${navPickerPoi.lat},${navPickerPoi.lng}&q=${label}`;
-                  window.open(apple, '_blank');
-                  setNavPickerPoi(null);
-                }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
-                title="Plans (Apple)"
-              >
-                <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />
-              </button>
+              {!isAndroid ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const label = encodeURIComponent(navPickerTarget.title || 'Cible');
+                    const apple = `http://maps.apple.com/?ll=${navPickerTarget.lat},${navPickerTarget.lng}&q=${label}`;
+                    window.open(apple, '_blank');
+                    setNavPickerTarget(null);
+                  }}
+                  className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                  title="Plans (Apple)"
+                >
+                  <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -4765,75 +4798,75 @@ export default function MapLibreMap() {
         </button>
 
         {canEditMap ? (
-          <>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeTool === 'poi') {
+                cancelDraft();
+                return;
+              }
+              cancelDraft();
+              setZoneMenuOpen(false);
+              setDraftColor('');
+              setDraftIcon('');
+              setDraftComment('');
+              setActiveTool('poi');
+            }}
+            className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
+              activeTool === 'poi' ? 'ring-1 ring-inset ring-blue-500/25' : ''
+            }`}
+            title="Ajouter un POI"
+          >
+            <MapPin
+              className={activeTool === 'poi' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'}
+              size={20}
+            />
+          </button>
+        ) : null}
+
+        <div
+          className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+            zoneMenuOpen ? 'h-[260px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+          }`}
+        >
+          <div className="flex flex-col gap-2">
             <button
               type="button"
               onClick={() => {
-                if (activeTool === 'poi') {
+                setActionError(null);
+
+                if (canEditMap && (activeTool === 'zone_circle' || activeTool === 'zone_polygon')) {
                   cancelDraft();
+                  setZoneMenuOpen(false);
                   return;
                 }
-                cancelDraft();
-                setZoneMenuOpen(false);
-                setDraftColor('');
-                setDraftIcon('');
-                setDraftComment('');
-                setActiveTool('poi');
+
+                setZoneMenuOpen((v) => !v);
               }}
-              className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
-                activeTool === 'poi' ? 'ring-1 ring-inset ring-blue-500/25' : ''
+              className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+                zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                  ? 'ring-1 ring-inset ring-blue-500/25'
+                  : ''
               }`}
-              title="Ajouter un POI"
+              title="Zones"
             >
-              <MapPin
+              <CircleDotDashed
                 className={
-                  activeTool === 'poi' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'
+                  zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                    ? 'mx-auto text-blue-600'
+                    : 'mx-auto text-gray-600'
                 }
                 size={20}
               />
             </button>
 
             <div
-              className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-                zoneMenuOpen ? 'h-[160px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+              className={`flex flex-col gap-2 transition-all duration-200 ${
+                zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
               }`}
             >
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActionError(null);
-
-                    if (activeTool === 'zone_circle' || activeTool === 'zone_polygon') {
-                      cancelDraft();
-                      setZoneMenuOpen(false);
-                      return;
-                    }
-
-                    setZoneMenuOpen((v) => !v);
-                  }}
-                  className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                      ? 'ring-1 ring-inset ring-blue-500/25'
-                      : ''
-                  }`}
-                  title="Zones"
-                >
-                  <CircleDotDashed
-                    className={
-                      zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                        ? 'mx-auto text-blue-600'
-                        : 'mx-auto text-gray-600'
-                    }
-                    size={20}
-                  />
-                </button>
-
-                <div
-                  className={`flex flex-col gap-2 transition-all duration-200 ${
-                    zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
-                  }`}
-                >
+              {canEditMap ? (
+                <>
                   <button
                     type="button"
                     onClick={() => {
@@ -4872,15 +4905,45 @@ export default function MapLibreMap() {
                   >
                     <Spline className={activeTool === 'zone_polygon' ? 'text-blue-600' : 'text-gray-600'} size={20} />
                   </button>
-                </div>
+                </>
+              ) : null}
+
+              <div className="max-h-[152px] overflow-y-auto rounded-2xl border bg-white p-1">
+                {zones.length ? (
+                  <div className="grid gap-1">
+                    {zones.map((z) => (
+                      <div key={z.id} className="flex items-center justify-between gap-2 rounded-xl px-2 py-2 hover:bg-gray-50">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-semibold text-gray-800">{z.title || 'Zone'}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = zoneNavTarget(z);
+                            if (!t) return;
+                            setNavPickerTarget(t);
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                          title="Naviguer vers la zone"
+                        >
+                          <Navigation2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-2 py-2 text-xs text-gray-600">Aucune zone</div>
+                )}
               </div>
             </div>
-          </>
-        ) : null}
+          </div>
+        </div>
 
         <div
           className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-            settingsMenuOpen ? 'h-[274px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+            settingsMenuOpen
+              ? `${isAdmin ? 'h-[274px]' : 'h-[214px]'} ring-1 ring-inset ring-black/10`
+              : 'h-12 ring-0'
           }`}
         >
           <div className="flex flex-col gap-2">
@@ -5131,7 +5194,6 @@ export default function MapLibreMap() {
                         try {
                           await deletePersonCase(selectedMissionId);
                           setPersonCase(null);
-                          setHasPersonCase(false);
                           setPersonEdit(true);
                           setPersonDraft({
                             lastKnownQuery: '',

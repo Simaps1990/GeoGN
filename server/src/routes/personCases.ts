@@ -35,6 +35,10 @@ async function requireAdminMembership(userId: string, missionId: string) {
   return MissionMemberModel.findOne({ missionId, userId, removedAt: null, role: 'admin' }).lean();
 }
 
+async function requireAnyMembership(userId: string, missionId: string) {
+  return MissionMemberModel.findOne({ missionId, userId, removedAt: null }).lean();
+}
+
 function toDto(doc: any) {
   return {
     id: doc._id.toString(),
@@ -77,7 +81,7 @@ function toDto(doc: any) {
 }
 
 export async function personCasesRoutes(app: FastifyInstance) {
-  // Read current person case for a mission (admin-only)
+  // Read current person case for a mission (any mission member)
   app.get<{ Params: { missionId: string } }>(
     '/missions/:missionId/person-case',
     async (req: FastifyRequest<{ Params: { missionId: string } }>, reply: FastifyReply) => {
@@ -92,8 +96,8 @@ export async function personCasesRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
       }
 
-      const admin = await requireAdminMembership(req.userId, missionId);
-      if (!admin) {
+      const mem = await requireAnyMembership(req.userId, missionId);
+      if (!mem) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
