@@ -1320,6 +1320,7 @@ export default function MapLibreMap() {
   // Notifications projection (pour utilisateurs / visualisateurs)
   const [projectionNotification, setProjectionNotification] = useState(false);
   const [settingsNotification, setSettingsNotification] = useState(false);
+  const lastNotifiedPersonCaseIdRef = useRef<string | null>(null);
 
   const mobilityLabel = (m: ApiPersonCase['mobility']) => {
     switch (m) {
@@ -1346,8 +1347,13 @@ export default function MapLibreMap() {
 
   // Lorsqu'une fiche apparaît pour la mission, déclencher une notification pour les non-admin
   useEffect(() => {
-    if (!personCase) return;
     if (isAdmin) return;
+    if (!personCase) {
+      lastNotifiedPersonCaseIdRef.current = null;
+      return;
+    }
+    if (lastNotifiedPersonCaseIdRef.current === personCase.id) return;
+    lastNotifiedPersonCaseIdRef.current = personCase.id;
     setProjectionNotification(true);
     setSettingsNotification(true);
   }, [personCase, isAdmin]);
