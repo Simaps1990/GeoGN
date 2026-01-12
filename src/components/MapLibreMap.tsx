@@ -4973,7 +4973,7 @@ export default function MapLibreMap() {
                 size={20}
               />
               {!isAdmin && settingsNotification ? (
-                <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+                <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
               ) : null}
             </button>
 
@@ -5009,6 +5009,10 @@ export default function MapLibreMap() {
                 onClick={() => {
                   const map = mapInstanceRef.current;
 
+                  if (!isAdmin) {
+                    setProjectionNotification(false);
+                  }
+
                   if (!personCase) {
                     if (!isAdmin) {
                       setNoProjectionToast(true);
@@ -5021,7 +5025,6 @@ export default function MapLibreMap() {
                   }
 
                   if (!isAdmin) {
-                    setProjectionNotification(false);
                     setSettingsNotification(false);
                   }
 
@@ -5055,7 +5058,7 @@ export default function MapLibreMap() {
               >
                 <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
                 {!isAdmin && projectionNotification ? (
-                  <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
                 ) : null}
               </button>
 
