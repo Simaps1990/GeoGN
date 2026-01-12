@@ -398,6 +398,12 @@ export default function MapLibreMap() {
   const [memberColors, setMemberColors] = useState<Record<string, string>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
+  const [othersActivityTick, setOthersActivityTick] = useState(0);
+
+  const [followMyBearing, setFollowMyBearing] = useState(false);
+  const centerOnMeNextActionRef = useRef<'center' | 'follow'>('center');
+  const lastHeadingRef = useRef<number | null>(null);
+
   const [lastPos, setLastPos] = useState<{ lng: number; lat: number } | null>(null);
   const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number; t: number }[]>([]);
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
@@ -657,6 +663,12 @@ export default function MapLibreMap() {
       .filter((p) => (p.title ?? '').toLowerCase().includes(q))
       .slice(0, 5);
   }, [personDraft.nextClueQuery, pois]);
+
+  useEffect(() => {
+    if (personDraft.mobility === 'none') return;
+    setDiseasesOpen(false);
+    setInjuriesOpen(false);
+  }, [personDraft.mobility]);
 
   useEffect(() => {
     const q = personDraft.lastKnownQuery.trim();
@@ -1351,7 +1363,7 @@ export default function MapLibreMap() {
       case 'bike':
         return 'Vélo';
       case 'scooter':
-        return 'Trottinette';
+        return 'Scooter';
       case 'motorcycle':
         return 'Moto';
       case 'car':
@@ -1776,6 +1788,59 @@ export default function MapLibreMap() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const members = await listMissionMembers(selectedMissionId);
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        const nextNames: Record<string, string> = {};
+        for (const m of members) {
+          const id = m.user?.id;
+          if (!id) continue;
+          const c = typeof m.color === 'string' ? m.color.trim() : '';
+          if (c) next[id] = c;
+          const name = typeof m.user?.displayName === 'string' ? m.user.displayName.trim() : '';
+          if (name) nextNames[id] = name;
+        }
+        setMemberColors(next);
+        setMemberNames(nextNames);
+      } catch {
+        // non bloquant
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refresh();
+    };
+    const onFocus = () => {
+      void refresh();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    const id = window.setInterval(() => {
+      setOthersActivityTick((v) => (v + 1) % 1_000_000);
+    }, 10_000);
+    return () => {
+      window.clearInterval(id);
     };
   }, [selectedMissionId]);
 
@@ -2287,6 +2352,19 @@ export default function MapLibreMap() {
   function centerOnMe() {
     const map = mapInstanceRef.current;
     if (!map) return;
+
+    // Alternance simple à chaque clic :
+    // - center => recentre + désactive follow
+    // - follow => active followMyBearing
+    if (centerOnMeNextActionRef.current === 'follow') {
+      setFollowMyBearing(true);
+      centerOnMeNextActionRef.current = 'center';
+      return;
+    }
+
+    setFollowMyBearing(false);
+    centerOnMeNextActionRef.current = 'follow';
+
     if (selectedMissionId) {
       (async () => {
         try {
@@ -4119,13 +4197,21 @@ export default function MapLibreMap() {
 
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!socket.connected) return;
+      if (!socket.connected) {
+        try {
+          socket.connect();
+        } catch {
+          // ignore
+        }
+      }
       ensureJoined();
       requestSnapshot();
       flushPending();
       void flushPendingActions(missionId);
     };
     document.addEventListener('visibilitychange', onVisibility);
+
+    window.addEventListener('focus', onVisibility);
 
     const onOnline = () => {
       void flushPendingActions(missionId);
@@ -4297,6 +4383,11 @@ export default function MapLibreMap() {
     return () => {
       cancelled = true;
 
+      socket.off('connect', onConnected);
+      socket.off('reconnect', onConnected as any);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onVisibility);
+      window.removeEventListener('online', onOnline);
       socket.off('mission:snapshot', onSnapshot);
       socket.off('position:update', onPos);
       socket.off('position:bulk', onPosBulk);
@@ -4358,6 +4449,10 @@ export default function MapLibreMap() {
         const lat = pos.coords.latitude;
         const t = Date.now();
 
+        if (typeof pos.coords.heading === 'number' && Number.isFinite(pos.coords.heading)) {
+          lastHeadingRef.current = pos.coords.heading;
+        }
+
         setLastPos({ lng, lat });
         setTracePoints((prev) => {
           const cutoff = Date.now() - traceRetentionMs;
@@ -4406,6 +4501,34 @@ export default function MapLibreMap() {
       }
     };
   }, [selectedMissionId, trackingEnabled, traceRetentionMs, maxTracePoints]);
+
+  useEffect(() => {
+    if (!followMyBearing) return;
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!lastPos) return;
+
+    const heading = lastHeadingRef.current;
+    let bearing: number | null = null;
+    if (typeof heading === 'number' && Number.isFinite(heading)) {
+      bearing = heading;
+    } else if (tracePoints.length >= 2) {
+      const a = tracePoints[tracePoints.length - 2];
+      const b = tracePoints[tracePoints.length - 1];
+      const dLng = (b.lng - a.lng) * Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180));
+      const dLat = b.lat - a.lat;
+      const rad = Math.atan2(dLng, dLat);
+      bearing = ((rad * 180) / Math.PI + 360) % 360;
+    }
+
+    if (bearing === null) return;
+    try {
+      map.easeTo({ center: [lastPos.lng, lastPos.lat], bearing, duration: 350 });
+    } catch {
+      // ignore
+    }
+  }, [followMyBearing, lastPos, tracePoints, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -4533,7 +4656,7 @@ export default function MapLibreMap() {
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberColors, memberNames, mapReady]);
+  }, [otherPositions, memberColors, memberNames, mapReady, othersActivityTick]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -4545,6 +4668,7 @@ export default function MapLibreMap() {
     const inactiveAfterMs = 60_000;
     const inactiveColor = '#9ca3af';
     const features: any[] = [];
+    const segmentGapMs = 30_000;
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       if (pts.length < 2) continue;
       const memberColor = memberColors[userId];
@@ -4552,15 +4676,37 @@ export default function MapLibreMap() {
       const isInactive = now - lastT > inactiveAfterMs;
       const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
 
-      features.push({
-        type: 'Feature',
-        properties: { userId, color, inactive: isInactive ? 1 : 0 },
-        geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) },
-      });
+      let segment: { lng: number; lat: number; t: number }[] = [];
+      let prevT: number | null = null;
+      for (const p of pts) {
+        if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
+        if (typeof p.t !== 'number' || !Number.isFinite(p.t)) continue;
+
+        if (prevT !== null && p.t - prevT > segmentGapMs) {
+          if (segment.length >= 2) {
+            features.push({
+              type: 'Feature',
+              properties: { userId, color, inactive: isInactive ? 1 : 0 },
+              geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
+            });
+          }
+          segment = [];
+        }
+        segment.push(p);
+        prevT = p.t;
+      }
+
+      if (segment.length >= 2) {
+        features.push({
+          type: 'Feature',
+          properties: { userId, color, inactive: isInactive ? 1 : 0 },
+          geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
+        });
+      }
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
-  }, [otherPositions, memberColors, mapReady, traceRetentionMs]);
+  }, [otherPositions, memberColors, mapReady, traceRetentionMs, othersActivityTick]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -4598,20 +4744,33 @@ export default function MapLibreMap() {
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
       if (filtered.length !== tracePoints.length) setTracePoints(filtered);
 
-      if (filtered.length >= 2) {
-        traceSource.setData({
-          type: 'FeatureCollection',
-          features: [
-            {
+      const segmentGapMs = 30_000;
+      const selfFeatures: any[] = [];
+      let segment: { lng: number; lat: number; t: number }[] = [];
+      let prevT: number | null = null;
+      for (const p of filtered) {
+        if (prevT !== null && p.t - prevT > segmentGapMs) {
+          if (segment.length >= 2) {
+            selfFeatures.push({
               type: 'Feature',
-              geometry: { type: 'LineString', coordinates: filtered.map((p) => [p.lng, p.lat]) },
+              geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
               properties: {},
-            },
-          ],
-        });
-      } else {
-        traceSource.setData({ type: 'FeatureCollection', features: [] });
+            });
+          }
+          segment = [];
+        }
+        segment.push(p);
+        prevT = p.t;
       }
+      if (segment.length >= 2) {
+        selfFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
+          properties: {},
+        });
+      }
+
+      traceSource.setData({ type: 'FeatureCollection', features: selfFeatures } as any);
     };
 
     update();
@@ -4816,10 +4975,16 @@ export default function MapLibreMap() {
         <button
           type="button"
           onClick={centerOnMe}
-          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-          title="Centrer sur moi"
+          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
+            followMyBearing ? 'ring-1 ring-inset ring-blue-500/25' : ''
+          }`}
+          title={followMyBearing ? 'Suivre mon orientation' : 'Centrer sur moi'}
         >
-          <Crosshair className="mx-auto text-gray-600" size={20} />
+          {followMyBearing ? (
+            <Navigation2 className="mx-auto text-blue-600" size={20} />
+          ) : (
+            <Crosshair className="mx-auto text-gray-600" size={20} />
+          )}
         </button>
 
         <button
@@ -5609,91 +5774,93 @@ export default function MapLibreMap() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border p-3">
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between text-left"
-                        onClick={() => setDiseasesOpen((v) => !v)}
-                      >
-                        <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
-                        <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
-                      </button>
-                      {diseasesOpen ? (
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          {diseaseOptions.map((id) => {
-                            const checked = personDraft.diseases.includes(id);
-                            const raw = id.replace(/_/g, ' ');
-                            const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
-                            return (
-                              <div key={id} className="rounded-2xl border p-2">
-                                <label className="flex items-center gap-2 text-sm text-gray-800">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(e) => {
-                                      const next = e.target.checked
-                                        ? Array.from(new Set([...personDraft.diseases, id]))
-                                        : personDraft.diseases.filter((x) => x !== id);
-                                      setPersonDraft((p) => ({ ...p, diseases: next }));
-                                    }}
-                                  />
-                                  <span className="font-normal">{label}</span>
-                                </label>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
+                  {personDraft.mobility === 'none' ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="rounded-2xl border p-3">
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between text-left"
+                          onClick={() => setDiseasesOpen((v) => !v)}
+                        >
+                          <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
+                          <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
+                        </button>
+                        {diseasesOpen ? (
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            {diseaseOptions.map((id) => {
+                              const checked = personDraft.diseases.includes(id);
+                              const raw = id.replace(/_/g, ' ');
+                              const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+                              return (
+                                <div key={id} className="rounded-2xl border p-2">
+                                  <label className="flex items-center gap-2 text-sm text-gray-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        const next = e.target.checked
+                                          ? Array.from(new Set([...personDraft.diseases, id]))
+                                          : personDraft.diseases.filter((x) => x !== id);
+                                        setPersonDraft((p) => ({ ...p, diseases: next }));
+                                      }}
+                                    />
+                                    <span className="font-normal">{label}</span>
+                                  </label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
 
-                    <div className="rounded-2xl border p-3">
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between text-left"
-                        onClick={() => setInjuriesOpen((v) => !v)}
-                      >
-                        <div className="text-xs font-semibold text-gray-700">Blessures</div>
-                        <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
-                      </button>
-                      {injuriesOpen ? (
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          {injuryOptions.map((injuryId) => {
-                            const injury = personDraft.injuries.find((x) => x.id === injuryId);
-                            const checked = !!injury;
-                            return (
-                              <div key={injuryId} className="rounded-2xl border p-2">
-                                <label className="flex items-center gap-2 text-sm text-gray-800">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setPersonDraft((p) => ({
-                                          ...p,
-                                          injuries: [...p.injuries, { id: injuryId, locations: [] }],
-                                        }));
-                                      } else {
-                                        setPersonDraft((p) => ({
-                                          ...p,
-                                          injuries: p.injuries.filter((x) => x.id !== injuryId),
-                                        }));
-                                      }
-                                    }}
-                                  />
-                                  <span className="font-normal">
-                                    {injuryId
-                                      .replace(/_/g, ' ')
-                                      .replace(/\b\w/g, (c) => c.toUpperCase())}
-                                  </span>
-                                </label>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
+                      <div className="rounded-2xl border p-3">
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between text-left"
+                          onClick={() => setInjuriesOpen((v) => !v)}
+                        >
+                          <div className="text-xs font-semibold text-gray-700">Blessures</div>
+                          <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
+                        </button>
+                        {injuriesOpen ? (
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            {injuryOptions.map((injuryId) => {
+                              const injury = personDraft.injuries.find((x) => x.id === injuryId);
+                              const checked = !!injury;
+                              return (
+                                <div key={injuryId} className="rounded-2xl border p-2">
+                                  <label className="flex items-center gap-2 text-sm text-gray-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setPersonDraft((p) => ({
+                                            ...p,
+                                            injuries: [...p.injuries, { id: injuryId, locations: [] }],
+                                          }));
+                                        } else {
+                                          setPersonDraft((p) => ({
+                                            ...p,
+                                            injuries: p.injuries.filter((x) => x.id !== injuryId),
+                                          }));
+                                        }
+                                      }}
+                                    />
+                                    <span className="font-normal">
+                                      {injuryId
+                                        .replace(/_/g, ' ')
+                                        .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                    </span>
+                                  </label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button
@@ -5743,9 +5910,30 @@ export default function MapLibreMap() {
                     </button>
                     <button
                       type="button"
-                      disabled={personLoading || !selectedMissionId}
+                      disabled={
+                        personLoading ||
+                        !selectedMissionId ||
+                        !personDraft.lastKnownWhen ||
+                        !personDraft.lastKnownQuery.trim() ||
+                        !personDraft.mobility
+                      }
                       onClick={async () => {
                         if (!selectedMissionId) return;
+
+                        const address = personDraft.lastKnownQuery.trim();
+                        if (!address) {
+                          setPersonError('Adresse requise');
+                          return;
+                        }
+                        if (!personDraft.lastKnownWhen) {
+                          setPersonError('Date / heure requise');
+                          return;
+                        }
+                        if (!personDraft.mobility) {
+                          setPersonError('Mode de déplacement requis');
+                          return;
+                        }
+
                         setPersonLoading(true);
                         setPersonError(null);
                         try {
@@ -5754,7 +5942,7 @@ export default function MapLibreMap() {
                           const payload = {
                             lastKnown: {
                               type: personDraft.lastKnownType,
-                              query: personDraft.lastKnownQuery,
+                              query: address,
                               poiId: personDraft.lastKnownPoiId,
                               lng: personDraft.lastKnownLng,
                               lat: personDraft.lastKnownLat,
