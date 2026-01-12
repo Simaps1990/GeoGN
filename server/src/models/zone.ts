@@ -21,6 +21,7 @@ export interface ZoneSector {
 export interface ZoneGrid {
   rows: number;
   cols: number;
+  orientation?: 'vertical' | 'diag45';
 }
 
 export interface ZoneDoc {
@@ -60,6 +61,7 @@ const ZoneGridSchema = new Schema<ZoneGrid>(
   {
     rows: { type: Number, required: true, min: 1, max: 26 },
     cols: { type: Number, required: true, min: 1, max: 26 },
+    orientation: { type: String, required: false, enum: ['vertical', 'diag45'] },
   },
   { _id: false }
 );

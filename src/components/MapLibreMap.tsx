@@ -1323,6 +1323,19 @@ export default function MapLibreMap() {
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
+  function normalizeRemoteTime(t: any, now: number) {
+    // Certains clients / caches peuvent fournir des timestamps en secondes.
+    // Et certains appareils peuvent avoir une horloge très décalée.
+    // On normalise pour éviter de marquer tout le monde "inactif" à tort.
+    if (typeof t !== 'number' || !Number.isFinite(t)) return now;
+    let v = t;
+    // seconds -> ms
+    if (v > 0 && v < 10_000_000_000) v = v * 1000;
+    // future timestamps (clock skew) -> clamp to now
+    if (v > now + 5 * 60_000) return now;
+    return v;
+  }
+
   useEffect(() => {
     if (!selectedMissionId) {
       setHiddenUserIds({});
@@ -3172,11 +3185,200 @@ export default function MapLibreMap() {
         const rows = Math.max(1, z.grid.rows);
         const cols = Math.max(1, Math.min(26, z.grid.cols));
 
+        const gridOrientation = (z.grid as any)?.orientation === 'diag45' ? 'diag45' : 'vertical';
+
         const dx = (bbox.maxLng - bbox.minLng) / cols;
         const dy = (bbox.maxLat - bbox.minLat) / rows;
 
         const metersPerDegLat = 111_320;
         const metersPerDegLng = 111_320 * Math.cos((((z.type === 'circle' && z.circle) ? z.circle.center.lat : (bbox.minLat + bbox.maxLat) / 2) * Math.PI) / 180);
+
+        // Centre utilisé pour la rotation (et le repère en mètres)
+        const centerLng = z.type === 'circle' && z.circle ? z.circle.center.lng : (bbox.minLng + bbox.maxLng) / 2;
+        const centerLat = z.type === 'circle' && z.circle ? z.circle.center.lat : (bbox.minLat + bbox.maxLat) / 2;
+
+        const rotateMeters = (x: number, y: number, angleRad: number) => {
+          const c = Math.cos(angleRad);
+          const s = Math.sin(angleRad);
+          return { x: x * c - y * s, y: x * s + y * c };
+        };
+
+        const toMeters = (lng: number, lat: number, centerLng: number, centerLat: number) => {
+          return {
+            x: (lng - centerLng) * metersPerDegLng,
+            y: (lat - centerLat) * metersPerDegLat,
+          };
+        };
+
+        const toLngLat = (x: number, y: number, centerLng: number, centerLat: number) => {
+          return {
+            lng: centerLng + x / metersPerDegLng,
+            lat: centerLat + y / metersPerDegLat,
+          };
+        };
+
+        const addRotatedSegments = (
+          kind: 'line' | 'label' | 'cell',
+          axis: 'x' | 'y' | null,
+          text: string | null,
+          a: { x: number; y: number },
+          b: { x: number; y: number } | null
+        ) => {
+          if (kind === 'line') {
+            if (!b) return;
+            const pa = toLngLat(a.x, a.y, centerLng, centerLat);
+            const pb = toLngLat(b.x, b.y, centerLng, centerLat);
+            features.push({
+              type: 'Feature',
+              properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
+              geometry: { type: 'LineString', coordinates: [[pa.lng, pa.lat], [pb.lng, pb.lat]] },
+            });
+            return;
+          }
+          const p = toLngLat(a.x, a.y, centerLng, centerLat);
+          if (kind === 'cell') {
+            features.push({
+              type: 'Feature',
+              properties: { kind: 'cell', zoneId: z.id, text },
+              geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+            });
+            return;
+          }
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'label', axis, zoneId: z.id, text, rows, cols },
+            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+          });
+        };
+
+        if (gridOrientation === 'diag45') {
+          const angle = Math.PI / 4;
+          const inv = -angle;
+
+          const ringMetersRot: [number, number][] | null =
+            z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length
+              ? z.polygon.coordinates[0].map((p) => {
+                  const m = toMeters(p[0], p[1], centerLng, centerLat);
+                  const r = rotateMeters(m.x, m.y, inv);
+                  return [r.x, r.y];
+                })
+              : null;
+
+          const clipV = (x: number) => {
+            if (z.type === 'circle' && z.circle) {
+              const R = z.circle.radiusMeters;
+              if (Math.abs(x) >= R) return [] as [number, number][];
+              const y = Math.sqrt(R * R - x * x);
+              return [[-y, y]] as [number, number][];
+            }
+            if (ringMetersRot) {
+              return clipVerticalLineToPolygon(x, ringMetersRot);
+            }
+            return [] as [number, number][];
+          };
+
+          const clipH = (y: number) => {
+            if (z.type === 'circle' && z.circle) {
+              const R = z.circle.radiusMeters;
+              if (Math.abs(y) >= R) return [] as [number, number][];
+              const x = Math.sqrt(R * R - y * y);
+              return [[-x, x]] as [number, number][];
+            }
+            if (ringMetersRot) {
+              return clipHorizontalLineToPolygon(y, ringMetersRot);
+            }
+            return [] as [number, number][];
+          };
+
+          // bbox dans l'espace tourné (en mètres)
+          let minX = 0;
+          let maxX = 0;
+          let minY = 0;
+          let maxY = 0;
+
+          if (z.type === 'circle' && z.circle) {
+            const R = z.circle.radiusMeters;
+            minX = -R;
+            maxX = R;
+            minY = -R;
+            maxY = R;
+          } else if (ringMetersRot && ringMetersRot.length) {
+            minX = Math.min(...ringMetersRot.map((p) => p[0]));
+            maxX = Math.max(...ringMetersRot.map((p) => p[0]));
+            minY = Math.min(...ringMetersRot.map((p) => p[1]));
+            maxY = Math.max(...ringMetersRot.map((p) => p[1]));
+          } else {
+            continue;
+          }
+
+          const dxm = (maxX - minX) / cols;
+          const dym = (maxY - minY) / rows;
+
+          const fromRotMeters = (x: number, y: number) => {
+            const r = rotateMeters(x, y, angle);
+            return { x: r.x, y: r.y };
+          };
+
+          // lignes verticales (dans repère tourné)
+          for (let c = 1; c < cols; c++) {
+            const x = minX + c * dxm;
+            const segs = clipV(x);
+            for (const [a, b] of segs) {
+              const p1 = fromRotMeters(x, a);
+              const p2 = fromRotMeters(x, b);
+              addRotatedSegments('line', null, null, p1, p2);
+            }
+          }
+
+          // lignes horizontales (dans repère tourné)
+          for (let r = 1; r < rows; r++) {
+            const y = minY + r * dym;
+            const segs = clipH(y);
+            for (const [a, b] of segs) {
+              const p1 = fromRotMeters(a, y);
+              const p2 = fromRotMeters(b, y);
+              addRotatedSegments('line', null, null, p1, p2);
+            }
+          }
+
+          // labels colonnes (bas dans repère tourné)
+          for (let c = 0; c < cols; c++) {
+            const x = minX + (c + 0.5) * dxm;
+            const segs = clipV(x);
+            if (!segs.length) continue;
+            const bottom = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+            const p = fromRotMeters(x, bottom);
+            const letter = String.fromCharCode('A'.charCodeAt(0) + c);
+            addRotatedSegments('label', 'x', letter, p, null);
+          }
+
+          // labels lignes (gauche dans repère tourné)
+          for (let r = 0; r < rows; r++) {
+            const y = minY + (r + 0.5) * dym;
+            const segs = clipH(y);
+            if (!segs.length) continue;
+            const left = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+            const p = fromRotMeters(left, y);
+            const num = String(rows - r);
+            addRotatedSegments('label', 'y', num, p, null);
+          }
+
+          // labels cellules
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const x = minX + (c + 0.5) * dxm;
+              const y = minY + (r + 0.5) * dym;
+              const p = fromRotMeters(x, y);
+              if (!isPointInZone(centerLng + p.x / metersPerDegLng, centerLat + p.y / metersPerDegLat, z)) continue;
+              const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
+              const rowNumber = rows - r;
+              const text = `${colLetter}${rowNumber}`;
+              addRotatedSegments('cell', null, text, p, null);
+            }
+          }
+
+          continue;
+        }
 
         const getBottomBoundaryAtX = (x: number) => {
           if (z.type === 'circle' && z.circle) {
@@ -4285,7 +4487,7 @@ export default function MapLibreMap() {
         if (!userId) continue;
         if (user?.id && userId === user.id) continue;
         if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
-        const t = typeof p.t === 'number' ? p.t : now;
+        const t = normalizeRemoteTime((p as any).t, now);
         if (t < cutoff) continue;
         nextOthers[userId] = { lng: p.lng, lat: p.lat, t };
       }
@@ -4297,7 +4499,7 @@ export default function MapLibreMap() {
         if (!Array.isArray(pts) || pts.length === 0) continue;
         const filtered = pts
           .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number')
-          .map((p) => ({ lng: p.lng, lat: p.lat, t: typeof p.t === 'number' ? p.t : now }))
+          .map((p) => ({ lng: p.lng, lat: p.lat, t: normalizeRemoteTime((p as any).t, now) }))
           .filter((p) => p.t >= cutoff)
           .slice(-maxTracePointsFromSnapshot);
         if (filtered.length) {
@@ -4326,7 +4528,7 @@ export default function MapLibreMap() {
       if (memberColor) {
         otherColorsRef.current[msg.userId] = memberColor;
       }
-      const now = typeof msg.t === 'number' ? msg.t : Date.now();
+      const now = normalizeRemoteTime(msg.t, Date.now());
       const traces = otherTracesRef.current[msg.userId] ?? [];
       const cutoff = Date.now() - traceRetentionMs;
       const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }]

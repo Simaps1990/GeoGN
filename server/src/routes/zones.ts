@@ -12,6 +12,7 @@ type GeoJSONPolygon = {
 type ZoneGrid = {
   rows: number;
   cols: number;
+  orientation?: 'vertical' | 'diag45';
 };
 
 type CreateZoneBody =
@@ -123,7 +124,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         type,
         circle: type === 'circle' ? body.circle : undefined,
         polygon: type === 'polygon' ? body.polygon : undefined,
-        grid: body.grid ? { rows: body.grid.rows, cols: body.grid.cols } : undefined,
+        grid: body.grid ? { rows: body.grid.rows, cols: body.grid.cols, orientation: body.grid.orientation } : undefined,
         sectors:
           Array.isArray(body.sectors)
             ? body.sectors.map((s: any) => ({
@@ -202,7 +203,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       const unset: any = {};
       if (body.grid === null) unset.grid = 1;
       if (body.grid && typeof body.grid.rows === 'number' && typeof body.grid.cols === 'number') {
-        update.grid = { rows: body.grid.rows, cols: body.grid.cols };
+        update.grid = { rows: body.grid.rows, cols: body.grid.cols, orientation: body.grid.orientation };
       }
 
       const updateDoc: any = { $set: update };

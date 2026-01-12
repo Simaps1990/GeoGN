@@ -61,7 +61,7 @@ export type ApiZone = {
   type: 'circle' | 'polygon';
   circle: { center: { lng: number; lat: number }; radiusMeters: number } | null;
   polygon: { type: 'Polygon'; coordinates: number[][][] } | null;
-  grid: { rows: number; cols: number } | null;
+  grid: { rows: number; cols: number; orientation?: 'vertical' | 'diag45' } | null;
   sectors:
     | {
         sectorId: string;
@@ -570,7 +570,7 @@ export async function createZone(
         comment?: string;
         color: string;
         circle: { center: { lng: number; lat: number }; radiusMeters: number };
-        grid?: { rows: number; cols: number } | null;
+        grid?: { rows: number; cols: number; orientation?: 'vertical' | 'diag45' } | null;
       }
     | {
         type: 'polygon';
@@ -578,7 +578,7 @@ export async function createZone(
         comment?: string;
         color: string;
         polygon: { type: 'Polygon'; coordinates: number[][][] };
-        grid?: { rows: number; cols: number } | null;
+        grid?: { rows: number; cols: number; orientation?: 'vertical' | 'diag45' } | null;
       }
 ) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones`, {
@@ -688,7 +688,16 @@ export async function deleteZone(missionId: string, zoneId: string) {
 export async function updateZone(
   missionId: string,
   zoneId: string,
-  input: Partial<{ title: string; comment: string; color: string; type: 'circle' | 'polygon'; circle: any; polygon: any; sectors: any; grid: { rows: number; cols: number } | null }>
+  input: Partial<{
+    title: string;
+    comment: string;
+    color: string;
+    type: 'circle' | 'polygon';
+    circle: any;
+    polygon: any;
+    sectors: any;
+    grid: { rows: number; cols: number; orientation?: 'vertical' | 'diag45' } | null;
+  }>
 ) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/zones/${encodeURIComponent(zoneId)}`,
     {

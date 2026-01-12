@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CircleDot, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, Trash2 } from 'lucide-react';
+import { CircleDot, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
@@ -301,10 +301,10 @@ export default function MissionZonesPage() {
                           if (!t) return;
                           setNavPickerTarget(t);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                         title="Naviguer"
                       >
-                        <Navigation2 size={16} />
+                        <Navigation2 size={18} />
                       </button>
 
                       <button
@@ -334,10 +334,10 @@ export default function MissionZonesPage() {
                           );
                           navigate(`/mission/${missionId}/map`);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                         title="Voir sur la carte"
                       >
-                        <MapIcon size={16} />
+                        <MapIcon size={18} />
                       </button>
                     </div>
 
@@ -356,10 +356,10 @@ export default function MissionZonesPage() {
                               color: z.color,
                             });
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                           title="Modifier"
                         >
-                          <Pencil size={16} />
+                          <Pencil size={18} />
                         </button>
                         <button
                           type="button"
@@ -382,10 +382,10 @@ export default function MissionZonesPage() {
                               setBusyId(null);
                             }
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
                           title="Supprimer"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     ) : null}
@@ -396,60 +396,61 @@ export default function MissionZonesPage() {
               {editingId !== z.id && (
                 <div className="mt-3 space-y-3">
                   {isAdmin ? (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid gap-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          disabled={!missionId || busyId === z.id}
+                          onClick={async () => {
+                            await setZoneGrid(z.id, { rows: 2, cols: 2, orientation: z.grid?.orientation ?? 'vertical' } as any);
+                          }}
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            z.grid?.rows === 2 && z.grid?.cols === 2 ? 'ring-2 ring-blue-500' : ''
+                          }`}
+                          title="Carroyage 2x2"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Grid2X2 size={16} />
+                            <span>2x2</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!missionId || busyId === z.id}
+                          onClick={async () => {
+                            await setZoneGrid(z.id, { rows: 3, cols: 3, orientation: z.grid?.orientation ?? 'vertical' } as any);
+                          }}
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            z.grid?.rows === 3 && z.grid?.cols === 3 ? 'ring-2 ring-blue-500' : ''
+                          }`}
+                          title="Carroyage 3x3"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Grid2X2 size={16} />
+                            <span>3x3</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!missionId || busyId === z.id}
+                          onClick={async () => {
+                            await setZoneGrid(z.id, { rows: 4, cols: 4, orientation: z.grid?.orientation ?? 'vertical' } as any);
+                          }}
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            z.grid?.rows === 4 && z.grid?.cols === 4 ? 'ring-2 ring-blue-500' : ''
+                          }`}
+                          title="Carroyage 4x4"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Grid2X2 size={16} />
+                            <span>4x4</span>
+                          </span>
+                        </button>
                       <button
                         type="button"
                         disabled={!missionId || busyId === z.id}
                         onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 2, cols: 2 });
-                        }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
-                          z.grid?.rows === 2 && z.grid?.cols === 2 ? 'ring-2 ring-blue-500' : ''
-                        }`}
-                        title="Carroyage 2x2"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Grid2X2 size={16} />
-                          <span>2x2</span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!missionId || busyId === z.id}
-                        onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 3, cols: 3 });
-                        }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
-                          z.grid?.rows === 3 && z.grid?.cols === 3 ? 'ring-2 ring-blue-500' : ''
-                        }`}
-                        title="Carroyage 3x3"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Grid2X2 size={16} />
-                          <span>3x3</span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!missionId || busyId === z.id}
-                        onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 4, cols: 4 });
-                        }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
-                          z.grid?.rows === 4 && z.grid?.cols === 4 ? 'ring-2 ring-blue-500' : ''
-                        }`}
-                        title="Carroyage 4x4"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Grid2X2 size={16} />
-                          <span>4x4</span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!missionId || busyId === z.id}
-                        onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 5, cols: 5 });
+                          await setZoneGrid(z.id, { rows: 5, cols: 5, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
                         className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
                           z.grid?.rows === 5 && z.grid?.cols === 5 ? 'ring-2 ring-blue-500' : ''
@@ -465,7 +466,7 @@ export default function MissionZonesPage() {
                         type="button"
                         disabled={!missionId || busyId === z.id}
                         onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 6, cols: 6 });
+                          await setZoneGrid(z.id, { rows: 6, cols: 6, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
                         className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
                           z.grid?.rows === 6 && z.grid?.cols === 6 ? 'ring-2 ring-blue-500' : ''
@@ -481,7 +482,7 @@ export default function MissionZonesPage() {
                         type="button"
                         disabled={!missionId || busyId === z.id}
                         onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 8, cols: 8 });
+                          await setZoneGrid(z.id, { rows: 8, cols: 8, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
                         className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
                           z.grid?.rows === 8 && z.grid?.cols === 8 ? 'ring-2 ring-blue-500' : ''
@@ -497,7 +498,7 @@ export default function MissionZonesPage() {
                         type="button"
                         disabled={!missionId || busyId === z.id}
                         onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 10, cols: 10 });
+                          await setZoneGrid(z.id, { rows: 10, cols: 10, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
                         className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
                           z.grid?.rows === 10 && z.grid?.cols === 10 ? 'ring-2 ring-blue-500' : ''
@@ -513,7 +514,7 @@ export default function MissionZonesPage() {
                         type="button"
                         disabled={!missionId || busyId === z.id}
                         onClick={async () => {
-                          await setZoneGrid(z.id, { rows: 12, cols: 12 });
+                          await setZoneGrid(z.id, { rows: 12, cols: 12, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
                         className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
                           z.grid?.rows === 12 && z.grid?.cols === 12 ? 'ring-2 ring-blue-500' : ''
@@ -541,6 +542,44 @@ export default function MissionZonesPage() {
                           <span>Sans</span>
                         </span>
                       </button>
+                      </div>
+
+                      {z.grid ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={!missionId || busyId === z.id}
+                            onClick={async () => {
+                              await setZoneGrid(z.id, { rows: z.grid!.rows, cols: z.grid!.cols, orientation: 'vertical' } as any);
+                            }}
+                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                              (z.grid?.orientation ?? 'vertical') === 'vertical' ? 'ring-2 ring-blue-500' : ''
+                            }`}
+                            title="Carroyage vertical"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <Grid2X2 size={16} />
+                              <span>Vertical</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!missionId || busyId === z.id}
+                            onClick={async () => {
+                              await setZoneGrid(z.id, { rows: z.grid!.rows, cols: z.grid!.cols, orientation: 'diag45' } as any);
+                            }}
+                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                              z.grid?.orientation === 'diag45' ? 'ring-2 ring-blue-500' : ''
+                            }`}
+                            title="Carroyage 45°"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <RotateCw size={16} />
+                              <span>45°</span>
+                            </span>
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 

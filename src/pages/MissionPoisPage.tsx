@@ -335,13 +335,14 @@ export default function MissionPoisPage() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
+                          disabled={!missionId}
                           onClick={() => {
                             setNavPickerPoi(p);
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                           title="Naviguer vers le point"
                         >
-                          <Navigation2 size={16} />
+                          <Navigation2 size={18} />
                         </button>
                         <button
                           type="button"
@@ -354,10 +355,10 @@ export default function MissionPoisPage() {
                             );
                             navigate(`/mission/${missionId}/map`);
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                           title="Afficher sur la carte"
                         >
-                          <MapIcon size={16} />
+                          <MapIcon size={18} />
                         </button>
                       </div>
                       {editingId !== p.id && canEdit ? (
@@ -376,10 +377,10 @@ export default function MissionPoisPage() {
                                 comment: p.comment,
                               });
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                             title="Éditer le POI"
                           >
-                            <Pencil size={16} />
+                            <Pencil size={18} />
                           </button>
                           <button
                             type="button"
@@ -396,10 +397,10 @@ export default function MissionPoisPage() {
                                 setBusyId(null);
                               }
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
                             title="Supprimer le POI"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       ) : null}
