@@ -594,29 +594,14 @@ export default function MapLibreMap() {
       }
     | null
   >(null);
-  const [showEstimationHeatmap, setShowEstimationHeatmap] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const raw = window.localStorage.getItem('showEstimationHeatmap');
-      if (raw === 'false') return false;
-      if (raw === 'true') return true;
-    } catch {
-      // ignore
-    }
-    return true;
-  });
-  const showEstimationHeatmapRef = useRef(showEstimationHeatmap);
+  // Ancien toggle de heatmap conservé uniquement pour compatibilité, mais la visibilité
+  // est désormais pilotée uniquement par l'état de suivi (panneau activité ouvert + fiche existante).
+  const [showEstimationHeatmap, setShowEstimationHeatmap] = useState<boolean>(true);
+  const showEstimationHeatmapRef = useRef(true);
   const personPanelOpenRef = useRef(false);
 
   useEffect(() => {
     showEstimationHeatmapRef.current = showEstimationHeatmap;
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem('showEstimationHeatmap', showEstimationHeatmap ? 'true' : 'false');
-      } catch {
-        // ignore
-      }
-    }
   }, [showEstimationHeatmap]);
 
   useEffect(() => {
@@ -624,8 +609,9 @@ export default function MapLibreMap() {
 
     const map = mapInstanceRef.current;
     if (!map || !mapReady) return;
-    applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpen);
-  }, [personPanelOpen, showEstimationHeatmap, mapReady]);
+    // Heatmap visible dès que le panneau est ouvert et qu'une fiche existe
+    applyHeatmapVisibility(map, personPanelOpen && !!personCase);
+  }, [personPanelOpen, personCase, mapReady]);
 
   const lastKnownPoiSuggestions = useMemo(() => {
     const q = personDraft.lastKnownQuery.trim().toLowerCase();
@@ -1295,10 +1281,11 @@ export default function MapLibreMap() {
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
-  // Par défaut, tant que la mission n'est pas chargée, on considère que l'utilisateur ne peut pas éditer
-  // afin d'éviter un flash de boutons d'édition pour les comptes visualisateurs.
-  const isAdmin = !!mission && mission.membership?.role === 'admin';
-  const canEdit = isAdmin;
+  // Rôles
+  const role = mission?.membership?.role ?? null; // 'admin' | 'member' | 'viewer' | null
+  const isAdmin = role === 'admin';
+  const canEditMap = role === 'admin' || role === 'member'; // zones / POI
+  const canEditPerson = isAdmin; // fiche personne / projection
   const canOpenPersonPanel = isAdmin || hasPersonCase === true;
 
   const mobilityLabel = (m: ApiPersonCase['mobility']) => {
@@ -1365,8 +1352,8 @@ export default function MapLibreMap() {
         setPersonCase(c);
         setHasPersonCase(!!c);
         if (!c) {
-          // Pas encore de fiche : les éditeurs peuvent en créer, les visualisateurs restent en lecture seule.
-          if (canEdit) {
+          // Pas encore de fiche : seuls les admins peuvent en créer, les visualisateurs restent en lecture seule.
+          if (canEditPerson) {
             setPersonEdit(true);
             setPersonDraft({
               lastKnownQuery: '',
@@ -1423,7 +1410,7 @@ export default function MapLibreMap() {
       } catch (e: any) {
         if (cancelled) return;
         setPersonError(e?.message ?? 'Erreur');
-        if (canEdit) setPersonEdit(true);
+        if (canEditPerson) setPersonEdit(true);
       } finally {
         if (!cancelled) setPersonLoading(false);
       }
@@ -1432,7 +1419,7 @@ export default function MapLibreMap() {
     return () => {
       cancelled = true;
     };
-  }, [personPanelOpen, selectedMissionId, mission, canEdit]);
+  }, [personPanelOpen, selectedMissionId, mission, canEditPerson]);
 
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
@@ -4609,7 +4596,7 @@ export default function MapLibreMap() {
                   <X size={14} />
                 </button>
               </div>
-              {canEdit ? (
+              {canEditMap ? (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -4754,7 +4741,7 @@ export default function MapLibreMap() {
           <Layers className="mx-auto text-gray-600" size={20} />
         </button>
 
-        {canEdit ? (
+        {canEditMap ? (
           <>
             <button
               type="button"
@@ -5072,7 +5059,7 @@ export default function MapLibreMap() {
                       <ChevronDown size={16} />
                     </button>
                   ) : null}
-                  {canEdit && !personEdit && personCase ? (
+                  {canEditPerson && !personEdit && personCase ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -5085,7 +5072,7 @@ export default function MapLibreMap() {
                       <Pencil size={16} />
                     </button>
                   ) : null}
-                  {canEdit && !personEdit && personCase ? (
+                  {canEditPerson && !personEdit && personCase ? (
                     <button
                       type="button"
                       disabled={personLoading || !selectedMissionId}
@@ -5241,7 +5228,7 @@ export default function MapLibreMap() {
                   ) : null}
 
                 </div>
-              ) : canEdit ? (
+              ) : canEditPerson ? (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="relative">
