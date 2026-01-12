@@ -1760,10 +1760,11 @@ export default function MapLibreMap() {
       }
       const nextRetention = Math.max(0, Math.floor(parsed));
       const updated = await updateMission(selectedMissionId, { traceRetentionSeconds: nextRetention });
-      setMission(updated);
+      const merged = { ...(mission ?? {}), ...(updated ?? {}) } as any;
+      setMission(merged);
       setTimerModalOpen(false);
       try {
-        window.dispatchEvent(new CustomEvent('geotacops:mission:updated', { detail: { mission: updated } }));
+        window.dispatchEvent(new CustomEvent('geotacops:mission:updated', { detail: { mission: merged } }));
       } catch {
         // ignore
       }
@@ -4265,8 +4266,16 @@ export default function MapLibreMap() {
         }
       }
 
-      otherTracesRef.current = nextOthersTraces;
-      setOtherPositions(nextOthers);
+      // Éviter les micro-sauts: lors d'un reconnect / retour foreground, il peut arriver
+      // de recevoir un snapshot vide/partiel. Dans ce cas, ne pas écraser l'état courant.
+      const hasAnySnapshotData = Object.keys(nextOthers).length > 0 || Object.keys(nextOthersTraces).length > 0;
+      setOtherPositions((prev) => {
+        const hasAnyCurrentData = Object.keys(otherTracesRef.current).length > 0 || Object.keys(prev).length > 0;
+        if (!hasAnySnapshotData && hasAnyCurrentData) return prev;
+
+        otherTracesRef.current = { ...otherTracesRef.current, ...nextOthersTraces };
+        return { ...prev, ...nextOthers };
+      });
     };
 
     const applyRemotePosition = (msg: any) => {
@@ -4636,7 +4645,7 @@ export default function MapLibreMap() {
     if (!src) return;
 
     const now = Date.now();
-    const inactiveAfterMs = 60_000;
+    const inactiveAfterMs = 30_000;
     const inactiveColor = '#9ca3af';
     const features = Object.entries(otherPositions).map(([userId, p]) => {
       const memberColor = memberColors[userId];
@@ -4665,7 +4674,7 @@ export default function MapLibreMap() {
     if (!src) return;
 
     const now = Date.now();
-    const inactiveAfterMs = 60_000;
+    const inactiveAfterMs = 30_000;
     const inactiveColor = '#9ca3af';
     const features: any[] = [];
     const segmentGapMs = 30_000;
