@@ -1286,7 +1286,11 @@ export default function MapLibreMap() {
   const isAdmin = role === 'admin';
   const canEditMap = role === 'admin' || role === 'member'; // zones / POI
   const canEditPerson = isAdmin; // fiche personne / projection
-  const canOpenPersonPanel = isAdmin || hasPersonCase === true;
+  const canOpenPersonPanel = true; // tout le monde voit le bouton paw
+
+  // Notifications projection (pour utilisateurs / visualisateurs)
+  const [projectionNotification, setProjectionNotification] = useState(false);
+  const [settingsNotification, setSettingsNotification] = useState(false);
 
   const mobilityLabel = (m: ApiPersonCase['mobility']) => {
     switch (m) {
@@ -1335,6 +1339,14 @@ export default function MapLibreMap() {
       cancelled = true;
     };
   }, [selectedMissionId, mission?.id]);
+
+  // Lorsqu'une fiche apparaît pour la mission, déclencher une notification pour les non-admin
+  useEffect(() => {
+    if (!personCase) return;
+    if (isAdmin) return;
+    setProjectionNotification(true);
+    setSettingsNotification(true);
+  }, [personCase, isAdmin]);
 
   useEffect(() => {
     if (!personPanelOpen) return;
@@ -1431,6 +1443,9 @@ export default function MapLibreMap() {
   const [timerSecondsInput, setTimerSecondsInput] = useState('');
   const [timerSaving, setTimerSaving] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
+
+  // Toast discret pour informer qu'aucune projection n'est active
+  const [noProjectionToast, setNoProjectionToast] = useState(false);
 
   const [isMapRotated, setIsMapRotated] = useState(false);
 
@@ -4865,8 +4880,11 @@ export default function MapLibreMap() {
                     setActionError(null);
 
                     setSettingsMenuOpen((v) => !v);
+                    if (!isAdmin) {
+                      setSettingsNotification(false);
+                    }
                   }}
-                  className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+                  className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
                     settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
                       ? 'ring-1 ring-inset ring-blue-500/25'
                       : ''
@@ -4881,6 +4899,9 @@ export default function MapLibreMap() {
                     }
                     size={20}
                   />
+                  {!isAdmin && settingsNotification ? (
+                    <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+                  ) : null}
                 </button>
 
                 <div
@@ -4910,45 +4931,63 @@ export default function MapLibreMap() {
                     <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
                   </button>
 
-                  {canOpenPersonPanel ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const map = mapInstanceRef.current;
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const map = mapInstanceRef.current;
 
-                        // If already open in mini mode -> close.
-                        if (personPanelOpen && personPanelCollapsed) {
-                          setPersonPanelOpen(false);
-                          setPersonPanelCollapsed(false);
-                          if (map && mapReady) applyHeatmapVisibility(map, false);
+                      if (!personCase) {
+                        if (!isAdmin) {
+                          window.alert('Aucune projection active pour cette mission.');
                           return;
                         }
+                        setPersonEdit(true);
+                        setPersonPanelCollapsed(false);
+                        setPersonPanelOpen(true);
+                        return;
+                      }
 
-                        // If already open in expanded mode -> collapse to mini.
-                        if (personPanelOpen && !personPanelCollapsed) {
-                          setPersonEdit(false);
-                          setPersonPanelCollapsed(true);
-                          if (map && mapReady) {
-                            applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
-                          }
-                          return;
-                        }
-                        // Otherwise (closed) -> ouvrir directement en mini recap, les données se chargeront.
+                      if (!isAdmin) {
+                        setProjectionNotification(false);
+                        setSettingsNotification(false);
+                      }
+
+                      if (personPanelOpen && personPanelCollapsed) {
+                        setPersonPanelOpen(false);
+                        setPersonPanelCollapsed(false);
+                        if (map && mapReady) applyHeatmapVisibility(map, false);
+                        return;
+                      }
+
+                      if (personPanelOpen && !personPanelCollapsed) {
                         setPersonEdit(false);
                         setPersonPanelCollapsed(true);
-                        setPersonPanelOpen(true);
                         if (map && mapReady) {
                           applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
                         }
-                      }}
-                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                        personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-                      }`}
-                      title="Activité"
-                    >
-                      <PawPrint className={personPanelOpen ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                    </button>
-                  ) : null}
+                        return;
+                      }
+
+                      setPersonEdit(false);
+                      setPersonPanelCollapsed(true);
+                      setPersonPanelOpen(true);
+                      if (map && mapReady) {
+                        applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
+                      }
+                    }}
+                    className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                      personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
+                    } ${!personCase ? 'opacity-60' : ''}`}
+                    title="Activité"
+                  >
+                    <PawPrint
+                      className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'}
+                      size={20}
+                    />
+                    {!isAdmin && projectionNotification ? (
+                      <span className="absolute -top-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+                    ) : null}
+                  </button>
 
                   <button
                     type="button"
