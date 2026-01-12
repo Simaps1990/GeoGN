@@ -56,14 +56,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       const startedAt = Date.now();
-      // Safe diagnostics (no secrets): helps debug mobile/prod networking issues.
-      console.log('[auth] bootstrap start', { apiBaseUrl: getApiBaseUrl() });
       try {
         const current = await me();
-        console.log('[auth] bootstrap me() ok', {
-          tookMs: Date.now() - startedAt,
-          hasUser: Boolean(current),
-        });
 
         try {
           const lastUserId = localStorage.getItem(LAST_USER_KEY);
@@ -88,12 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setUser(null);
         }
-        console.warn('[auth] bootstrap me() failed', {
-          tookMs: Date.now() - startedAt,
-          message: e?.message,
-        });
       } finally {
-        console.log('[auth] bootstrap done', { tookMs: Date.now() - startedAt });
         setLoading(false);
       }
     })();

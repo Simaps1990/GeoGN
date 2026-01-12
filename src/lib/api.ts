@@ -167,9 +167,6 @@ async function rawFetch(path: string, init?: RequestInit) {
       },
     });
   } catch (e: any) {
-    const name = e?.name;
-    const message = e?.message;
-    console.warn('[api] fetch failed', { url, name, message });
     throw e;
   } finally {
     window.clearTimeout(timeoutId);

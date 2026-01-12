@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -67,6 +67,24 @@ import {
   type ApiPersonCase,
   type ApiZone,
 } from '../lib/api';
+import {
+  BodyPartId,
+  DiseaseId,
+  InjuryId,
+  SimpleWeather,
+  clamp,
+  cleanDiseases,
+  cleanInjuries,
+  computeAgeFactor,
+  computeDiseaseFactor,
+  computeEffectiveWalkingKmh,
+  computeHealthStatusFactor,
+  computeIsNight,
+  computeLocomotorInjuryFactor,
+  computeNightFactor,
+  computeWeatherFactor,
+  isLocomotorLocation,
+} from '../lib/estimationWalking';
 
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
@@ -551,39 +569,29 @@ export default function MapLibreMap() {
   const [injuriesOpen, setInjuriesOpen] = useState(false);
 
   const diseaseOptions = useMemo(
-    () => [
-      'diabete',
-      'cardiaque',
-      'asthme',
-      'epilepsie',
-      'alzheimer',
-      'parkinson',
-      'insuffisance_respiratoire',
-      'insuffisance_renale',
-      'grossesse',
-      'handicap_moteur',
-      'handicap_mental',
-      'depression',
-      'anxiete',
-      'addiction',
-      'traitement',
-    ],
+    () =>
+      [
+        'diabete',
+        'cardiaque',
+        'asthme',
+        'parkinson',
+        'insuffisance_respiratoire',
+        'insuffisance_renale',
+        'grossesse',
+        'handicap_moteur',
+      ] as DiseaseId[],
     []
   );
 
   const injuryOptions = useMemo(
-    () => [
-      'fracture',
-      'entorse',
-      'luxation',
-      'plaie',
-      'brulure',
-      'hematome',
-      'traumatisme_cranien',
-      'hypothermie',
-      'deshydratation',
-      'malaise',
-    ],
+    () =>
+      [
+        'fracture',
+        'entorse',
+        'plaie',
+        'hypothermie',
+        'deshydratation',
+      ] as InjuryId[],
     []
   );
 
@@ -645,8 +653,9 @@ export default function MapLibreMap() {
 
     const map = mapInstanceRef.current;
     if (!map || !mapReady) return;
-    // Heatmap visible dès que le panneau est ouvert et qu'une fiche existe
-    applyHeatmapVisibility(map, personPanelOpen && !!personCase);
+    // Heatmap visible seulement si le panneau est ouvert, qu'une fiche existe
+    // ET que le toggle utilisateur est à true.
+    applyHeatmapVisibility(map, personPanelOpen && !!personCase && showEstimationHeatmapRef.current);
   }, [personPanelOpen, personCase, mapReady]);
 
   const lastKnownPoiSuggestions = useMemo(() => {
@@ -816,7 +825,18 @@ export default function MapLibreMap() {
     return () => window.clearInterval(t);
   }, [personPanelOpen]);
 
-  const estimation = useMemo(() => {
+  type EstimationResult = {
+    hoursSince: number | null;
+    effectiveKmh: number;
+    probableKm: number;
+    maxKm: number;
+    risk: number;
+    needs: string[];
+    likelyPlaces: string[];
+    reasoning: string[];
+  };
+
+  const estimation = useMemo<EstimationResult | null>(() => {
     if (!personCase) return null;
 
     const now = estimationNowMs;
@@ -838,210 +858,85 @@ export default function MapLibreMap() {
       }
     })();
 
-    const ageFactor = (() => {
-      const age = typeof personCase.age === 'number' ? personCase.age : null;
-      if (age === null) return 1;
-      const table = [
-        { min: 0, max: 5, factor: 0.45 },
-        { min: 6, max: 12, factor: 0.7 },
-        { min: 13, max: 15, factor: 0.85 },
-        { min: 16, max: 19, factor: 0.95 },
-        { min: 20, max: 39, factor: 1 },
-        { min: 40, max: 49, factor: 0.98 },
-        { min: 50, max: 59, factor: 0.92 },
-        { min: 60, max: 69, factor: 0.85 },
-        { min: 70, max: 79, factor: 0.78 },
-        { min: 80, max: 89, factor: 0.68 },
-        { min: 90, max: 120, factor: 0.55 },
-      ];
-      const found = table.find((row) => age >= row.min && age <= row.max);
-      return found ? found.factor : 1;
-    })();
+    const cleanDis = cleanDiseases(personCase.diseases ?? []);
+    const cleanInj = cleanInjuries(personCase.injuries ?? []);
 
-    const injuryFactor = (() => {
-      const ids = Array.isArray(personCase.injuries) ? personCase.injuries.map((x) => x.id) : [];
-      if (!ids.length) return 1;
+    const walkingKmh = computeEffectiveWalkingKmh(
+      personCase.mobility,
+      personCase.age,
+      personCase.healthStatus as any,
+      personCase.diseases,
+      personCase.injuries,
+      weather as SimpleWeather | null,
+      personCase.lastKnown.when
+    );
 
-      const map: Record<string, number> = {
-        fracture: 0.4, // moderate
-        entorse: 0.65,
-        luxation: 0.55,
-        plaie: 0.75,
-        brulure: 0.7,
-        hematome: 0.85,
-        traumatisme_cranien: 0.55,
-        hypothermie: 0.5,
-        dehydration: 0.6,
-        malaise: 0.5,
-      };
+    const ageFactor = computeAgeFactor(personCase.age);
+    const healthFactor = computeHealthStatusFactor(personCase.healthStatus as any);
+    const isNight = computeIsNight(personCase.lastKnown.when);
+    const hasDeshydratation = cleanInj.some((inj) => inj.id === 'deshydratation');
+    const hasLocomotor = cleanInj.some((inj) => inj.locations.some((loc) => isLocomotorLocation(loc)));
+    const diseaseFactor = computeDiseaseFactor(personCase.diseases, weather as SimpleWeather | null);
+    const weatherFactor = computeWeatherFactor(weather as SimpleWeather | null, isNight, hasDeshydratation);
+    const nightFactor = computeNightFactor(isNight, weather as SimpleWeather | null, hasLocomotor);
+    const terrainFactor = 1;
 
-      const factors = ids
-        .map((id) => map[id])
-        .filter((v): v is number => typeof v === 'number');
-      if (!factors.length) return 1;
-
-      const minF = Math.min(...factors);
-      const n = factors.length;
-      const decayPerExtra = 0.95;
-      const combined = minF * Math.pow(decayPerExtra, n - 1);
-      return Math.max(0.2, Math.min(1, combined));
-    })();
-
-    const diseaseFactor = (() => {
-      const ids = Array.isArray(personCase.diseases) ? personCase.diseases : [];
-      if (!ids.length) return 1;
-
-      const map: Record<string, number> = {
-        cardiaque: 0.75,
-        insuffisance_respiratoire: 0.75,
-        asthme: 0.75,
-        parkinson: 0.65,
-        handicap_moteur: 0.65,
-        diabete: 0.8,
-        insuffisance_renale: 0.8,
-        epilepsie: 0.8,
-        grossesse: 0.75,
-        alzheimer: 1,
-        handicap_mental: 1,
-        depression: 1,
-        anxiete: 1,
-        addiction: 1,
-      };
-
-      const factors = ids
-        .map((id) => map[id])
-        .filter((v): v is number => typeof v === 'number');
-      if (!factors.length) return 1;
-
-      const minF = Math.min(...factors);
-      const n = factors.length;
-      const decayPerExtra = 0.97;
-      const combined = minF * Math.pow(decayPerExtra, n - 1);
-      return Math.max(0.35, Math.min(1, combined));
-    })();
-
-    const when = personCase.lastKnown.when ? new Date(personCase.lastKnown.when) : null;
-    const localHour = when ? when.getHours() : null;
-    const month = when ? when.getMonth() : null; // 0 = jan, ... 11 = dec
-    const isNight = (() => {
-      if (localHour === null || month === null) return false;
-      // hiver (nov–fév) : nuit [18–7]
-      if (month === 10 || month === 11 || month === 0 || month === 1) {
-        return localHour >= 18 || localHour < 7;
-      }
-      // été (mai–août) : nuit [22–6]
-      if (month === 4 || month === 5 || month === 6 || month === 7) {
-        return localHour >= 22 || localHour < 6;
-      }
-      // intersaison : nuit [21–6]
-      return localHour >= 21 || localHour < 6;
-    })();
-
-    const locomotorInjuryPresent = Array.isArray(personCase.injuries)
-      ? personCase.injuries.some((x) => ['fracture', 'entorse', 'luxation'].includes(x.id))
-      : false;
-
-    const hasDehydrationInjury = Array.isArray(personCase.injuries)
-      ? personCase.injuries.some((x) => x.id === 'dehydration')
-      : false;
-
-    const weatherFactor = (() => {
-      if (!weather) return 1;
-      const t = weather.temperatureC;
-      const w = weather.windSpeedKmh;
-      const r = weather.precipitationMm;
-
-      if (typeof t !== 'number') return 1;
-
-      if (t <= 10) {
-        const rain = typeof r === 'number' && r > 0;
-        const windy = typeof w === 'number' && w >= 25;
-        if (!rain && !windy) return 1; // dry_low_wind
-        if ((rain && !windy) || (!rain && windy)) return 0.9; // rain_or_moderate_wind
-        if (rain && windy && !isNight) return 0.75; // rain_and_wind
-        if (rain && windy && isNight) return 0.6; // rain_and_wind_and_night
-        return 0.9;
+    const rawKmh = (() => {
+      if (personCase.mobility === 'none') {
+        if (walkingKmh !== null) return walkingKmh;
+        const base = 4.5;
+        return (
+          base *
+          ageFactor *
+          healthFactor *
+          computeLocomotorInjuryFactor(cleanInj) *
+          diseaseFactor *
+          weatherFactor *
+          nightFactor *
+          terrainFactor
+        );
       }
 
-      if (t >= 26) {
-        if (t < 32) return 0.9; // hot_and_sunny
-        if (t >= 32 && hasDehydrationInjury) return 0.6; // very_hot_and_dehydration
-        return 0.75; // very_hot_and_exertion
-      }
-
-      return 1;
+      return (
+        mobilityBaseKmh *
+        ageFactor *
+        healthFactor *
+        diseaseFactor *
+        weatherFactor *
+        nightFactor *
+        terrainFactor
+      );
     })();
-
-    const nightFactor = (() => {
-      if (!isNight) return 1;
-      const r = weather?.precipitationMm;
-      let f = typeof r === 'number' && r > 0 ? 0.75 : 0.85;
-      if (locomotorInjuryPresent) f *= 0.9;
-      return f;
-    })();
-
-    const terrainFactor = 1; // phase 1: urban_flat
-
-    const gravityFactor = (() => {
-      switch (personCase.healthStatus) {
-        case 'critique':
-          return 0.7;
-        case 'fragile':
-          return 0.85;
-        default:
-          return 1;
-      }
-    })();
-
-    const rawKmh =
-      mobilityBaseKmh *
-      ageFactor *
-      injuryFactor *
-      diseaseFactor *
-      weatherFactor *
-      nightFactor *
-      terrainFactor *
-      gravityFactor;
 
     const clampedKmh = (() => {
       const v = rawKmh;
       if (personCase.mobility === 'bike') {
-        return Math.max(2, Math.min(25, v));
+        return clamp(v, 2, 25);
       }
-      if (personCase.mobility === 'car' || personCase.mobility === 'motorcycle' || personCase.mobility === 'scooter') {
-        return Math.max(15, Math.min(70, v));
+      if (
+        personCase.mobility === 'car' ||
+        personCase.mobility === 'motorcycle' ||
+        personCase.mobility === 'scooter'
+      ) {
+        return clamp(v, 15, 70);
       }
-      return Math.max(0.3, Math.min(6.5, v));
+      return clamp(v, 0.2, 6.5);
     })();
 
     const effectiveHours = (() => {
-      if (hoursSince === null) return 0; // heure manquante → pas de distance défendable
-      const t = hoursSince;
-      // Conserver uniquement une borne haute raisonnable, pour que les petites durées restent petites
-      const clamped = Math.max(0, Math.min(72, t));
-      return clamped;
+      if (hoursSince === null) return 0;
+      return clamp(hoursSince, 0, 72);
     })();
 
-    const d50KmRaw = clampedKmh * effectiveHours;
-    const maxPossible = clampedKmh * effectiveHours;
-    const d50Km = effectiveHours === 0 ? 0 : Math.max(0, Math.min(maxPossible, d50KmRaw));
+    const d50Km = effectiveHours === 0 ? 0 : Math.max(0, clampedKmh * effectiveHours);
 
     let kDisp = 2.2;
-    const timeDispBoost = (() => {
-      if (hoursSince === null) return 0;
-      const h = Math.max(0, Math.min(24, hoursSince));
-      // Increases dispersion with time, fast early then saturates.
-      return Math.min(1.4, Math.log1p(h) / 1.2);
-    })();
-    kDisp += timeDispBoost;
-    const dis = Array.isArray(personCase.diseases) ? personCase.diseases : [];
-    const hasAlzheimerOrMental = dis.includes('alzheimer') || dis.includes('handicap_mental');
-    if (hasAlzheimerOrMental) kDisp += 0.3;
+    if (hoursSince !== null) {
+      const h = clamp(hoursSince, 0, 24);
+      kDisp += Math.min(1.4, Math.log1p(h) / 1.2);
+    }
     if (isNight) kDisp += 0.1;
-    const injIds = Array.isArray(personCase.injuries) ? personCase.injuries.map((x) => x.id) : [];
-    const hasCollapseRisk = injIds.includes('malaise') || injIds.includes('traumatisme_cranien');
-    if (hasCollapseRisk) kDisp -= 0.15;
-    kDisp = Math.max(1.6, Math.min(4.2, kDisp));
+    kDisp = clamp(kDisp, 1.6, 4.2);
 
     const probableKm = d50Km;
     const maxKm = d50Km * kDisp;
@@ -1050,37 +945,90 @@ export default function MapLibreMap() {
       let s = 0;
       if (personCase.healthStatus === 'fragile') s += 1;
       if (personCase.healthStatus === 'critique') s += 2;
-      if (injuryFactor <= 0.55) s += 2;
+
+      const locomotorFracture = cleanInj.some(
+        (inj) => inj.id === 'fracture' && inj.locations.some((loc) => isLocomotorLocation(loc))
+      );
+      if (locomotorFracture) s += 2;
+
       if (diseaseFactor <= 0.75) s += 1;
+
       const t = weather?.temperatureC;
       if (typeof t === 'number' && t <= 5) s += 1;
       const r = weather?.precipitationMm;
       if (typeof r === 'number' && r >= 2) s += 1;
+
+      const hasHypothermie = cleanInj.some((inj) => inj.id === 'hypothermie');
+      if (hasHypothermie) s += 1;
+      const hasDeshydratationNeed = cleanInj.some((inj) => inj.id === 'deshydratation');
+      if (hasDeshydratationNeed) s += 1;
+
       return s;
     })();
 
     const needs: string[] = [];
-    if (weather && typeof weather.temperatureC === 'number' && weather.temperatureC <= 5) needs.push('Se protéger du froid (abri, vêtements secs)');
-    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) needs.push('Trouver un abri / se mettre au sec');
-    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'dehydration')) needs.push('Hydratation urgente');
-    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'hypothermie')) needs.push('Réchauffement progressif + abri');
-    if (Array.isArray(personCase.injuries) && personCase.injuries.some((x) => x.id === 'fracture')) needs.push('Limiter les déplacements (douleur/immobilisation)');
-    if (Array.isArray(personCase.diseases) && personCase.diseases.includes('diabete')) needs.push('Sucre/prise alimentaire régulière');
-    if (Array.isArray(personCase.diseases) && personCase.diseases.includes('asthme')) needs.push('Éviter effort + air froid/humide');
+    if (weather && typeof weather.temperatureC === 'number' && weather.temperatureC <= 5) {
+      needs.push('Se protéger du froid (abri, vêtements secs)');
+    }
+    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) {
+      needs.push('Trouver un abri / se mettre au sec');
+    }
+    if (cleanInj.some((x) => x.id === 'deshydratation')) {
+      needs.push('Hydratation urgente');
+    }
+    if (cleanInj.some((x) => x.id === 'hypothermie')) {
+      needs.push('Réchauffement progressif + abri');
+    }
+    const locomotorFracture = cleanInj.some(
+      (inj) => inj.id === 'fracture' && inj.locations.some((loc) => isLocomotorLocation(loc))
+    );
+    if (locomotorFracture) {
+      needs.push('Limiter les déplacements (douleur/immobilisation)');
+    }
+    if (cleanDis.includes('diabete')) {
+      needs.push('Sucre/prise alimentaire régulière');
+    }
+    if (cleanDis.includes('asthme')) {
+      needs.push('Éviter effort + air froid/humide');
+    }
 
     const likelyPlaces: string[] = [];
     likelyPlaces.push('Abris proches (bâtiments, hangars, porches, arrêts)');
-    if (risk >= 3) likelyPlaces.push('Points d’aide (pharmacie, médecin, pompiers, commerces)');
-    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) likelyPlaces.push('Zones couvertes (centres commerciaux, parkings couverts)');
-    likelyPlaces.push('Points d’eau / commerces (si déshydratation / chaleur)');
+    if (risk >= 3) {
+      likelyPlaces.push('Points d’aide (pharmacie, médecin, pompiers, commerces)');
+    }
+    if (weather && typeof weather.precipitationMm === 'number' && weather.precipitationMm >= 2) {
+      likelyPlaces.push('Zones couvertes (centres commerciaux, parkings couverts)');
+    }
+    if (cleanInj.some((x) => x.id === 'deshydratation')) {
+      likelyPlaces.push('Points d’eau / commerces (si déshydratation / chaleur)');
+    }
 
     const reasoning: string[] = [];
     reasoning.push(
-      `Mobilité: ${personCase.mobility} (base ~${mobilityBaseKmh.toFixed(0)} km/h) x âge ${(ageFactor * 100).toFixed(0)}% x blessures ${(injuryFactor * 100).toFixed(0)}% x pathologies ${(diseaseFactor * 100).toFixed(0)}% x météo+nuit ${(weatherFactor * nightFactor * 100).toFixed(0)}% x gravité ${(gravityFactor * 100).toFixed(0)}% → ~${clampedKmh.toFixed(1)} km/h.`
+      `Mobilité: ${personCase.mobility} (base ~${mobilityBaseKmh.toFixed(0)} km/h) x âge ${(ageFactor * 100).toFixed(
+        0
+      )}% x santé ${(healthFactor * 100).toFixed(0)}% x blessures locomotrices ${(computeLocomotorInjuryFactor(
+        cleanInj
+      ) * 100).toFixed(0)}% x pathologies ${(diseaseFactor * 100).toFixed(
+        0
+      )}% x météo+nuit ${(
+        computeWeatherFactor(weather as SimpleWeather | null, isNight, hasDeshydratation) *
+        computeNightFactor(isNight, weather as SimpleWeather | null, hasLocomotor) *
+        100
+      ).toFixed(0)}% → ~${clampedKmh.toFixed(1)} km/h.`
     );
-    reasoning.push(
-      `Temps depuis le dernier indice: ${hoursSince === null ? 'inconnu (heure manquante : distance non fiable)' : `${hoursSince.toFixed(1)} h`} → temps de déplacement effectif estimé ~${effectiveHours.toFixed(1)} h (pauses + fatigue).`
-    );
+    if (hoursSince === null) {
+      reasoning.push(
+        'Heure du dernier indice inconnue : distance non fiable (temps de marche nul).'
+      );
+    } else {
+      reasoning.push(
+        `Temps depuis le dernier indice: ${hoursSince.toFixed(
+          1
+        )} h → temps de marche effectif estimé ~${effectiveHours.toFixed(1)} h (pauses + fatigue).`
+      );
+    }
     const hasSecondClue =
       typeof personDraft.nextClueLng === 'number' && typeof personDraft.nextClueLat === 'number';
     if (hasSecondClue) {
@@ -1088,14 +1036,20 @@ export default function MapLibreMap() {
         "Un second indice permet de restreindre la zone probable dans un couloir de déplacement entre les deux points."
       );
     }
-    if (personCase.mobility === 'car' || personCase.mobility === 'motorcycle' || personCase.mobility === 'scooter') {
+    if (
+      personCase.mobility === 'car' ||
+      personCase.mobility === 'motorcycle' ||
+      personCase.mobility === 'scooter'
+    ) {
       reasoning.push(
         "Attention: mode motorisé sans routage (OSRM / GraphHopper) – distance estimée très grossière à vol d'oiseau."
       );
     }
     if (weather && typeof weather.temperatureC === 'number') {
       reasoning.push(
-        `Météo: ${weather.temperatureC.toFixed(1)}°C, vent ${weather.windSpeedKmh ?? '—'} km/h, pluie ${weather.precipitationMm ?? '—'} mm.`
+        `Météo: ${weather.temperatureC.toFixed(1)}°C, vent ${weather.windSpeedKmh ?? '—'} km/h, pluie ${
+          weather.precipitationMm ?? '—'
+        } mm.`
       );
     }
 
@@ -2722,7 +2676,7 @@ export default function MapLibreMap() {
     }
 
     if (!map.getSource('trace')) {
-      map.addSource('trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addSource('trace', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } });
     }
     if (!map.getLayer('trace-line')) {
       // Insert the trace layer *under* the me-dot layer so the position icon stays above the line.
@@ -2734,7 +2688,11 @@ export default function MapLibreMap() {
           paint: {
             'line-color': '#00ff00',
             'line-width': 8,
-            'line-opacity': 0.9,
+            'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
+          },
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'butt',
           },
         },
         'me-dot'
@@ -4998,30 +4956,53 @@ export default function MapLibreMap() {
       if (filtered.length !== tracePoints.length) setTracePoints(filtered);
 
       const segmentGapMs = 30_000;
+      const opacities = [1, 0.8, 0.6, 0.4, 0.2];
+      const n = filtered.length;
+
       const selfFeatures: any[] = [];
       let segment: { lng: number; lat: number; t: number }[] = [];
       let prevT: number | null = null;
-      for (const p of filtered) {
-        if (prevT !== null && p.t - prevT > segmentGapMs) {
-          if (segment.length >= 2) {
-            selfFeatures.push({
-              type: 'Feature',
-              geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
-              properties: {},
-            });
-          }
-          segment = [];
+      let prevBucket: number | null = null;
+      let prevPoint: { lng: number; lat: number; t: number } | null = null;
+
+      const flush = (bucket: number | null) => {
+        if (segment.length >= 2 && bucket !== null) {
+          selfFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
+            properties: { opacity: opacities[bucket] ?? 0.9 },
+          });
         }
-        segment.push(p);
+        segment = [];
+      };
+
+      for (let i = 0; i < n; i++) {
+        const p = filtered[i];
+        const bucket = n > 0 ? Math.min(4, Math.max(0, Math.floor(((n - 1 - i) * 5) / n))) : 0;
+
+        const isGap = prevT !== null && p.t - prevT > segmentGapMs;
+        const bucketChanged = prevBucket !== null && bucket !== prevBucket;
+
+        if ((isGap || bucketChanged) && segment.length) {
+          flush(prevBucket);
+
+          // Si on change de bucket (mais pas de trou), dupliquer le point précédent
+          // pour éviter un micro-trou visuel entre les 2 opacités.
+          if (!isGap && prevPoint) {
+            segment.push(prevPoint, p);
+          } else {
+            segment.push(p);
+          }
+        } else {
+          segment.push(p);
+        }
+
         prevT = p.t;
+        prevBucket = bucket;
+        prevPoint = p;
       }
-      if (segment.length >= 2) {
-        selfFeatures.push({
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
-          properties: {},
-        });
-      }
+
+      flush(prevBucket);
 
       traceSource.setData({ type: 'FeatureCollection', features: selfFeatures } as any);
     };
@@ -5700,11 +5681,19 @@ export default function MapLibreMap() {
                     {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
                       <div className="mt-1 text-xs text-gray-600">Maladies: {personCase.diseases.join(', ')}</div>
                     ) : null}
-                    {Array.isArray(personCase.injuries) && personCase.injuries.length ? (
-                      <div className="mt-1 text-xs text-gray-600">
-                        Blessures: {personCase.injuries.map((x) => x.id).join(', ')}
-                      </div>
-                    ) : null}
+                    {Array.isArray(personCase.injuries) && personCase.injuries.length ? (() => {
+                      const clean = cleanInjuries(personCase.injuries);
+                      if (!clean.length) return null;
+                      const labels = clean.map((inj) => {
+                        if (inj.id === 'plaie') return 'Plaie membre inférieur';
+                        return inj.id;
+                      });
+                      return (
+                        <div className="mt-1 text-xs text-gray-600">
+                          Blessures: {labels.join(', ')}
+                        </div>
+                      );
+                    })() : null}
                   </div>
 
                   <div className="rounded-2xl border p-3">
@@ -6122,35 +6111,40 @@ export default function MapLibreMap() {
                       onClick={() => {
                         if (personCase) {
                           setPersonEdit(false);
+                          const last = personCase.lastKnown;
+                          const next = personCase.nextClue;
+                          const cleanDis = cleanDiseases(personCase.diseases ?? []);
+                          const cleanInj = cleanInjuries(personCase.injuries ?? []);
                           setPersonDraft({
-                            lastKnownQuery: personCase.lastKnown.query,
-                            lastKnownType: personCase.lastKnown.type,
-                            lastKnownPoiId: personCase.lastKnown.poiId,
+                            lastKnownQuery: last.query,
+                            lastKnownType: last.type,
+                            lastKnownPoiId: last.poiId,
                             lastKnownLng:
-                              typeof personCase.lastKnown.lng === 'number' ? personCase.lastKnown.lng : undefined,
+                              typeof last.lng === 'number' ? last.lng : undefined,
                             lastKnownLat:
-                              typeof personCase.lastKnown.lat === 'number' ? personCase.lastKnown.lat : undefined,
-                            lastKnownWhen: personCase.lastKnown.when
-                              ? personCase.lastKnown.when.slice(0, 16)
-                              : '',
-                            nextClueQuery: '',
-                            nextClueType: 'address',
-                            nextCluePoiId: undefined,
-                            nextClueLng: undefined,
-                            nextClueLat: undefined,
-                            nextClueWhen: '',
+                              typeof last.lat === 'number' ? last.lat : undefined,
+                            lastKnownWhen: last.when ? last.when.slice(0, 16) : '',
+                            nextClueQuery: next?.query ?? '',
+                            nextClueType: next?.type ?? 'address',
+                            nextCluePoiId: next?.poiId,
+                            nextClueLng:
+                              typeof next?.lng === 'number' ? next!.lng : undefined,
+                            nextClueLat:
+                              typeof next?.lat === 'number' ? next!.lat : undefined,
+                            nextClueWhen: next?.when ? next.when.slice(0, 16) : '',
                             mobility: personCase.mobility,
-                            age: personCase.age === null ? '' : String(personCase.age),
-                            sex: personCase.sex,
-                            healthStatus: personCase.healthStatus,
-                            diseases: Array.isArray(personCase.diseases) ? personCase.diseases : [],
+                            age:
+                              typeof personCase.age === 'number'
+                                ? String(personCase.age)
+                                : '',
+                            sex: personCase.sex ?? 'unknown',
+                            healthStatus: personCase.healthStatus ?? 'stable',
+                            diseases: cleanDis,
                             diseasesFreeText: personCase.diseasesFreeText ?? '',
-                            injuries: Array.isArray(personCase.injuries)
-                              ? personCase.injuries.map((x) => ({
-                                  id: x.id,
-                                  locations: Array.isArray(x.locations) ? x.locations : [],
-                                }))
-                              : [],
+                            injuries: cleanInj.map((x) => ({
+                              id: x.id,
+                              locations: x.locations,
+                            })),
                             injuriesFreeText: personCase.injuriesFreeText ?? '',
                           });
                         } else {
@@ -6220,8 +6214,8 @@ export default function MapLibreMap() {
                             age: Number.isFinite(ageParsed as any) ? Math.floor(ageParsed as number) : undefined,
                             sex: personDraft.sex,
                             healthStatus: personDraft.healthStatus,
-                            diseases: personDraft.diseases,
-                            injuries: personDraft.injuries,
+                            diseases: cleanDiseases(personDraft.diseases) as string[],
+                            injuries: cleanInjuries(personDraft.injuries) as any,
                             diseasesFreeText: personDraft.diseasesFreeText,
                             injuriesFreeText: personDraft.injuriesFreeText,
                           };
