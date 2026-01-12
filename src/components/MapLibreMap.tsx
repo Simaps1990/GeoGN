@@ -1322,6 +1322,28 @@ export default function MapLibreMap() {
   const [settingsNotification, setSettingsNotification] = useState(false);
   const lastNotifiedPersonCaseIdRef = useRef<string | null>(null);
 
+  function dismissedPersonCaseStorageKey(missionId: string) {
+    return `dismissed_person_case_${missionId}`;
+  }
+
+  function getDismissedPersonCaseId(missionId: string): string | null {
+    try {
+      if (typeof window === 'undefined') return null;
+      return window.localStorage.getItem(dismissedPersonCaseStorageKey(missionId));
+    } catch {
+      return null;
+    }
+  }
+
+  function setDismissedPersonCaseId(missionId: string, caseId: string) {
+    try {
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem(dismissedPersonCaseStorageKey(missionId), caseId);
+    } catch {
+      // ignore
+    }
+  }
+
   const mobilityLabel = (m: ApiPersonCase['mobility']) => {
     switch (m) {
       case 'none':
@@ -1352,11 +1374,17 @@ export default function MapLibreMap() {
       lastNotifiedPersonCaseIdRef.current = null;
       return;
     }
+
+    if (selectedMissionId) {
+      const dismissed = getDismissedPersonCaseId(selectedMissionId);
+      if (dismissed === personCase.id) return;
+    }
+
     if (lastNotifiedPersonCaseIdRef.current === personCase.id) return;
     lastNotifiedPersonCaseIdRef.current = personCase.id;
     setProjectionNotification(true);
     setSettingsNotification(true);
-  }, [personCase, isAdmin]);
+  }, [personCase, isAdmin, selectedMissionId]);
 
   // Précharger la fiche personne pour tous les rôles afin que les non-admin puissent voir le suivi actif
   // (pastilles + ouverture Paw + heatmap) sans devoir ouvrir le panneau.
@@ -4597,7 +4625,7 @@ export default function MapLibreMap() {
         <div id="map-scale-container" className="pointer-events-auto flex w-full justify-center" />
       </div>
 
-      {selectedPoi && (
+      {selectedPoi ? (
         <div
           className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4"
           onClick={() => setSelectedPoi(null)}
@@ -4718,7 +4746,7 @@ export default function MapLibreMap() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {navPickerTarget ? (
         <div
@@ -4830,120 +4858,94 @@ export default function MapLibreMap() {
           </button>
         ) : null}
 
-        <div
-          className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-            zoneMenuOpen ? 'h-[260px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
-          }`}
-        >
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
+        {role !== 'viewer' ? (
+          <div
+            className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+              zoneMenuOpen ? 'h-[160px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+            }`}
+          >
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActionError(null);
 
-                if (canEditMap && (activeTool === 'zone_circle' || activeTool === 'zone_polygon')) {
-                  cancelDraft();
-                  setZoneMenuOpen(false);
-                  return;
-                }
+                  if (canEditMap && (activeTool === 'zone_circle' || activeTool === 'zone_polygon')) {
+                    cancelDraft();
+                    setZoneMenuOpen(false);
+                    return;
+                  }
 
-                setZoneMenuOpen((v) => !v);
-              }}
-              className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                  ? 'ring-1 ring-inset ring-blue-500/25'
-                  : ''
-              }`}
-              title="Zones"
-            >
-              <CircleDotDashed
-                className={
+                  setZoneMenuOpen((v) => !v);
+                }}
+                className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
                   zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                    ? 'mx-auto text-blue-600'
-                    : 'mx-auto text-gray-600'
-                }
-                size={20}
-              />
-            </button>
+                    ? 'ring-1 ring-inset ring-blue-500/25'
+                    : ''
+                }`}
+                title="Zones"
+              >
+                <CircleDotDashed
+                  className={
+                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
+                      ? 'mx-auto text-blue-600'
+                      : 'mx-auto text-gray-600'
+                  }
+                  size={20}
+                />
+              </button>
 
-            <div
-              className={`flex flex-col gap-2 transition-all duration-200 ${
-                zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
-              }`}
-            >
-              {canEditMap ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activeTool === 'zone_circle') {
+              <div
+                className={`flex flex-col gap-2 transition-all duration-200 ${
+                  zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
+                }`}
+              >
+                {canEditMap ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeTool === 'zone_circle') {
+                          cancelDraft();
+                          setZoneMenuOpen(false);
+                          return;
+                        }
                         cancelDraft();
-                        setZoneMenuOpen(false);
-                        return;
-                      }
-                      cancelDraft();
-                      setDraftColor('#2563eb');
-                      setActiveTool('zone_circle');
-                    }}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      activeTool === 'zone_circle' ? 'ring-blue-500/25' : 'ring-black/10'
-                    }`}
-                    title="Zone cercle"
-                  >
-                    <CircleDot className={activeTool === 'zone_circle' ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activeTool === 'zone_polygon') {
+                        setDraftColor('#2563eb');
+                        setActiveTool('zone_circle');
+                      }}
+                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                        activeTool === 'zone_circle' ? 'ring-blue-500/25' : 'ring-black/10'
+                      }`}
+                      title="Zone cercle"
+                    >
+                      <CircleDot className={activeTool === 'zone_circle' ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeTool === 'zone_polygon') {
+                          cancelDraft();
+                          setZoneMenuOpen(false);
+                          return;
+                        }
                         cancelDraft();
-                        setZoneMenuOpen(false);
-                        return;
-                      }
-                      cancelDraft();
-                      setDraftColor('#2563eb');
-                      setActiveTool('zone_polygon');
-                    }}
-                    className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                      activeTool === 'zone_polygon' ? 'ring-blue-500/25' : 'ring-black/10'
-                    }`}
-                    title="Zone à la main"
-                  >
-                    <Spline className={activeTool === 'zone_polygon' ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                  </button>
-                </>
-              ) : null}
-
-              <div className="max-h-[152px] overflow-y-auto rounded-2xl border bg-white p-1">
-                {zones.length ? (
-                  <div className="grid gap-1">
-                    {zones.map((z) => (
-                      <div key={z.id} className="flex items-center justify-between gap-2 rounded-xl px-2 py-2 hover:bg-gray-50">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-semibold text-gray-800">{z.title || 'Zone'}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const t = zoneNavTarget(z);
-                            if (!t) return;
-                            setNavPickerTarget(t);
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                          title="Naviguer vers la zone"
-                        >
-                          <Navigation2 size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-2 py-2 text-xs text-gray-600">Aucune zone</div>
-                )}
+                        setDraftColor('#2563eb');
+                        setActiveTool('zone_polygon');
+                      }}
+                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                        activeTool === 'zone_polygon' ? 'ring-blue-500/25' : 'ring-black/10'
+                      }`}
+                      title="Zone à la main"
+                    >
+                      <Spline className={activeTool === 'zone_polygon' ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                    </button>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
-        </div>
+        ) : null}
 
         <div
           className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
@@ -4961,6 +4963,9 @@ export default function MapLibreMap() {
                 setSettingsMenuOpen((v) => !v);
                 if (!isAdmin) {
                   setSettingsNotification(false);
+                  if (selectedMissionId && personCase) {
+                    setDismissedPersonCaseId(selectedMissionId, personCase.id);
+                  }
                 }
               }}
               className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
@@ -5017,6 +5022,9 @@ export default function MapLibreMap() {
 
                   if (!isAdmin) {
                     setProjectionNotification(false);
+                    if (selectedMissionId && personCase) {
+                      setDismissedPersonCaseId(selectedMissionId, personCase.id);
+                    }
                   }
 
                   if (!personCase) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CircleDot, Spline, Grid2X2, Map as MapIcon, Pencil, Trash2 } from 'lucide-react';
+import { CircleDot, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, Trash2 } from 'lucide-react';
 import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
 
 export default function MissionZonesPage() {
@@ -9,6 +9,22 @@ export default function MissionZonesPage() {
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
+
+  useEffect(() => {
+    if (!navPickerTarget) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNavPickerTarget(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navPickerTarget]);
+
+  const isAndroid = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    return /android/i.test(navigator.userAgent);
+  }, []);
 
   const [members, setMembers] = useState<ApiMissionMember[]>([]);
 
@@ -75,6 +91,21 @@ export default function MissionZonesPage() {
   // Tant que la mission n'est pas chargée, ne pas afficher les contrôles d'édition
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
   const isAdmin = mission?.membership?.role === 'admin';
+
+  function zoneNavTarget(z: ApiZone): { lng: number; lat: number; title: string } | null {
+    if (z.type === 'circle' && z.circle?.center) {
+      return { lng: z.circle.center.lng, lat: z.circle.center.lat, title: z.title || 'Zone' };
+    }
+    if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+      const ring = z.polygon.coordinates[0];
+      const pts = ring.slice(0, Math.max(0, ring.length - 1));
+      if (!pts.length) return null;
+      const lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      const lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      return { lng, lat, title: z.title || 'Zone' };
+    }
+    return null;
+  }
 
   function enqueueOfflineAction(action: any) {
     if (!missionId) return;
@@ -260,39 +291,58 @@ export default function MissionZonesPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={!missionId}
-                      onClick={() => {
-                        if (!missionId) return;
+                  <div className="ml-2 flex flex-col items-end gap-1 self-start">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!missionId}
+                        onClick={() => {
+                          const t = zoneNavTarget(z);
+                          if (!t) return;
+                          setNavPickerTarget(t);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        title="Naviguer"
+                      >
+                        <Navigation2 size={16} />
+                      </button>
 
-                        let lng = 0;
-                        let lat = 0;
+                      <button
+                        type="button"
+                        disabled={!missionId}
+                        onClick={() => {
+                          if (!missionId) return;
 
-                        if (z.type === 'circle' && z.circle?.center) {
-                          lng = z.circle.center.lng;
-                          lat = z.circle.center.lat;
-                        } else if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-                          const ring = z.polygon.coordinates[0];
-                          const pts = ring.slice(0, Math.max(0, ring.length - 1));
-                          if (pts.length) {
-                            lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-                            lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                          let lng = 0;
+                          let lat = 0;
+
+                          if (z.type === 'circle' && z.circle?.center) {
+                            lng = z.circle.center.lng;
+                            lat = z.circle.center.lat;
+                          } else if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
+                            const ring = z.polygon.coordinates[0];
+                            const pts = ring.slice(0, Math.max(0, ring.length - 1));
+                            if (pts.length) {
+                              lng = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+                              lat = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                            }
                           }
-                        }
 
-                        sessionStorage.setItem('geogn.centerZone', JSON.stringify({ missionId, lng, lat, zoom: 15 }));
-                        navigate(`/mission/${missionId}/map`);
-                      }}
-                      className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                      title="Voir sur la carte"
-                    >
-                      <MapIcon size={18} />
-                    </button>
+                          sessionStorage.setItem(
+                            'geogn.centerZone',
+                            JSON.stringify({ missionId, lng, lat, zoom: 15 })
+                          );
+                          navigate(`/mission/${missionId}/map`);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        title="Voir sur la carte"
+                      >
+                        <MapIcon size={16} />
+                      </button>
+                    </div>
 
                     {editingId !== z.id && canEdit ? (
-                      <>
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           disabled={!missionId || busyId === z.id}
@@ -306,10 +356,10 @@ export default function MissionZonesPage() {
                               color: z.color,
                             });
                           }}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                           title="Modifier"
                         >
-                          <Pencil size={18} />
+                          <Pencil size={16} />
                         </button>
                         <button
                           type="button"
@@ -332,12 +382,12 @@ export default function MissionZonesPage() {
                               setBusyId(null);
                             }
                           }}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
                           title="Supprimer"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
                         </button>
-                      </>
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -502,6 +552,62 @@ export default function MissionZonesPage() {
           ))}
         </div>
       )}
+
+      {navPickerTarget ? (
+        <div
+          className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setNavPickerTarget(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 text-sm font-semibold text-gray-900">Selectionnez votre moyen de navigation</div>
+            <div className="flex items-center justify-center gap-4 p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  const waze = `https://waze.com/ul?ll=${navPickerTarget.lat}%2C${navPickerTarget.lng}&navigate=yes`;
+                  window.open(waze, '_blank');
+                  setNavPickerTarget(null);
+                }}
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Waze"
+              >
+                <img src="/icon/waze.png" alt="Waze" className="h-12 w-12 object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const q = encodeURIComponent(`${navPickerTarget.lat},${navPickerTarget.lng}`);
+                  const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
+                  window.open(gmaps, '_blank');
+                  setNavPickerTarget(null);
+                }}
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                title="Google Maps"
+              >
+                <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
+              </button>
+              {!isAndroid ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const label = encodeURIComponent(navPickerTarget.title || 'Cible');
+                    const apple = `http://maps.apple.com/?ll=${navPickerTarget.lat},${navPickerTarget.lng}&q=${label}`;
+                    window.open(apple, '_blank');
+                    setNavPickerTarget(null);
+                  }}
+                  className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                  title="Plans (Apple)"
+                >
+                  <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
