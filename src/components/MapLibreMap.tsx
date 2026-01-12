@@ -989,7 +989,8 @@ export default function MapLibreMap() {
     const effectiveHours = (() => {
       if (hoursSince === null) return 0; // heure manquante → pas de distance défendable
       const t = hoursSince;
-      const clamped = Math.max(0.25, Math.min(72, t));
+      // Conserver uniquement une borne haute raisonnable, pour que les petites durées restent petites
+      const clamped = Math.max(0, Math.min(72, t));
       return clamped;
     })();
 
@@ -1313,8 +1314,14 @@ export default function MapLibreMap() {
       case 'car':
         return 'Voiture';
       default:
-        return String(m);
+        return 'Inconnu';
     }
+  };
+
+  const sexLabel = (s: ApiPersonCase['sex']) => {
+    if (s === 'female') return 'Femme';
+    if (s === 'male') return 'Homme';
+    return 'Inconnu';
   };
 
   // Précharger l'existence d'une fiche personne pour pouvoir masquer l'icône aux non-admin
@@ -2387,10 +2394,19 @@ export default function MapLibreMap() {
       }
     };
 
+    // Zones et grilles de fond
     safeMoveToTop('zones-fill');
     safeMoveToTop('zones-outline');
     safeMoveToTop('zones-grid-lines');
     safeMoveToTop('zones-grid-labels');
+
+    // Zone d'estimation (doit rester sous les points/POI)
+    safeMoveToTop('person-estimation-outer-fill');
+    safeMoveToTop('person-estimation-inner-fill');
+    safeMoveToTop('person-estimation-corridor-outline');
+    safeMoveToTop('person-estimation-corridor-fill');
+
+    // POI, traces et positions au-dessus de la zone
     safeMoveToTop('pois');
     safeMoveToTop('pois-labels');
 
@@ -2401,10 +2417,6 @@ export default function MapLibreMap() {
     safeMoveToTop('others-labels');
     safeMoveToTop('me-dot');
     safeMoveToTop('zones-labels');
-    safeMoveToTop('person-estimation-outer-fill');
-    safeMoveToTop('person-estimation-inner-fill');
-    safeMoveToTop('person-estimation-corridor-outline');
-    safeMoveToTop('person-estimation-corridor-fill');
   }
 
   function ensureOverlays(map: MapLibreMapInstance) {
@@ -3736,6 +3748,8 @@ export default function MapLibreMap() {
         (el as any).style.transformOrigin = 'center bottom';
         // Remonter légèrement l'échelle pour qu'elle passe au-dessus du mini popup heatmap
         (el as HTMLElement).style.marginBottom = '60px';
+        // La réglette doit être purement informative (pas de drag/clic parasite sur mobile)
+        (el as HTMLElement).style.pointerEvents = 'none';
         // Initialiser la visibilité de l'échelle en fonction de scaleEnabled au moment de la création
         (el as HTMLElement).style.display = scaleEnabled ? '' : 'none';
       } catch {
@@ -4988,7 +5002,10 @@ export default function MapLibreMap() {
           onTouchStart={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
         >
-          <div className="rounded-3xl border bg-white/80 shadow-xl backdrop-blur p-3">
+          <div
+            className="rounded-3xl border bg-white/80 shadow-xl backdrop-blur p-3"
+            onClick={() => setPersonPanelCollapsed(false)}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs text-gray-700">
@@ -5031,12 +5048,12 @@ export default function MapLibreMap() {
       ) : personPanelOpen ? (
         <div
           className="absolute inset-0 z-[1250] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setPersonPanelOpen(false)}
+          onClick={() => setPersonPanelCollapsed(true)}
         >
           <div
             className={
               personEdit || !personCase
-                ? 'flex h-[calc(100vh-24px)] w-[calc(100vw-24px)] flex-col rounded-3xl bg-white p-4 shadow-xl'
+                ? 'w-full max-w-3xl max-h-[calc(100vh-48px)] flex flex-col rounded-3xl bg-white p-4 shadow-xl'
                 : 'w-full max-w-3xl max-h-[calc(100vh-48px)] flex flex-col rounded-3xl bg-white p-4 shadow-xl'
             }
             onClick={(e) => e.stopPropagation()}
@@ -5147,7 +5164,7 @@ export default function MapLibreMap() {
                     <div className="text-xs font-semibold text-gray-700">Profil</div>
                     <div className="mt-1 text-sm text-gray-900">
                       Âge: {personCase.age ?? '—'}
-                      {' · '}Sexe: {personCase.sex}
+                      {' · '}Sexe: {sexLabel(personCase.sex)}
                       {' · '}État: {personCase.healthStatus}
                     </div>
                     {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
