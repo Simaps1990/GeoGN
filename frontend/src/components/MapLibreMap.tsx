@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -68,7 +68,6 @@ import {
   type ApiZone,
 } from '../lib/api';
 import {
-  BodyPartId,
   DiseaseId,
   InjuryId,
   SimpleWeather,
@@ -478,31 +477,6 @@ export default function MapLibreMap() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  function zoneNavTarget(z: ApiZone): { lng: number; lat: number; title: string } | null {
-    if (z.type === 'circle' && z.circle?.center) {
-      return { lng: z.circle.center.lng, lat: z.circle.center.lat, title: z.title || 'Zone' };
-    }
-    if (z.type === 'polygon' && z.polygon?.type === 'Polygon' && Array.isArray(z.polygon.coordinates)) {
-      const ring = Array.isArray(z.polygon.coordinates[0]) ? z.polygon.coordinates[0] : [];
-      if (!ring.length) return null;
-      let sumLng = 0;
-      let sumLat = 0;
-      let n = 0;
-      for (const pt of ring) {
-        if (!Array.isArray(pt) || pt.length < 2) continue;
-        const lng = Number(pt[0]);
-        const lat = Number(pt[1]);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-        sumLng += lng;
-        sumLat += lat;
-        n += 1;
-      }
-      if (n === 0) return null;
-      return { lng: sumLng / n, lat: sumLat / n, title: z.title || 'Zone' };
-    }
-    return null;
-  }
-
   useEffect(() => {
     if (!selectedPoi) return;
     const next = pois.find((p) => p.id === selectedPoi.id);
@@ -578,7 +552,7 @@ export default function MapLibreMap() {
         'insuffisance_respiratoire',
         'insuffisance_renale',
         'grossesse',
-        'handicap_moteur',
+        'autre',
       ] as DiseaseId[],
     []
   );
@@ -586,33 +560,13 @@ export default function MapLibreMap() {
   const injuryOptions = useMemo(
     () =>
       [
-        'fracture',
-        'entorse',
+        'traumatisme_cranien',
         'plaie',
-        'hypothermie',
-        'deshydratation',
+        'fracture',
+        'brulure',
+        'hemorragie',
+        'autre',
       ] as InjuryId[],
-    []
-  );
-
-  const bodyPartOptions = useMemo(
-    () => [
-      { id: 'head', label: 'Tête' },
-      { id: 'face', label: 'Visage' },
-      { id: 'neck', label: 'Cou' },
-      { id: 'chest', label: 'Thorax' },
-      { id: 'back', label: 'Dos' },
-      { id: 'abdomen', label: 'Abdomen' },
-      { id: 'pelvis', label: 'Bassin' },
-      { id: 'left_arm', label: 'Bras gauche' },
-      { id: 'right_arm', label: 'Bras droit' },
-      { id: 'left_hand', label: 'Main gauche' },
-      { id: 'right_hand', label: 'Main droite' },
-      { id: 'left_leg', label: 'Jambe gauche' },
-      { id: 'right_leg', label: 'Jambe droite' },
-      { id: 'left_foot', label: 'Pied gauche' },
-      { id: 'right_foot', label: 'Pied droit' },
-    ],
     []
   );
 
@@ -1330,7 +1284,6 @@ export default function MapLibreMap() {
   const isAdmin = role === 'admin';
   const canEditMap = role === 'admin' || role === 'member'; // zones / POI
   const canEditPerson = isAdmin; // fiche personne / projection
-  const canOpenPersonPanel = true; // tout le monde voit le bouton paw
 
   // Notifications projection (pour utilisateurs / visualisateurs)
   const [projectionNotification, setProjectionNotification] = useState(false);

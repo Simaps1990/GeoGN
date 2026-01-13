@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ApiUser } from '../lib/api';
-import { clearTokens, getApiBaseUrl, login, me, register } from '../lib/api';
+import { clearTokens, login, me, register } from '../lib/api';
 
 const SELECTED_MISSION_KEY = 'geotacops.selectedMissionId';
 const LAST_USER_KEY = 'geotacops.lastUserId';
@@ -55,7 +55,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const startedAt = Date.now();
       try {
         const current = await me();
 
