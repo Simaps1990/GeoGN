@@ -11,6 +11,7 @@ import { joinRequestsRoutes } from './routes/joinRequests.js';
 import { poisRoutes } from './routes/pois.js';
 import { personCasesRoutes } from './routes/personCases.js';
 import { zonesRoutes } from './routes/zones.js';
+import { oidcPlugin } from './routes/oidc.js';
 import { setupSocket } from './socket.js';
 
 const mongoUri = process.env.MONGO_URI;
@@ -20,6 +21,9 @@ if (!mongoUri) {
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true, credentials: true });
+
+// OIDC / Keycloak BFF SSO (cookies + server-side tokens)
+await oidcPlugin(app);
 
 await connectMongo(mongoUri);
 

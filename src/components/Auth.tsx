@@ -131,6 +131,18 @@ export default function Auth() {
           >
             {loading ? 'Chargement...' : isSignUp ? 'Créer un compte' : 'Se connecter'}
           </button>
+          {!isSignUp ? (
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = '/api/login';
+              }}
+              className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-[#15181d] text-xs font-medium text-white/80 hover:bg-[#1f232a] hover:text-white transition"
+            >
+              <Lock size={16} className="text-white/70" />
+              <span>Se connecter avec Keycloak</span>
+            </button>
+          ) : null}
         </form>
 
         <div className="mt-6 text-center text-sm text-white/70">

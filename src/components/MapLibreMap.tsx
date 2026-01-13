@@ -2595,6 +2595,32 @@ export default function MapLibreMap() {
       });
     }
 
+    // Ensure my fading trace is rendered above other users' traces.
+    if (!map.getLayer('trace-line')) {
+      map.addLayer(
+        {
+          id: 'trace-line',
+          type: 'line',
+          source: 'trace',
+          paint: {
+            'line-color': '#00ff00',
+            'line-width': 8,
+            'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
+          },
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'butt',
+          },
+        },
+        'me-dot'
+      );
+    }
+
+    if (map.getLayer('others-traces-line') && map.getLayer('trace-line')) {
+      // Render others-traces-line underneath the main trace-line layer.
+      map.moveLayer('others-traces-line', 'trace-line');
+    }
+
     if (!map.getSource('zones-grid')) {
       map.addSource('zones-grid', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
@@ -2678,26 +2704,6 @@ export default function MapLibreMap() {
     if (!map.getSource('trace')) {
       map.addSource('trace', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } });
     }
-    if (!map.getLayer('trace-line')) {
-      // Insert the trace layer *under* the me-dot layer so the position icon stays above the line.
-      map.addLayer(
-        {
-          id: 'trace-line',
-          type: 'line',
-          source: 'trace',
-          paint: {
-            'line-color': '#00ff00',
-            'line-width': 8,
-            'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
-          },
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'butt',
-          },
-        },
-        'me-dot'
-      );
-    }
 
     if (!map.getSource('others')) {
       map.addSource('others', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -2713,7 +2719,8 @@ export default function MapLibreMap() {
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
           'line-width': 8,
-          'line-opacity': 0.9,
+          // Use per-feature opacity to support fading gradient on other users' traces as well.
+          'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
         },
       });
     }
@@ -2735,6 +2742,11 @@ export default function MapLibreMap() {
           'circle-stroke-width': 2,
         },
       });
+
+      // Ensure my own position dot stays visually on top of other points.
+      if (map.getLayer('me-dot')) {
+        map.moveLayer('me-dot');
+      }
     }
 
     if (!map.getLayer('others-points-inactive-dot')) {
@@ -4879,41 +4891,62 @@ export default function MapLibreMap() {
     const inactiveColor = '#9ca3af';
     const features: any[] = [];
     const segmentGapMs = 30_000;
+    const opacities = [1, 0.8, 0.6, 0.4, 0.2];
+
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       if (hiddenUserIds[userId]) continue;
       if (pts.length < 2) continue;
+
       const memberColor = memberColors[userId];
       const lastT = pts[pts.length - 1]?.t ?? 0;
       const isInactive = now - lastT > inactiveAfterMs;
       const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
 
+      const n = pts.length;
       let segment: { lng: number; lat: number; t: number }[] = [];
       let prevT: number | null = null;
-      for (const p of pts) {
+      let prevBucket: number | null = null;
+      let prevPoint: { lng: number; lat: number; t: number } | null = null;
+
+      const flush = (bucket: number | null) => {
+        if (segment.length >= 2 && bucket !== null) {
+          features.push({
+            type: 'Feature',
+            properties: { userId, color, inactive: isInactive ? 1 : 0, opacity: opacities[bucket] ?? 0.9 },
+            geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
+          });
+        }
+        segment = [];
+      };
+
+      for (let i = 0; i < n; i++) {
+        const p = pts[i];
         if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
         if (typeof p.t !== 'number' || !Number.isFinite(p.t)) continue;
 
-        if (prevT !== null && p.t - prevT > segmentGapMs) {
-          if (segment.length >= 2) {
-            features.push({
-              type: 'Feature',
-              properties: { userId, color, inactive: isInactive ? 1 : 0 },
-              geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
-            });
+        const bucket = n > 0 ? Math.min(4, Math.max(0, Math.floor(((n - 1 - i) * 5) / n))) : 0;
+        const isGap = prevT !== null && p.t - prevT > segmentGapMs;
+        const bucketChanged = prevBucket !== null && bucket !== prevBucket;
+
+        if ((isGap || bucketChanged) && segment.length) {
+          flush(prevBucket);
+
+          // Si on change de bucket (mais pas de trou), dupliquer le point précédent pour éviter un trou visuel.
+          if (!isGap && prevPoint) {
+            segment.push(prevPoint, p);
+          } else {
+            segment.push(p);
           }
-          segment = [];
+        } else {
+          segment.push(p);
         }
-        segment.push(p);
+
         prevT = p.t;
+        prevBucket = bucket;
+        prevPoint = p;
       }
 
-      if (segment.length >= 2) {
-        features.push({
-          type: 'Feature',
-          properties: { userId, color, inactive: isInactive ? 1 : 0 },
-          geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
-        });
-      }
+      flush(prevBucket);
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
