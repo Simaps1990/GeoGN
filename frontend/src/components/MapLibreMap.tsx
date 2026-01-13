@@ -399,8 +399,32 @@ export default function MapLibreMap() {
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
-  const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
+  const pendingBulkRef = useRef<{
+    lng: number;
+    lat: number;
+    t: number;
+    speed?: number;
+    heading?: number;
+    accuracy?: number;
+  }[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
+  const flushDelayRef = useRef<number>(1000);
+  const lastPersistTsRef = useRef<number>(0);
+  const activeMissionRef = useRef<string | null>(null);
+  const wasSocketConnectedRef = useRef<boolean>(false);
   const pendingActionsRef = useRef<any[]>([]);
+
+  const persistPendingPositions = (missionId: string, userId: string) => {
+    const now = Date.now();
+    if (now - lastPersistTsRef.current < 2000) return;
+    lastPersistTsRef.current = now;
+    const key = `geogn.pendingPos.${missionId}.${userId}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(pendingBulkRef.current.slice(-5000)));
+    } catch {
+      // ignore
+    }
+  };
 
   const scaleControlRef = useRef<maplibregl.ScaleControl | null>(null);
   const scaleControlElRef = useRef<HTMLElement | null>(null);
@@ -672,6 +696,11 @@ export default function MapLibreMap() {
 
     return () => {
       cancelled = true;
+
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
       window.clearTimeout(t);
     };
   }, [personDraft.lastKnownQuery, lastKnownSuggestionsOpen]);
@@ -4278,16 +4307,29 @@ export default function MapLibreMap() {
     const socket = getSocket();
     socketRef.current = socket;
 
-    const ensureJoined = () => {
-      try {
-        socket.emit('mission:join', { missionId });
-      } catch {
-        // ignore
-      }
+    activeMissionRef.current = missionId;
+
+    const ensureJoined = async (): Promise<boolean> => {
+      return new Promise<boolean>((resolve) => {
+        try {
+          socket.emit('mission:join', { missionId }, (res: any) => {
+            resolve(Boolean(res?.ok));
+          });
+        } catch {
+          resolve(false);
+        }
+      });
     };
 
-    // Always (re)join on mount so we are in the right room (even if MissionLayout is not mounted).
-    ensureJoined();
+    const onConnected = async () => {
+      const joined = await ensureJoined();
+      if (!joined) return;
+      if (activeMissionRef.current !== missionId) return;
+      flushDelayRef.current = 1000;
+      flushPendingInternal();
+      void flushPendingActions(missionId);
+      requestSnapshot();
+    };
 
     const pendingKey = user?.id ? `geogn.pendingPos.${missionId}.${user.id}` : null;
     if (pendingKey) {
@@ -4321,22 +4363,52 @@ export default function MapLibreMap() {
 
     const persistPending = () => {
       if (!pendingKey) return;
-      try {
-        localStorage.setItem(pendingKey, JSON.stringify(pendingBulkRef.current.slice(-5000)));
-      } catch {
-        // ignore
-      }
+      if (!user?.id) return;
+      persistPendingPositions(missionId, user.id);
     };
 
-    const flushPending = () => {
+    const scheduleFlush = (delayMs: number) => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      if (!pendingKey) return;
+      flushTimerRef.current = window.setTimeout(() => {
+        flushPendingInternal();
+      }, delayMs);
+    };
+
+    const flushPendingInternal = () => {
       const pts = pendingBulkRef.current;
       if (!pendingKey) return;
-      if (!pts || pts.length === 0) return;
-      if (!socket.connected) return;
-      socket.emit('position:bulk', { points: pts }, (res: any) => {
+      if (activeMissionRef.current !== missionId) {
+        return;
+      }
+      if (!pts || pts.length === 0) {
+        flushDelayRef.current = 1000;
+        return;
+      }
+      if (!socket.connected) {
+        scheduleFlush(flushDelayRef.current);
+        return;
+      }
+
+      const batch = pts.slice(0, 200);
+      socket.emit('position:bulk', { points: batch }, (res: any) => {
+        if (activeMissionRef.current !== missionId) {
+          return;
+        }
         if (res && res.ok) {
-          pendingBulkRef.current = [];
+          pendingBulkRef.current = pendingBulkRef.current.slice(batch.length);
           persistPending();
+          flushDelayRef.current = 1000;
+          if (pendingBulkRef.current.length > 0) {
+            scheduleFlush(0);
+          }
+        } else {
+          const nextDelay = flushDelayRef.current < 2000 ? 2000 : flushDelayRef.current < 5000 ? 5000 : 5000;
+          flushDelayRef.current = nextDelay;
+          scheduleFlush(flushDelayRef.current);
         }
       });
     };
@@ -4349,16 +4421,10 @@ export default function MapLibreMap() {
       }
     };
 
-    // Best effort: re-join + request fresh snapshot + flush buffered points on connect/reconnect.
-    const onConnected = () => {
-      ensureJoined();
-      flushPending();
-      void flushPendingActions(missionId);
-      requestSnapshot();
-    };
     socket.on('connect', onConnected);
-    socket.on('reconnect', onConnected as any);
-    setTimeout(onConnected, 300);
+    if (socket.connected) {
+      void onConnected();
+    }
 
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
@@ -4369,9 +4435,14 @@ export default function MapLibreMap() {
           // ignore
         }
       }
-      ensureJoined();
-      requestSnapshot();
-      flushPending();
+      void (async () => {
+        const joined = await ensureJoined();
+        if (!joined) return;
+        if (activeMissionRef.current !== missionId) return;
+        requestSnapshot();
+        flushDelayRef.current = 1000;
+        flushPendingInternal();
+      })();
       void flushPendingActions(missionId);
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -4556,8 +4627,13 @@ export default function MapLibreMap() {
     return () => {
       cancelled = true;
 
+      // stop scheduled flush
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+
       socket.off('connect', onConnected);
-      socket.off('reconnect', onConnected as any);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onVisibility);
       window.removeEventListener('online', onOnline);
@@ -4573,6 +4649,12 @@ export default function MapLibreMap() {
       socket.off('zone:created', onZoneCreated);
       socket.off('zone:updated', onZoneUpdated);
       socket.off('zone:deleted', onZoneDeleted);
+
+      // prevent late callbacks from rescheduling
+      activeMissionRef.current = null;
+
+      // reset backoff
+      flushDelayRef.current = 1000;
     };
   }, [selectedMissionId]);
 
@@ -4645,16 +4727,18 @@ export default function MapLibreMap() {
           };
 
           if (socket.connected) {
+            wasSocketConnectedRef.current = true;
             socket.emit('position:update', payload);
           } else {
+            // First offline point: persist immediately (then throttle every 2s)
+            if (wasSocketConnectedRef.current) {
+              wasSocketConnectedRef.current = false;
+              lastPersistTsRef.current = 0;
+            }
+
             pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
-            if (selectedMissionId && user?.id) {
-              const key = `geogn.pendingPos.${selectedMissionId}.${user.id}`;
-              try {
-                localStorage.setItem(key, JSON.stringify(pendingBulkRef.current));
-              } catch {
-                // ignore
-              }
+            if (user?.id) {
+              persistPendingPositions(selectedMissionId, user.id);
             }
           }
         }

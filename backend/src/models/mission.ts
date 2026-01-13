@@ -20,7 +20,8 @@ const MissionSchema = new Schema<MissionDoc>(
     createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
     status: { type: String, required: true, enum: ['draft', 'active', 'closed'], index: true },
     mapStyle: { type: String, required: true, enum: ['streets', 'satellite'], default: 'streets' },
-    traceRetentionSeconds: { type: Number, required: true, default: 3600 },
+    // Default trace retention: 24h (86400s). TTL + snapshot window rely on this.
+    traceRetentionSeconds: { type: Number, required: true, default: 86400 },
     createdAt: { type: Date, required: true, default: () => new Date() },
     updatedAt: { type: Date, required: true, default: () => new Date() },
   },

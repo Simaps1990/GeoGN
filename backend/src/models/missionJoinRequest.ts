@@ -25,5 +25,6 @@ const MissionJoinRequestSchema = new Schema<MissionJoinRequestDoc>(
 );
 
 MissionJoinRequestSchema.index({ missionId: 1, requestedBy: 1 }, { unique: true });
+MissionJoinRequestSchema.index({ missionId: 1, status: 1 });
 
 export const MissionJoinRequestModel = mongoose.model<MissionJoinRequestDoc>('MissionJoinRequest', MissionJoinRequestSchema);

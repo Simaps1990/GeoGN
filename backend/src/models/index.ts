@@ -9,3 +9,4 @@ export { PositionModel } from './position.js';
 export { TraceModel } from './trace.js';
 export { PoiModel } from './poi.js';
 export { PersonCaseModel } from './personCase.js';
+export { PositionCurrentModel } from './positionCurrent.js';

@@ -5,6 +5,7 @@ import { generateAppUserId } from '../auth/appUserId.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../auth/jwt.js';
 import { requireAuth } from '../plugins/auth.js';
+import { getBffUserFromRequest } from './oidc.js';
 
 type RegisterBody = {
   email: string;
@@ -71,6 +72,65 @@ export async function authRoutes(app: FastifyInstance) {
       },
     });
   });
+
+	// Attache la session Keycloak (BFF) à un utilisateur applicatif et émet les JWT
+	// comme pour /auth/login. Utilisé après un login SSO pour que les autorisations
+	// backend (requireAuth) fonctionnent de la même façon.
+	app.post('/auth/oidc/attach', async (req: FastifyRequest, reply: FastifyReply) => {
+		const bffUser = getBffUserFromRequest(req);
+		if (!bffUser) {
+			return reply.code(401).send({ error: 'BFF_SESSION_MISSING' });
+		}
+
+		const sub = String(bffUser.sub ?? bffUser.id ?? '').trim();
+		const email = typeof bffUser.email === 'string' ? bffUser.email.trim().toLowerCase() : undefined;
+		const displayNameRaw =
+			bffUser.name ?? bffUser.preferred_username ?? bffUser.given_name ?? bffUser.email ?? bffUser.sub ?? 'Utilisateur SSO';
+		const displayName = String(displayNameRaw).trim() || 'Utilisateur SSO';
+		if (!sub && !email) {
+			return reply.code(400).send({ error: 'OIDC_USER_INCOMPLETE' });
+		}
+
+		// On essaie de retrouver un utilisateur existant par email si possible, sinon par un appUserId dérivé de sub.
+		const appUserIdFromSub = sub ? `oidc:${sub}` : undefined;
+		const query: any[] = [];
+		if (email) query.push({ email });
+		if (appUserIdFromSub) query.push({ appUserId: appUserIdFromSub });
+		let user = await UserModel.findOne(query.length ? { $or: query } : {}).exec();
+
+		if (!user) {
+			// Crée un utilisateur "virtuel" avec un mot de passe aléatoire (jamais utilisé côté login).
+			let appUserId = appUserIdFromSub ?? generateAppUserId();
+			for (let i = 0; i < 5; i += 1) {
+				const collision = await UserModel.findOne({ appUserId }).lean();
+				if (!collision) break;
+				appUserId = generateAppUserId();
+			}
+			const randomPassword = `oidc:${crypto.randomUUID()}`;
+			const passwordHash = await hashPassword(randomPassword);
+			user = await UserModel.create({
+				appUserId,
+				displayName,
+				email,
+				passwordHash,
+				createdAt: new Date(),
+			});
+		}
+
+		const accessToken = signAccessToken(user._id.toString());
+		const refreshToken = signRefreshToken(user._id.toString());
+
+		return reply.send({
+			accessToken,
+			refreshToken,
+			user: {
+				id: user._id.toString(),
+				appUserId: user.appUserId,
+				displayName: user.displayName,
+				email: user.email,
+			},
+		});
+	});
 
   app.post<{ Body: LoginBody }>('/auth/login', async (req: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
     const { email, password } = req.body;

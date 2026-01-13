@@ -27,5 +27,7 @@ const MissionInviteSchema = new Schema<MissionInviteDoc>(
 );
 
 MissionInviteSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+MissionInviteSchema.index({ invitedUserId: 1, status: 1 });
+MissionInviteSchema.index({ missionId: 1, status: 1 });
 
 export const MissionInviteModel = mongoose.model<MissionInviteDoc>('MissionInvite', MissionInviteSchema);

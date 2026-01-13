@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ApiUser } from '../lib/api';
-import { clearTokens, login, me, register } from '../lib/api';
+import { clearTokens, getApiBaseUrl, login, me, register, setTokens } from '../lib/api';
 
 const SELECTED_MISSION_KEY = 'geotacops.selectedMissionId';
 const LAST_USER_KEY = 'geotacops.lastUserId';
@@ -56,6 +56,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
+        // 1) Tenter d'abord une session BFF (Keycloak) via /api/me
+        try {
+          const baseUrl = getApiBaseUrl();
+          const res = await fetch(`${baseUrl}/api/me`, {
+            method: 'GET',
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const data: any = await res.json().catch(() => null);
+            if (data && data.authenticated && data.user) {
+              // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
+              const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
+                method: 'POST',
+                credentials: 'include',
+              });
+              if (attachRes.ok) {
+                const attach: any = await attachRes.json().catch(() => null);
+                if (attach && attach.accessToken && attach.refreshToken && attach.user) {
+                  setTokens(attach.accessToken, attach.refreshToken);
+                  try {
+                    if (attach.user.id) {
+                      localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
+                    }
+                  } catch {
+                    // ignore
+                  }
+                  setUser(attach.user as ApiUser);
+                  return;
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore, on retombe sur le flux JWT existant
+        }
+
+        // 2) Sinon, tenter l'API JWT existante
         const current = await me();
 
         try {
@@ -110,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // 1) Nettoyage local (JWT + état mission)
     clearTokens();
     clearCachedMissionState();
     try {
@@ -118,6 +156,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     setUser(null);
+
+    // 2) Redirection complète vers le backend pour fermer la session BFF/Keycloak
+    // Utiliser une navigation de page (pas fetch) pour éviter les problèmes CORS
+    // et laisser Keycloak gérer la redirection post-logout.
+    try {
+      const baseUrl = getApiBaseUrl();
+      window.location.href = `${baseUrl}/api/logout`;
+    } catch {
+      // En cas de problème, on reste simplement déconnecté côté appli.
+    }
   };
 
   const refreshUser = async () => {

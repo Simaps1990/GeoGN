@@ -23,7 +23,9 @@ const app = Fastify({ logger: true });
 await app.register(cors, { origin: true, credentials: true });
 
 // OIDC / Keycloak BFF SSO (cookies + server-side tokens)
-await oidcPlugin(app);
+if (process.env.OIDC_ISSUER_URL) {
+  await app.register(oidcPlugin);
+}
 
 await connectMongo(mongoUri);
 

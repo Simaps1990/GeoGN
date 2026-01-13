@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Lock, Mail, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getApiBaseUrl } from '../lib/api';
 
 function formatAuthError(err: unknown) {
   const raw = (err as any)?.message ? String((err as any).message) : 'Erreur';
@@ -135,7 +136,8 @@ export default function Auth() {
             <button
               type="button"
               onClick={() => {
-                window.location.href = '/api/login';
+                const baseUrl = getApiBaseUrl();
+                window.location.href = `${baseUrl}/api/login`;
               }}
               className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-[#15181d] text-xs font-medium text-white/80 hover:bg-[#1f232a] hover:text-white transition"
             >

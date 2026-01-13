@@ -1,12 +1,16 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import crypto from 'crypto';
-import * as oidc from 'openid-client';
+import { createRequire } from 'module';
+
+// Use CommonJS require for openid-client to avoid ESM interop issues where
+// Issuer/generators may end up undefined on the namespace import.
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const oidc: any = require('openid-client');
 
 // The typings bundled with openid-client in this environment don't expose
-// Client/TokenSet/Issuer/generators as named members on the namespace type,
-// so we use loose "any" aliases to avoid TypeScript errors while still
-// calling the real runtime API.
+// Client/TokenSet/Issuer/generators cleanly, so we keep loose aliases.
 type Client = any;
 type TokenSet = any;
 
@@ -18,6 +22,14 @@ interface OidcSessionData {
 }
 
 const sessionStore = new Map<string, OidcSessionData>();
+
+export function getBffUserFromRequest(req: FastifyRequest): any | null {
+  const sessionId = ((req as any).cookies as any)?.bff_session as string | undefined;
+  if (!sessionId) return null;
+  const session = sessionStore.get(sessionId);
+  if (!session || !session.user) return null;
+  return session.user;
+}
 
 let oidcClientPromise: Promise<Client> | null = null;
 
@@ -33,7 +45,13 @@ async function getOidcClient(): Promise<Client> {
     }
 
     oidcClientPromise = (async () => {
-      const issuer = await (oidc as any).Issuer.discover(issuerUrl);
+      const lib: any = oidc;
+      const IssuerCtor = lib.Issuer ?? lib.default?.Issuer ?? lib.default ?? lib;
+      if (!IssuerCtor || typeof IssuerCtor.discover !== 'function') {
+        throw new Error('openid-client Issuer.discover is not available');
+      }
+
+      const issuer = await IssuerCtor.discover(issuerUrl);
       return new issuer.Client({
         client_id: clientId,
         client_secret: clientSecret,
@@ -81,10 +99,11 @@ export async function oidcPlugin(app: FastifyInstance) {
 
     const sessionId = getOrCreateSessionId(req, reply);
 
-    const generators = (oidc as any).generators;
-    const codeVerifier = generators.codeVerifier();
-    const codeChallenge = generators.codeChallenge(codeVerifier);
-    const state = generators.state();
+    const lib: any = oidc;
+    const gens = lib.generators ?? lib.default?.generators ?? lib;
+    const codeVerifier = gens.codeVerifier();
+    const codeChallenge = gens.codeChallenge(codeVerifier);
+    const state = gens.state();
 
     const existing = sessionStore.get(sessionId) ?? {};
     sessionStore.set(sessionId, { ...existing, codeVerifier, state });
@@ -106,6 +125,8 @@ export async function oidcPlugin(app: FastifyInstance) {
     Querystring: {
       code?: string;
       state?: string;
+      iss?: string;
+      session_state?: string;
     };
   }>('/api/oidc/callback', async (req, reply) => {
     const client = await getOidcClient();
@@ -129,14 +150,10 @@ export async function oidcPlugin(app: FastifyInstance) {
     const backendBaseUrl = process.env.BACKEND_BASE_URL!;
     const redirectUri = `${backendBaseUrl}/api/oidc/callback`;
 
-    const tokenSet = await client.callback(
-      redirectUri,
-      { code, state },
-      {
-        code_verifier: session.codeVerifier,
-        state,
-      }
-    );
+    const tokenSet = await client.callback(redirectUri, req.query as any, {
+      code_verifier: session.codeVerifier,
+      state,
+    });
 
     const userinfo = await client.userinfo(tokenSet.access_token!);
 
@@ -165,7 +182,7 @@ export async function oidcPlugin(app: FastifyInstance) {
     return reply.send({ authenticated: true, user: session.user });
   });
 
-  app.post('/api/logout', async (req, reply) => {
+  async function handleLogout(req: FastifyRequest, reply: FastifyReply) {
     const sessionId = ((req as any).cookies as any)?.bff_session as string | undefined;
     if (sessionId) {
       sessionStore.delete(sessionId);
@@ -173,6 +190,21 @@ export async function oidcPlugin(app: FastifyInstance) {
 
     (reply as any).clearCookie('bff_session', { path: '/' });
 
-    return reply.send({ ok: true });
-  });
+    // Redirige également vers le logout Keycloak pour fermer la session SSO côté IdP.
+    const issuerUrl = process.env.OIDC_ISSUER_URL;
+    const clientId = process.env.OIDC_CLIENT_ID;
+    const frontendBaseUrl = process.env.FRONTEND_BASE_URL ?? '/';
+    if (!issuerUrl || !clientId) {
+      return reply.send({ ok: true });
+    }
+
+    const logoutUrl = `${issuerUrl.replace(/\/$/, '')}/protocol/openid-connect/logout?client_id=${encodeURIComponent(
+      clientId
+    )}&post_logout_redirect_uri=${encodeURIComponent(frontendBaseUrl)}`;
+
+    return reply.redirect(logoutUrl);
+  }
+
+  app.post('/api/logout', handleLogout as any);
+  app.get('/api/logout', handleLogout as any);
 }
