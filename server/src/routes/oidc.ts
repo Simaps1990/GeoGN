@@ -1,7 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import crypto from 'crypto';
-import { Issuer, generators, type Client, type TokenSet } from 'openid-client';
+import * as oidc from 'openid-client';
+
+// The typings bundled with openid-client in this environment don't expose
+// Client/TokenSet/Issuer/generators as named members on the namespace type,
+// so we use loose "any" aliases to avoid TypeScript errors while still
+// calling the real runtime API.
+type Client = any;
+type TokenSet = any;
 
 interface OidcSessionData {
   codeVerifier?: string;
@@ -26,7 +33,7 @@ async function getOidcClient(): Promise<Client> {
     }
 
     oidcClientPromise = (async () => {
-      const issuer = await Issuer.discover(issuerUrl);
+      const issuer = await (oidc as any).Issuer.discover(issuerUrl);
       return new issuer.Client({
         client_id: clientId,
         client_secret: clientSecret,
@@ -74,6 +81,7 @@ export async function oidcPlugin(app: FastifyInstance) {
 
     const sessionId = getOrCreateSessionId(req, reply);
 
+    const generators = (oidc as any).generators;
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
     const state = generators.state();
