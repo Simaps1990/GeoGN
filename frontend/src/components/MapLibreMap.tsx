@@ -4521,6 +4521,24 @@ export default function MapLibreMap() {
         }
       }
 
+      // Apply self trace from snapshot as well (do not skip self for traces)
+      if (user?.id) {
+        const selfPts = traces[user.id];
+        if (Array.isArray(selfPts)) {
+          const normalizedSelf = selfPts
+            .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof (p as any).t === 'number')
+            .map((p) => ({ lng: p.lng, lat: p.lat, t: normalizeRemoteTime((p as any).t, now) }))
+            .filter((p) => p.t >= cutoff)
+            .slice(-maxTracePointsFromSnapshot);
+
+          if (normalizedSelf.length) {
+            setTracePoints(normalizedSelf);
+            const last = normalizedSelf[normalizedSelf.length - 1];
+            setLastPos({ lng: last.lng, lat: last.lat });
+          }
+        }
+      }
+
       // Éviter les micro-sauts: lors d'un reconnect / retour foreground, il peut arriver
       // de recevoir un snapshot vide/partiel. Dans ce cas, ne pas écraser l'état courant.
       const hasAnySnapshotData = Object.keys(nextOthers).length > 0 || Object.keys(nextOthersTraces).length > 0;
@@ -4535,7 +4553,25 @@ export default function MapLibreMap() {
 
     const applyRemotePosition = (msg: any) => {
       if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
-      if (user?.id && msg.userId === user.id) return;
+
+      // If it's me, also feed my local trace from socket events (update/bulk/snapshot)
+      // so my rendering behaves the same way as other users.
+      if (user?.id && msg.userId === user.id) {
+        const now = normalizeRemoteTime(msg.t, Date.now());
+        setLastPos({ lng: msg.lng, lat: msg.lat });
+        setTracePoints((prev) => {
+          const last = prev.length ? prev[prev.length - 1] : null;
+          if (last && last.lng === msg.lng && last.lat === msg.lat && Math.abs(last.t - now) < 500) {
+            return prev;
+          }
+          const cutoff = Date.now() - traceRetentionMs;
+          const next = [...prev, { lng: msg.lng, lat: msg.lat, t: now }]
+            .filter((p) => p.t >= cutoff)
+            .slice(-maxTracePoints);
+          return next;
+        });
+        return;
+      }
 
       // Toujours utiliser uniquement la couleur de mission attribuée au membre.
       const memberColor = memberColors[msg.userId];
