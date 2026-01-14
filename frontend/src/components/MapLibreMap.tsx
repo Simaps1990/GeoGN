@@ -1499,6 +1499,7 @@ export default function MapLibreMap() {
 
   const tracesLoadedRef = useRef(false);
   const prevTrackingRef = useRef<boolean | null>(null);
+  const tracePointsRef = useRef(tracePoints);
   const autoCenterMissionIdRef = useRef<string | null>(null);
   const autoCenterDoneRef = useRef(false);
 
@@ -1525,6 +1526,10 @@ export default function MapLibreMap() {
     const seconds = typeof s === 'number' && Number.isFinite(s) ? s : 3600;
     return Math.max(0, seconds) * 1000;
   }, [mission?.traceRetentionSeconds]);
+
+  useEffect(() => {
+    tracePointsRef.current = tracePoints;
+  }, [tracePoints]);
 
   // Immediate purge when retention decreases.
   const prevTraceRetentionMsRef = useRef<number>(traceRetentionMs);
@@ -3092,31 +3097,31 @@ export default function MapLibreMap() {
             properties: {},
           },
         ],
-      } as any);
+      });
     }
 
     if (traceSource) {
+      const retentionMs = traceRetentionMs;
       const now = Date.now();
-      const filtered = tracePoints.filter((p) => now - p.t <= traceRetentionMs);
-
-      const coords = filtered.map((p) => [p.lng, p.lat] as [number, number]);
+      const currentTracePoints = tracePointsRef.current;
+      const filtered = currentTracePoints.filter((p) => now - p.t <= retentionMs);
+      const coords = filtered.map((p) => [p.lng, p.lat]);
       if (coords.length >= 2) {
         const fc = {
           type: 'FeatureCollection',
           features: [
             {
               type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: coords,
-              },
               properties: {},
+              geometry: { type: 'LineString', coordinates: coords },
             },
           ],
         } as any;
         console.log('[TRACE] setData trace (resyncAllOverlays)', {
           featureCount: fc.features.length,
           coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+          tracePointsLen: currentTracePoints.length,
+          filteredLen: filtered.length,
           selectedMissionId,
           userId: user?.id,
         });
@@ -3128,6 +3133,7 @@ export default function MapLibreMap() {
           features: [
             {
               type: 'Feature',
+              properties: {},
               geometry: {
                 type: 'LineString',
                 coordinates: [
@@ -3135,13 +3141,14 @@ export default function MapLibreMap() {
                   [lng + 1e-9, lat + 1e-9],
                 ],
               },
-              properties: {},
             },
           ],
         } as any;
         console.log('[TRACE] setData trace (resyncAllOverlays)', {
           featureCount: fc.features.length,
           coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+          tracePointsLen: currentTracePoints.length,
+          filteredLen: filtered.length,
           selectedMissionId,
           userId: user?.id,
         });
@@ -3151,6 +3158,8 @@ export default function MapLibreMap() {
         console.log('[TRACE] setData trace (resyncAllOverlays)', {
           featureCount: 0,
           coordCount: 0,
+          tracePointsLen: currentTracePoints.length,
+          filteredLen: filtered.length,
           selectedMissionId,
           userId: user?.id,
         });
@@ -3162,19 +3171,19 @@ export default function MapLibreMap() {
       const features = Object.entries(otherPositions)
         .filter(([userId]) => !hiddenUserIds[userId])
         .map(([userId, p]) => {
-        const memberColor = memberColors[userId];
-        const color = memberColor ?? '#4b5563';
-        const name = memberNames[userId] ?? '';
+          const memberColor = memberColors[userId];
+          const color = memberColor ?? '#4b5563';
+          const name = memberNames[userId] ?? '';
 
           return {
-          type: 'Feature',
-          properties: {
-            userId,
-            t: p.t,
-            color,
-            name,
-          },
-          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+            type: 'Feature',
+            properties: {
+              userId,
+              t: p.t,
+              color,
+              name,
+            },
+            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
           };
         });
 
@@ -4622,15 +4631,35 @@ export default function MapLibreMap() {
       if (user?.id) {
         const selfPts = traces[user.id];
         if (Array.isArray(selfPts)) {
+          const effectiveRetentionMs = retentionMsFromSnapshot > 0 ? retentionMsFromSnapshot : traceRetentionMs;
+          const effectiveMaxTracePoints = Math.max(1, Math.ceil(effectiveRetentionMs / 1000) + 2);
+          const effectiveCutoff = now - effectiveRetentionMs;
+
           const normalizedSelf = selfPts
             .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof (p as any).t === 'number')
-            .map((p) => ({ lng: p.lng, lat: p.lat, t: normalizeRemoteTime((p as any).t, now) }))
-            .filter((p) => p.t >= cutoff)
-            .slice(-maxTracePointsFromSnapshot);
+            .map((p) => {
+              const rawT = (p as any).t as number;
+              const tMs = rawT < 1_000_000_000_000 ? rawT * 1000 : rawT;
+              return { lng: p.lng, lat: p.lat, t: normalizeRemoteTime(tMs, now) };
+            })
+            .filter((p) => p.t >= effectiveCutoff)
+            .slice(-effectiveMaxTracePoints);
 
           if (normalizedSelf.length) {
             setTracePoints((prev) => {
-              const next = normalizedSelf;
+              const merged = [...prev, ...normalizedSelf]
+                .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
+                .sort((a, b) => a.t - b.t)
+                .filter((p) => p.t >= effectiveCutoff);
+
+              const deduped: typeof merged = [];
+              for (const p of merged) {
+                const last = deduped.length ? deduped[deduped.length - 1] : null;
+                if (last && last.lng === p.lng && last.lat === p.lat && Math.abs(last.t - p.t) < 500) continue;
+                deduped.push(p);
+              }
+
+              const next = deduped.slice(-effectiveMaxTracePoints);
               console.log('[TRACE] setTracePoints call (snapshot self trace)', {
                 prevLen: prev.length,
                 nextLen: next.length,
@@ -5294,6 +5323,8 @@ export default function MapLibreMap() {
       console.log('[TRACE] setData trace (update self)', {
         featureCount: fc.features.length,
         coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+        tracePointsLen: tracePoints.length,
+        filteredLen: filtered.length,
         selectedMissionId,
         userId: user?.id,
       });
