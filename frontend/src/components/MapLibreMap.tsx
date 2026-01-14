@@ -4635,22 +4635,22 @@ export default function MapLibreMap() {
             .slice(-effectiveMaxTracePoints);
 
           if (normalizedSelf.length) {
-            setTracePoints((prev) => {
-              const merged = [...prev, ...normalizedSelf]
-                .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
-                .sort((a, b) => a.t - b.t)
-                .filter((p) => p.t >= effectiveCutoff);
+            // Remplacer complètement la trace locale par la trace du snapshot,
+            // pour éviter de garder d'anciens segments "fantômes" propres au client.
+            const merged = normalizedSelf
+              .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
+              .sort((a, b) => a.t - b.t)
+              .filter((p) => p.t >= effectiveCutoff);
 
-              const deduped: typeof merged = [];
-              for (const p of merged) {
-                const last = deduped.length ? deduped[deduped.length - 1] : null;
-                if (last && last.lng === p.lng && last.lat === p.lat && Math.abs(last.t - p.t) < 500) continue;
-                deduped.push(p);
-              }
+            const deduped: typeof merged = [];
+            for (const p of merged) {
+              const last = deduped.length ? deduped[deduped.length - 1] : null;
+              if (last && last.lng === p.lng && last.lat === p.lat && Math.abs(last.t - p.t) < 500) continue;
+              deduped.push(p);
+            }
 
-              const next = deduped.slice(-effectiveMaxTracePoints);
-              return next;
-            });
+            const next = deduped.slice(-effectiveMaxTracePoints);
+            setTracePoints(next);
           }
         }
       }
@@ -5372,8 +5372,37 @@ export default function MapLibreMap() {
                 {(() => {
                   const id = selectedPoi.createdBy as string | undefined;
                   if (!id) return 'Créé par inconnu';
-                  const name = getUserDisplayName(id);
-                  return `Créé par ${name}`;
+
+                  const lines: string[] = [];
+                  let idx = 1;
+
+                  // Variante brute: identifiant
+                  lines.push(`${idx++}. id: ${id}`);
+
+                  // Si c'est l'utilisateur courant, afficher aussi ses infos connues
+                  if (user?.id && id === user.id) {
+                    if (user.displayName && user.displayName.trim()) {
+                      lines.push(`${idx++}. user.displayName: ${user.displayName.trim()}`);
+                    }
+                    const anyUser = user as any;
+                    if (anyUser && typeof anyUser.appUserId === 'string' && anyUser.appUserId.trim()) {
+                      lines.push(`${idx++}. user.appUserId: ${anyUser.appUserId.trim()}`);
+                    }
+                  }
+
+                  // Variante depuis la liste des membres de mission
+                  const memberName = memberNames[id];
+                  if (memberName && memberName.trim()) {
+                    lines.push(`${idx++}. memberNames[id]: ${memberName.trim()}`);
+                  }
+
+                  // Variante calculée par le helper global (fallbacks combinés)
+                  const resolved = getUserDisplayName(id);
+                  if (resolved && resolved.trim() && !lines.some((l) => l.endsWith(resolved.trim()))) {
+                    lines.push(`${idx++}. getUserDisplayName: ${resolved.trim()}`);
+                  }
+
+                  return lines.join('\n');
                 })()}
               </div>
             </div>
