@@ -5200,20 +5200,6 @@ export default function MapLibreMap() {
       const retentionMs = traceRetentionMs;
       const now = Date.now();
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
-      if (filtered.length !== tracePoints.length) {
-        setTracePoints((prev) => {
-          const next = filtered;
-          console.log('[TRACE] setTracePoints call (update() self fading)', {
-            prevLen: prev.length,
-            nextLen: next.length,
-            selectedMissionId,
-            userId: user?.id,
-            trackingEnabled,
-            mapReady,
-          });
-          return next;
-        });
-      }
 
       const segmentGapMs = 30_000;
       const opacities = [1, 0.8, 0.6, 0.4, 0.2];
