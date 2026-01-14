@@ -2577,6 +2577,10 @@ export default function MapLibreMap() {
       });
     }
 
+    if (!map.getSource('trace')) {
+      map.addSource('trace', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } });
+    }
+
     // Ensure my fading trace is rendered above other users' traces.
     if (!map.getLayer('trace-line')) {
       map.addLayer(
@@ -2681,10 +2685,6 @@ export default function MapLibreMap() {
           'text-opacity': 0.9,
         },
       });
-    }
-
-    if (!map.getSource('trace')) {
-      map.addSource('trace', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } });
     }
 
     if (!map.getSource('others')) {
