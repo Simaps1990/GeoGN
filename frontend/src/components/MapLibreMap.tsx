@@ -1387,7 +1387,9 @@ export default function MapLibreMap() {
     if (lastNotifiedPersonCaseIdRef.current === personCase.id) return;
     lastNotifiedPersonCaseIdRef.current = personCase.id;
     setProjectionNotification(true);
-    if (!isAdmin) setSettingsNotification(true);
+    // Toujours signaler aussi sur l'icône paramètres, quel que soit le rôle,
+    // pour révéler plus facilement l'icône paw depuis le menu.
+    setSettingsNotification(true);
   }, [personCase, isAdmin, selectedMissionId, user?.id]);
 
   // Précharger la fiche personne pour tous les rôles afin que les non-admin puissent voir le suivi actif
@@ -1519,7 +1521,9 @@ export default function MapLibreMap() {
   const [noProjectionToast, setNoProjectionToast] = useState(false);
 
   const [activityToast, setActivityToast] = useState<string | null>(null);
+  const [activityToastVisible, setActivityToastVisible] = useState(false);
   const activityToastTimerRef = useRef<number | null>(null);
+  const activityToastHideRef = useRef<number | null>(null);
 
   const [historyWindowSeconds, setHistoryWindowSeconds] = useState(1800);
 
@@ -1536,19 +1540,43 @@ export default function MapLibreMap() {
   }, [noProjectionToast]);
 
   useEffect(() => {
-    if (!activityToast) return;
+    if (!activityToast) {
+      setActivityToastVisible(false);
+      return;
+    }
+
+    // Afficher immédiatement avec fade-in
+    setActivityToastVisible(true);
+
+    // Réinitialiser les timers existants
     if (activityToastTimerRef.current !== null) {
       window.clearTimeout(activityToastTimerRef.current);
       activityToastTimerRef.current = null;
     }
+    if (activityToastHideRef.current !== null) {
+      window.clearTimeout(activityToastHideRef.current);
+      activityToastHideRef.current = null;
+    }
+
+    // Après 4s, lancer le fade-out puis nettoyer le message
     activityToastTimerRef.current = window.setTimeout(() => {
-      setActivityToast(null);
+      setActivityToastVisible(false);
       activityToastTimerRef.current = null;
+
+      activityToastHideRef.current = window.setTimeout(() => {
+        setActivityToast(null);
+        activityToastHideRef.current = null;
+      }, 300);
     }, 4000);
+
     return () => {
       if (activityToastTimerRef.current !== null) {
         window.clearTimeout(activityToastTimerRef.current);
         activityToastTimerRef.current = null;
+      }
+      if (activityToastHideRef.current !== null) {
+        window.clearTimeout(activityToastHideRef.current);
+        activityToastHideRef.current = null;
       }
     };
   }, [activityToast]);
@@ -4605,8 +4633,6 @@ export default function MapLibreMap() {
               const next = deduped.slice(-effectiveMaxTracePoints);
               return next;
             });
-            const last = normalizedSelf[normalizedSelf.length - 1];
-            setLastPos({ lng: last.lng, lat: last.lat });
           }
         }
       }
@@ -5631,11 +5657,10 @@ export default function MapLibreMap() {
                 setActionError(null);
 
                 setSettingsMenuOpen((v) => !v);
-                if (!isAdmin) {
-                  setSettingsNotification(false);
-                  if (selectedMissionId && personCase) {
-                    setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                  }
+                // Ouverture du menu = on considère la notification comme vue
+                setSettingsNotification(false);
+                if (selectedMissionId && personCase) {
+                  setDismissedPersonCaseId(selectedMissionId, personCase.id);
                 }
               }}
               className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
@@ -5653,7 +5678,7 @@ export default function MapLibreMap() {
                 }
                 size={20}
               />
-              {!isAdmin && settingsNotification ? (
+              {settingsNotification ? (
                 <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
               ) : null}
             </button>
@@ -6769,7 +6794,11 @@ export default function MapLibreMap() {
 
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
-          <div className="pointer-events-auto max-w-[min(90vw,540px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
+          <div
+            className={`pointer-events-auto max-w-[min(90vw,540px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+              activityToastVisible ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
             {activityToast}
           </div>
         </div>
