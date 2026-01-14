@@ -442,6 +442,24 @@ export default function MapLibreMap() {
 
   const [othersActivityTick, setOthersActivityTick] = useState(0);
 
+  function getUserDisplayName(userId: string | null | undefined): string {
+    if (!userId) return 'Inconnu';
+
+    // Si c'est l'utilisateur courant, toujours préférer son displayName
+    if (user?.id && userId === user.id) {
+      if (user.displayName && user.displayName.trim()) {
+        return user.displayName.trim();
+      }
+    }
+
+    const fromMembers = memberNames[userId];
+    if (fromMembers && fromMembers.trim()) {
+      return fromMembers.trim();
+    }
+
+    return userId;
+  }
+
   const [followMyBearing, setFollowMyBearing] = useState(false);
   const centerOnMeNextActionRef = useRef<'center' | 'follow'>('center');
   const lastHeadingRef = useRef<number | null>(null);
@@ -4726,7 +4744,7 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
         if (createdBy && user?.id && createdBy !== user.id) {
-          const name = memberNames[createdBy] || createdBy;
+          const name = getUserDisplayName(createdBy);
           setActivityToast(`${name} vient de créer un POI`);
         }
       } catch {
@@ -4755,7 +4773,7 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.zone.createdBy === 'string' ? msg.zone.createdBy : null;
         if (createdBy && user?.id && createdBy !== user.id) {
-          const name = memberNames[createdBy] || createdBy;
+          const name = getUserDisplayName(createdBy);
           setActivityToast(`${name} vient de créer une zone`);
         }
       } catch {
@@ -4777,7 +4795,7 @@ export default function MapLibreMap() {
       const created = msg?.created === true;
       const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
       if (created && actorUserId && user?.id && actorUserId !== user.id) {
-        const name = memberNames[actorUserId] || actorUserId;
+        const name = getUserDisplayName(actorUserId);
         setActivityToast(`${name} vient de créer une piste`);
       }
     };
@@ -5103,27 +5121,33 @@ export default function MapLibreMap() {
     const now = Date.now();
     const inactiveAfterMs = 30_000;
     const inactiveColor = '#9ca3af';
-    const features = Object.entries(otherPositions)
-      .filter(([userId]) => !hiddenUserIds[userId])
-      .map(([userId, p]) => {
-      const memberColor = memberColors[userId];
-      const isInactive = now - p.t > inactiveAfterMs;
-      // Inactif: gris plus clair. Sinon, couleur de mission.
-      const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
-      const name = memberNames[userId] ?? '';
+    const features = Object.entries(otherTracesRef.current)
+      .filter(([userId, pts]) => !hiddenUserIds[userId] && Array.isArray(pts) && pts.length > 0)
+      .map(([userId, pts]) => {
+        const last = pts[pts.length - 1];
+        if (!last || typeof last.lng !== 'number' || typeof last.lat !== 'number' || typeof last.t !== 'number') {
+          return null;
+        }
+
+        const memberColor = memberColors[userId];
+        const isInactive = now - last.t > inactiveAfterMs;
+        // Inactif: gris plus clair. Sinon, couleur de mission.
+        const color = isInactive ? inactiveColor : (memberColor ?? inactiveColor);
+        const name = memberNames[userId] ?? '';
 
         return {
-        type: 'Feature',
-        properties: { userId, color, name, inactive: isInactive ? 1 : 0 },
-        geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+          type: 'Feature',
+          properties: { userId, color, name, inactive: isInactive ? 1 : 0 },
+          geometry: { type: 'Point', coordinates: [last.lng, last.lat] },
         };
-      });
+      })
+      .filter((f): f is any => Boolean(f));
 
     src.setData({
       type: 'FeatureCollection',
       features: features as any,
     });
-  }, [otherPositions, memberColors, memberNames, mapReady, othersActivityTick, hiddenUserIds]);
+  }, [memberColors, memberNames, mapReady, othersActivityTick, hiddenUserIds]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -5348,7 +5372,7 @@ export default function MapLibreMap() {
                 {(() => {
                   const id = selectedPoi.createdBy as string | undefined;
                   if (!id) return 'Créé par inconnu';
-                  const name = memberNames[id] || id;
+                  const name = getUserDisplayName(id);
                   return `Créé par ${name}`;
                 })()}
               </div>
