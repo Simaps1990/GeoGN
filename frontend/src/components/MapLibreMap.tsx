@@ -2527,6 +2527,7 @@ export default function MapLibreMap() {
       map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
     }
     if (map.getLayer('trace-line')) {
+      console.log('[TRACE] paint trace-line', { selectedMissionId, userId: user?.id, myColor });
       map.setPaintProperty('trace-line', 'line-color', myColor);
     }
   }
@@ -3100,7 +3101,7 @@ export default function MapLibreMap() {
 
       const coords = filtered.map((p) => [p.lng, p.lat] as [number, number]);
       if (coords.length >= 2) {
-        traceSource.setData({
+        const fc = {
           type: 'FeatureCollection',
           features: [
             {
@@ -3112,10 +3113,17 @@ export default function MapLibreMap() {
               properties: {},
             },
           ],
-        } as any);
+        } as any;
+        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+          featureCount: fc.features.length,
+          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+          selectedMissionId,
+          userId: user?.id,
+        });
+        traceSource.setData(fc);
       } else if (coords.length === 1) {
         const [lng, lat] = coords[0];
-        traceSource.setData({
+        const fc = {
           type: 'FeatureCollection',
           features: [
             {
@@ -3130,9 +3138,23 @@ export default function MapLibreMap() {
               properties: {},
             },
           ],
-        } as any);
+        } as any;
+        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+          featureCount: fc.features.length,
+          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+          selectedMissionId,
+          userId: user?.id,
+        });
+        traceSource.setData(fc);
       } else {
-        traceSource.setData({ type: 'FeatureCollection', features: [] } as any);
+        const fc = { type: 'FeatureCollection', features: [] } as any;
+        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+          featureCount: 0,
+          coordCount: 0,
+          selectedMissionId,
+          userId: user?.id,
+        });
+        traceSource.setData(fc);
       }
     }
 
@@ -4585,7 +4607,6 @@ export default function MapLibreMap() {
       const nextOthersTraces: Record<string, { lng: number; lat: number; t: number }[]> = {};
       for (const [userId, pts] of Object.entries(traces)) {
         if (!userId) continue;
-        if (user?.id && userId === user.id) continue;
         if (!Array.isArray(pts) || pts.length === 0) continue;
         const filtered = pts
           .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number')
