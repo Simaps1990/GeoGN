@@ -1,0 +1,395 @@
+﻿diff --git a/backend/src/socket.ts b/backend/src/socket.ts
+index 37575cf..44828ab 100644
+--- a/backend/src/socket.ts
++++ b/backend/src/socket.ts
+@@ -12,6 +12,7 @@ type AuthedSocket = {
+   data: {
+     userId: string;
+     missionId?: string;
++    requestedRetentionSeconds?: number;
+   };
+ };
+ 
+@@ -30,15 +31,23 @@ type PositionBulkPayload = {
+ 
+ const TRACE_THROTTLE_MS = 2000;
+ 
++const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
++
+ const lastTraceTsByUserMission = new Map<string, number>();
+ 
+-async function emitMissionSnapshot(socket: any, missionId: string) {
++async function emitMissionSnapshot(socket: any, missionId: string, requestedRetentionSeconds?: number) {
+   if (!mongoose.Types.ObjectId.isValid(missionId)) return;
+ 
+   const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+-  const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
++  const missionRetentionSeconds = mission?.traceRetentionSeconds ?? 3600;
++  const requested =
++    typeof requestedRetentionSeconds === 'number' && Number.isFinite(requestedRetentionSeconds)
++      ? requestedRetentionSeconds
++      : DEFAULT_SNAPSHOT_RETENTION_SECONDS;
++  const retentionSeconds = Math.max(0, Math.min(missionRetentionSeconds, requested));
+   const now = Date.now();
+   const cutoff = new Date(now - Math.max(0, retentionSeconds) * 1000);
++  const cutoffMs = cutoff.getTime();
+ 
+   const [currentPositions, traces] = await Promise.all([
+     PositionCurrentModel.find({ missionId: new mongoose.Types.ObjectId(missionId) })
+@@ -61,6 +70,7 @@ async function emitMissionSnapshot(socket: any, missionId: string) {
+     const lat = coords[1];
+     if (typeof lng !== 'number' || typeof lat !== 'number') continue;
+     const tMs = p.timestamp instanceof Date ? p.timestamp.getTime() : now;
++    if (tMs < cutoffMs) continue;
+     positions[uid] = { lng, lat, t: tMs };
+   }
+ 
+@@ -120,43 +130,55 @@ export function setupSocket(app: FastifyInstance) {
+   io.on('connection', (socket) => {
+     const userId = (socket as any as AuthedSocket).data.userId;
+ 
+-    socket.on('mission:join', async (payload: { missionId: string }, ack?: (res: any) => void) => {
+-      try {
+-        const missionId = payload?.missionId;
+-        if (!missionId) {
+-          ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
+-          return;
+-        }
++    socket.on(
++      'mission:join',
++      async (payload: { missionId: string; retentionSeconds?: number }, ack?: (res: any) => void) => {
++        try {
++          const missionId = payload?.missionId;
++          if (!missionId) {
++            ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
++            return;
++          }
+ 
+-        if (!mongoose.Types.ObjectId.isValid(userId)) {
+-          ack?.({ ok: false, error: 'INVALID_USER_ID' });
+-          return;
+-        }
++          if (!mongoose.Types.ObjectId.isValid(userId)) {
++            ack?.({ ok: false, error: 'INVALID_USER_ID' });
++            return;
++          }
+ 
+-        const ok = await requireMissionMember(userId, missionId);
+-        if (!ok) {
+-          ack?.({ ok: false, error: 'FORBIDDEN' });
+-          return;
+-        }
++          const ok = await requireMissionMember(userId, missionId);
++          if (!ok) {
++            ack?.({ ok: false, error: 'FORBIDDEN' });
++            return;
++          }
+ 
+-        const prevMissionId = (socket as any as AuthedSocket).data.missionId;
+-        if (prevMissionId) {
+-          socket.leave(`mission:${prevMissionId}`);
+-        }
++          const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
++          const missionRetentionSeconds = mission?.traceRetentionSeconds ?? 3600;
++          const requested =
++            typeof payload?.retentionSeconds === 'number' && Number.isFinite(payload.retentionSeconds)
++              ? payload.retentionSeconds
++              : DEFAULT_SNAPSHOT_RETENTION_SECONDS;
++          const requestedRetentionSeconds = Math.max(0, Math.min(missionRetentionSeconds, requested));
++
++          const prevMissionId = (socket as any as AuthedSocket).data.missionId;
++          if (prevMissionId) {
++            socket.leave(`mission:${prevMissionId}`);
++          }
+ 
+-        (socket as any as AuthedSocket).data.missionId = missionId;
+-        socket.join(`mission:${missionId}`);
++          (socket as any as AuthedSocket).data.missionId = missionId;
++          (socket as any as AuthedSocket).data.requestedRetentionSeconds = requestedRetentionSeconds;
++          socket.join(`mission:${missionId}`);
+ 
+-        ack?.({ ok: true });
+-        socket.emit('mission:joined', { missionId });
++          ack?.({ ok: true });
++          socket.emit('mission:joined', { missionId });
+ 
+-        // Envoyer un snapshot pour que les clients qui reviennent sur la carte
+-        // voient imm├®diatement les positions + traces r├®centes.
+-        await emitMissionSnapshot(socket, missionId);
+-      } catch {
+-        ack?.({ ok: false, error: 'JOIN_FAILED' });
++          // Envoyer un snapshot pour que les clients qui reviennent sur la carte
++          // voient imm├®diatement les positions + traces r├®centes.
++          await emitMissionSnapshot(socket, missionId, requestedRetentionSeconds);
++        } catch {
++          ack?.({ ok: false, error: 'JOIN_FAILED' });
++        }
+       }
+-    });
++    );
+ 
+     socket.on('mission:leave', async (_payload: any, ack?: (res: any) => void) => {
+       const missionId = (socket as any as AuthedSocket).data.missionId;
+@@ -183,7 +205,8 @@ export function setupSocket(app: FastifyInstance) {
+           return;
+         }
+ 
+-        await emitMissionSnapshot(socket, missionId);
++        const requestedRetentionSeconds = (socket as any as AuthedSocket).data.requestedRetentionSeconds;
++        await emitMissionSnapshot(socket, missionId, requestedRetentionSeconds);
+         ack?.({ ok: true });
+       } catch {
+         ack?.({ ok: false, error: 'SNAPSHOT_FAILED' });
+diff --git a/frontend/src/components/MapLibreMap.tsx b/frontend/src/components/MapLibreMap.tsx
+index 079b970..e988eea 100644
+--- a/frontend/src/components/MapLibreMap.tsx
++++ b/frontend/src/components/MapLibreMap.tsx
+@@ -1511,6 +1511,12 @@ export default function MapLibreMap() {
+   // Toast discret pour informer qu'aucune projection n'est active
+   const [noProjectionToast, setNoProjectionToast] = useState(false);
+ 
++  const [historyWindowSeconds, setHistoryWindowSeconds] = useState(1800);
++
++  useEffect(() => {
++    setHistoryWindowSeconds(1800);
++  }, [selectedMissionId]);
++
+   useEffect(() => {
+     if (!noProjectionToast) return;
+     const t = window.setTimeout(() => {
+@@ -1545,14 +1551,6 @@ export default function MapLibreMap() {
+ 
+     setTracePoints((prevPts) => {
+       const next = prevPts.filter((p) => p.t >= cutoff);
+-      console.log('[TRACE] setTracePoints call (retention decrease)', {
+-        prevLen: prevPts.length,
+-        nextLen: next.length,
+-        selectedMissionId,
+-        userId: user?.id,
+-        trackingEnabled,
+-        mapReady,
+-      });
+       return next;
+     });
+ 
+@@ -2051,18 +2049,7 @@ export default function MapLibreMap() {
+                 t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
+               }));
+ 
+-            setTracePoints((prev) => {
+-              const next = normalized;
+-              console.log('[TRACE] setTracePoints call (load self from localStorage)', {
+-                prevLen: prev.length,
+-                nextLen: next.length,
+-                selectedMissionId,
+-                userId: user?.id,
+-                trackingEnabled,
+-                mapReady,
+-              });
+-              return next;
+-            });
++            setTracePoints(() => normalized);
+             if (normalized.length) {
+               const last = normalized[normalized.length - 1];
+               setLastPos({ lng: last.lng, lat: last.lat });
+@@ -2113,14 +2100,6 @@ export default function MapLibreMap() {
+ 
+     setTracePoints((prev) => {
+       const next = prev.filter((p) => p.t >= cutoff);
+-      console.log('[TRACE] setTracePoints call (initial retention on mission/change)', {
+-        prevLen: prev.length,
+-        nextLen: next.length,
+-        selectedMissionId,
+-        userId: user?.id,
+-        trackingEnabled,
+-        mapReady,
+-      });
+       return next;
+     });
+ 
+@@ -2150,14 +2129,6 @@ export default function MapLibreMap() {
+     if (traceRetentionMs <= 0) {
+       setTracePoints((prev) => {
+         const next: typeof prev = [];
+-        console.log('[TRACE] RESET reason=traceRetentionMs<=0', {
+-          prevLen: prev.length,
+-          nextLen: next.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-          trackingEnabled,
+-          mapReady,
+-        });
+         return next;
+       });
+       otherTracesRef.current = {};
+@@ -2171,14 +2142,6 @@ export default function MapLibreMap() {
+ 
+       setTracePoints((prev) => {
+         const next = prev.filter((p) => p.t >= cutoff);
+-        console.log('[TRACE] setTracePoints call (periodic retention)', {
+-          prevLen: prev.length,
+-          nextLen: next.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-          trackingEnabled,
+-          mapReady,
+-        });
+         return next;
+       });
+ 
+@@ -2532,7 +2495,6 @@ export default function MapLibreMap() {
+       map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
+     }
+     if (map.getLayer('trace-line')) {
+-      console.log('[TRACE] paint trace-line', { selectedMissionId, userId: user?.id, myColor });
+       map.setPaintProperty('trace-line', 'line-color', myColor);
+     }
+   }
+@@ -3117,14 +3079,6 @@ export default function MapLibreMap() {
+             },
+           ],
+         } as any;
+-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+-          featureCount: fc.features.length,
+-          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+-          tracePointsLen: currentTracePoints.length,
+-          filteredLen: filtered.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-        });
+         traceSource.setData(fc);
+       } else if (coords.length === 1) {
+         const [lng, lat] = coords[0];
+@@ -3144,25 +3098,9 @@ export default function MapLibreMap() {
+             },
+           ],
+         } as any;
+-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+-          featureCount: fc.features.length,
+-          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+-          tracePointsLen: currentTracePoints.length,
+-          filteredLen: filtered.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-        });
+         traceSource.setData(fc);
+       } else {
+         const fc = { type: 'FeatureCollection', features: [] } as any;
+-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
+-          featureCount: 0,
+-          coordCount: 0,
+-          tracePointsLen: currentTracePoints.length,
+-          filteredLen: filtered.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-        });
+         traceSource.setData(fc);
+       }
+     }
+@@ -4439,7 +4377,7 @@ export default function MapLibreMap() {
+     const ensureJoined = async (): Promise<boolean> => {
+       return new Promise<boolean>((resolve) => {
+         try {
+-          socket.emit('mission:join', { missionId }, (res: any) => {
++          socket.emit('mission:join', { missionId, retentionSeconds: historyWindowSeconds }, (res: any) => {
+             resolve(Boolean(res?.ok));
+           });
+         } catch {
+@@ -4660,14 +4598,6 @@ export default function MapLibreMap() {
+               }
+ 
+               const next = deduped.slice(-effectiveMaxTracePoints);
+-              console.log('[TRACE] setTracePoints call (snapshot self trace)', {
+-                prevLen: prev.length,
+-                nextLen: next.length,
+-                selectedMissionId,
+-                userId: user?.id,
+-                trackingEnabled,
+-                mapReady,
+-              });
+               return next;
+             });
+             const last = normalizedSelf[normalizedSelf.length - 1];
+@@ -4705,14 +4635,6 @@ export default function MapLibreMap() {
+           const next = [...prev, { lng: msg.lng, lat: msg.lat, t: now }]
+             .filter((p) => p.t >= cutoff)
+             .slice(-maxTracePoints);
+-          console.log('[TRACE] setTracePoints call (applyRemotePosition self)', {
+-            prevLen: prev.length,
+-            nextLen: next.length,
+-            selectedMissionId,
+-            userId: user?.id,
+-            trackingEnabled,
+-            mapReady,
+-          });
+           return next;
+         });
+         return;
+@@ -4883,14 +4805,6 @@ export default function MapLibreMap() {
+       setLastPos(null);
+       setTracePoints((prev) => {
+         const next: typeof prev = [];
+-        console.log('[TRACE] RESET reason=trackingDisabled', {
+-          prevLen: prev.length,
+-          nextLen: next.length,
+-          selectedMissionId,
+-          userId: user?.id,
+-          trackingEnabled,
+-          mapReady,
+-        });
+         return next;
+       });
+ 
+@@ -4931,14 +4845,6 @@ export default function MapLibreMap() {
+           const cutoff = Date.now() - traceRetentionMs;
+           const next = [...prev, { lng, lat, t }].filter((p) => p.t >= cutoff);
+           const sliced = next.slice(-maxTracePoints);
+-          console.log('[TRACE] setTracePoints call (local GPS)', {
+-            prevLen: prev.length,
+-            nextLen: sliced.length,
+-            selectedMissionId,
+-            userId: user?.id,
+-            trackingEnabled,
+-            mapReady,
+-          });
+           return sliced;
+         });
+ 
+@@ -5320,14 +5226,6 @@ export default function MapLibreMap() {
+       }
+ 
+       const fc = { type: 'FeatureCollection', features: selfFeatures } as any;
+-      console.log('[TRACE] setData trace (update self)', {
+-        featureCount: fc.features.length,
+-        coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+-        tracePointsLen: tracePoints.length,
+-        filteredLen: filtered.length,
+-        selectedMissionId,
+-        userId: user?.id,
+-      });
+       traceSource.setData(fc);
+     };
+ 
+@@ -5818,6 +5716,22 @@ export default function MapLibreMap() {
+           </div>
+         </div>
+ 
++        <button
++          type="button"
++          onClick={() => {
++            if (!selectedMissionId) return;
++            const next = historyWindowSeconds + 3600;
++            setHistoryWindowSeconds(next);
++            const socket = socketRef.current;
++            if (socket) {
++              socket.emit('mission:join', { missionId: selectedMissionId, retentionSeconds: next });
++            }
++          }}
++          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
++        >
++          <span className="mx-auto block text-gray-600 text-sm font-semibold">+1h</span>
++        </button>
++
+         {isMapRotated ? (
+           <button
+             type="button"

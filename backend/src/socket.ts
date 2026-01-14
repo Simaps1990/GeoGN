@@ -12,6 +12,7 @@ type AuthedSocket = {
   data: {
     userId: string;
     missionId?: string;
+    requestedRetentionSeconds?: number;
   };
 };
 
@@ -30,15 +31,23 @@ type PositionBulkPayload = {
 
 const TRACE_THROTTLE_MS = 2000;
 
+const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
+
 const lastTraceTsByUserMission = new Map<string, number>();
 
-async function emitMissionSnapshot(socket: any, missionId: string) {
+async function emitMissionSnapshot(socket: any, missionId: string, requestedRetentionSeconds?: number) {
   if (!mongoose.Types.ObjectId.isValid(missionId)) return;
 
   const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
-  const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+  const missionRetentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+  const requested =
+    typeof requestedRetentionSeconds === 'number' && Number.isFinite(requestedRetentionSeconds)
+      ? requestedRetentionSeconds
+      : DEFAULT_SNAPSHOT_RETENTION_SECONDS;
+  const retentionSeconds = Math.max(0, Math.min(missionRetentionSeconds, requested));
   const now = Date.now();
   const cutoff = new Date(now - Math.max(0, retentionSeconds) * 1000);
+  const cutoffMs = cutoff.getTime();
 
   const [currentPositions, traces] = await Promise.all([
     PositionCurrentModel.find({ missionId: new mongoose.Types.ObjectId(missionId) })
@@ -61,6 +70,7 @@ async function emitMissionSnapshot(socket: any, missionId: string) {
     const lat = coords[1];
     if (typeof lng !== 'number' || typeof lat !== 'number') continue;
     const tMs = p.timestamp instanceof Date ? p.timestamp.getTime() : now;
+    if (tMs < cutoffMs) continue;
     positions[uid] = { lng, lat, t: tMs };
   }
 
@@ -120,43 +130,52 @@ export function setupSocket(app: FastifyInstance) {
   io.on('connection', (socket) => {
     const userId = (socket as any as AuthedSocket).data.userId;
 
-    socket.on('mission:join', async (payload: { missionId: string }, ack?: (res: any) => void) => {
-      try {
-        const missionId = payload?.missionId;
-        if (!missionId) {
-          ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
-          return;
+    socket.on(
+      'mission:join',
+      async (payload: { missionId: string; retentionSeconds?: number }, ack?: (res: any) => void) => {
+        try {
+          const missionId = payload?.missionId;
+          if (!missionId) {
+            ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
+            return;
+          }
+
+          if (!mongoose.Types.ObjectId.isValid(userId)) {
+            ack?.({ ok: false, error: 'INVALID_USER_ID' });
+            return;
+          }
+
+          const ok = await requireMissionMember(userId, missionId);
+          if (!ok) {
+            ack?.({ ok: false, error: 'FORBIDDEN' });
+            return;
+          }
+
+          const requested =
+            typeof payload?.retentionSeconds === 'number' && Number.isFinite(payload.retentionSeconds)
+              ? payload.retentionSeconds
+              : DEFAULT_SNAPSHOT_RETENTION_SECONDS;
+
+          const prevMissionId = (socket as any as AuthedSocket).data.missionId;
+          if (prevMissionId) {
+            socket.leave(`mission:${prevMissionId}`);
+          }
+
+          (socket as any as AuthedSocket).data.missionId = missionId;
+          (socket as any as AuthedSocket).data.requestedRetentionSeconds = requested;
+          socket.join(`mission:${missionId}`);
+
+          ack?.({ ok: true });
+          socket.emit('mission:joined', { missionId });
+
+          // Envoyer un snapshot pour que les clients qui reviennent sur la carte
+          // voient immédiatement les positions + traces récentes.
+          await emitMissionSnapshot(socket, missionId, requested);
+        } catch {
+          ack?.({ ok: false, error: 'JOIN_FAILED' });
         }
-
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-          ack?.({ ok: false, error: 'INVALID_USER_ID' });
-          return;
-        }
-
-        const ok = await requireMissionMember(userId, missionId);
-        if (!ok) {
-          ack?.({ ok: false, error: 'FORBIDDEN' });
-          return;
-        }
-
-        const prevMissionId = (socket as any as AuthedSocket).data.missionId;
-        if (prevMissionId) {
-          socket.leave(`mission:${prevMissionId}`);
-        }
-
-        (socket as any as AuthedSocket).data.missionId = missionId;
-        socket.join(`mission:${missionId}`);
-
-        ack?.({ ok: true });
-        socket.emit('mission:joined', { missionId });
-
-        // Envoyer un snapshot pour que les clients qui reviennent sur la carte
-        // voient immédiatement les positions + traces récentes.
-        await emitMissionSnapshot(socket, missionId);
-      } catch {
-        ack?.({ ok: false, error: 'JOIN_FAILED' });
       }
-    });
+    );
 
     socket.on('mission:leave', async (_payload: any, ack?: (res: any) => void) => {
       const missionId = (socket as any as AuthedSocket).data.missionId;
@@ -183,7 +202,8 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        await emitMissionSnapshot(socket, missionId);
+        const requestedRetentionSeconds = (socket as any as AuthedSocket).data.requestedRetentionSeconds;
+        await emitMissionSnapshot(socket, missionId, requestedRetentionSeconds);
         ack?.({ ok: true });
       } catch {
         ack?.({ ok: false, error: 'SNAPSHOT_FAILED' });

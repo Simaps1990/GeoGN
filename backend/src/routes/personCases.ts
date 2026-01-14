@@ -130,7 +130,10 @@ export async function personCasesRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      await PersonCaseModel.deleteOne({ missionId });
+      const res = await PersonCaseModel.deleteOne({ missionId });
+      if ((res as any)?.deletedCount) {
+        app.io?.to(`mission:${missionId}`).emit('person-case:deleted', { missionId, actorUserId: req.userId });
+      }
       return reply.send({ ok: true });
     }
   );
@@ -154,6 +157,9 @@ export async function personCasesRoutes(app: FastifyInstance) {
       if (!admin) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
+
+      const existing = await PersonCaseModel.findOne({ missionId }).select({ _id: 1 }).lean();
+      const created = !existing;
 
       const body = req.body as any;
       const lastKnownType = body?.lastKnown?.type;
@@ -289,7 +295,10 @@ export async function personCasesRoutes(app: FastifyInstance) {
         { new: true, upsert: true }
       ).lean();
 
-      return reply.send({ case: toDto(doc) });
+      const dto = toDto(doc);
+      app.io?.to(`mission:${missionId}`).emit('person-case:upserted', { missionId, case: dto, actorUserId: req.userId, created });
+
+      return reply.send({ case: dto });
     }
   );
 }

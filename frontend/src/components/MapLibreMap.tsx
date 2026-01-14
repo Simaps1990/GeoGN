@@ -399,6 +399,7 @@ export default function MapLibreMap() {
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
+  const lastSnapshotAtRef = useRef<number>(0);
   const pendingBulkRef = useRef<{
     lng: number;
     lat: number;
@@ -1366,9 +1367,15 @@ export default function MapLibreMap() {
 
   // Lorsqu'une fiche apparaît pour la mission, déclencher une notification pour les non-admin
   useEffect(() => {
-    if (isAdmin) return;
     if (!personCase) {
       lastNotifiedPersonCaseIdRef.current = null;
+      setProjectionNotification(false);
+      return;
+    }
+
+    if (user?.id && personCase.createdBy === user.id) {
+      lastNotifiedPersonCaseIdRef.current = personCase.id;
+      setProjectionNotification(false);
       return;
     }
 
@@ -1380,8 +1387,8 @@ export default function MapLibreMap() {
     if (lastNotifiedPersonCaseIdRef.current === personCase.id) return;
     lastNotifiedPersonCaseIdRef.current = personCase.id;
     setProjectionNotification(true);
-    setSettingsNotification(true);
-  }, [personCase, isAdmin, selectedMissionId]);
+    if (!isAdmin) setSettingsNotification(true);
+  }, [personCase, isAdmin, selectedMissionId, user?.id]);
 
   // Précharger la fiche personne pour tous les rôles afin que les non-admin puissent voir le suivi actif
   // (pastilles + ouverture Paw + heatmap) sans devoir ouvrir le panneau.
@@ -1511,6 +1518,15 @@ export default function MapLibreMap() {
   // Toast discret pour informer qu'aucune projection n'est active
   const [noProjectionToast, setNoProjectionToast] = useState(false);
 
+  const [activityToast, setActivityToast] = useState<string | null>(null);
+  const activityToastTimerRef = useRef<number | null>(null);
+
+  const [historyWindowSeconds, setHistoryWindowSeconds] = useState(1800);
+
+  useEffect(() => {
+    setHistoryWindowSeconds(1800);
+  }, [selectedMissionId]);
+
   useEffect(() => {
     if (!noProjectionToast) return;
     const t = window.setTimeout(() => {
@@ -1518,6 +1534,24 @@ export default function MapLibreMap() {
     }, 2500);
     return () => window.clearTimeout(t);
   }, [noProjectionToast]);
+
+  useEffect(() => {
+    if (!activityToast) return;
+    if (activityToastTimerRef.current !== null) {
+      window.clearTimeout(activityToastTimerRef.current);
+      activityToastTimerRef.current = null;
+    }
+    activityToastTimerRef.current = window.setTimeout(() => {
+      setActivityToast(null);
+      activityToastTimerRef.current = null;
+    }, 4000);
+    return () => {
+      if (activityToastTimerRef.current !== null) {
+        window.clearTimeout(activityToastTimerRef.current);
+        activityToastTimerRef.current = null;
+      }
+    };
+  }, [activityToast]);
 
   const [isMapRotated, setIsMapRotated] = useState(false);
 
@@ -1545,14 +1579,6 @@ export default function MapLibreMap() {
 
     setTracePoints((prevPts) => {
       const next = prevPts.filter((p) => p.t >= cutoff);
-      console.log('[TRACE] setTracePoints call (retention decrease)', {
-        prevLen: prevPts.length,
-        nextLen: next.length,
-        selectedMissionId,
-        userId: user?.id,
-        trackingEnabled,
-        mapReady,
-      });
       return next;
     });
 
@@ -1796,7 +1822,11 @@ export default function MapLibreMap() {
   }, [selectedMissionId]);
 
   useEffect(() => {
-    if (!selectedMissionId) return;
+    if (!selectedMissionId) {
+      setMemberColors({});
+      setMemberNames({});
+      return;
+    }
     let cancelled = false;
 
     const refresh = async () => {
@@ -1819,6 +1849,8 @@ export default function MapLibreMap() {
         // non bloquant
       }
     };
+
+    void refresh();
 
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
@@ -1886,7 +1918,7 @@ export default function MapLibreMap() {
         // If retention increased, request a fresh snapshot to fill missing history.
         if (prevRetention && nextRetention > prevRetention) {
           try {
-            socket.emit('mission:join', { missionId: selectedMissionId });
+            socket.emit('mission:join', { missionId: selectedMissionId, retentionSeconds: historyWindowSeconds });
           } catch {
             // ignore
           }
@@ -1964,38 +1996,6 @@ export default function MapLibreMap() {
   }, [mapReady, selectedMissionId, lastPos]);
 
   useEffect(() => {
-    if (!selectedMissionId) {
-      setMemberColors({});
-      setMemberNames({});
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const members = await listMissionMembers(selectedMissionId);
-        if (cancelled) return;
-        const next: Record<string, string> = {};
-        const nextNames: Record<string, string> = {};
-        for (const m of members) {
-          const id = m.user?.id;
-          if (!id) continue;
-          const c = typeof m.color === 'string' ? m.color.trim() : '';
-          if (c) next[id] = c;
-          const name = typeof m.user?.displayName === 'string' ? m.user.displayName.trim() : '';
-          if (name) nextNames[id] = name;
-        }
-        setMemberColors(next);
-        setMemberNames(nextNames);
-      } catch {
-        // non bloquant
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedMissionId]);
-
-  useEffect(() => {
     if (!selectedMissionId) return;
     const socket = getSocket();
 
@@ -2051,18 +2051,7 @@ export default function MapLibreMap() {
                 t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
               }));
 
-            setTracePoints((prev) => {
-              const next = normalized;
-              console.log('[TRACE] setTracePoints call (load self from localStorage)', {
-                prevLen: prev.length,
-                nextLen: next.length,
-                selectedMissionId,
-                userId: user?.id,
-                trackingEnabled,
-                mapReady,
-              });
-              return next;
-            });
+            setTracePoints(() => normalized);
             if (normalized.length) {
               const last = normalized[normalized.length - 1];
               setLastPos({ lng: last.lng, lat: last.lat });
@@ -2113,14 +2102,6 @@ export default function MapLibreMap() {
 
     setTracePoints((prev) => {
       const next = prev.filter((p) => p.t >= cutoff);
-      console.log('[TRACE] setTracePoints call (initial retention on mission/change)', {
-        prevLen: prev.length,
-        nextLen: next.length,
-        selectedMissionId,
-        userId: user?.id,
-        trackingEnabled,
-        mapReady,
-      });
       return next;
     });
 
@@ -2150,14 +2131,6 @@ export default function MapLibreMap() {
     if (traceRetentionMs <= 0) {
       setTracePoints((prev) => {
         const next: typeof prev = [];
-        console.log('[TRACE] RESET reason=traceRetentionMs<=0', {
-          prevLen: prev.length,
-          nextLen: next.length,
-          selectedMissionId,
-          userId: user?.id,
-          trackingEnabled,
-          mapReady,
-        });
         return next;
       });
       otherTracesRef.current = {};
@@ -2171,14 +2144,6 @@ export default function MapLibreMap() {
 
       setTracePoints((prev) => {
         const next = prev.filter((p) => p.t >= cutoff);
-        console.log('[TRACE] setTracePoints call (periodic retention)', {
-          prevLen: prev.length,
-          nextLen: next.length,
-          selectedMissionId,
-          userId: user?.id,
-          trackingEnabled,
-          mapReady,
-        });
         return next;
       });
 
@@ -2532,7 +2497,6 @@ export default function MapLibreMap() {
       map.setPaintProperty('me-dot', 'circle-stroke-color', stroke);
     }
     if (map.getLayer('trace-line')) {
-      console.log('[TRACE] paint trace-line', { selectedMissionId, userId: user?.id, myColor });
       map.setPaintProperty('trace-line', 'line-color', myColor);
     }
   }
@@ -3117,14 +3081,6 @@ export default function MapLibreMap() {
             },
           ],
         } as any;
-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
-          featureCount: fc.features.length,
-          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
-          tracePointsLen: currentTracePoints.length,
-          filteredLen: filtered.length,
-          selectedMissionId,
-          userId: user?.id,
-        });
         traceSource.setData(fc);
       } else if (coords.length === 1) {
         const [lng, lat] = coords[0];
@@ -3144,25 +3100,9 @@ export default function MapLibreMap() {
             },
           ],
         } as any;
-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
-          featureCount: fc.features.length,
-          coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
-          tracePointsLen: currentTracePoints.length,
-          filteredLen: filtered.length,
-          selectedMissionId,
-          userId: user?.id,
-        });
         traceSource.setData(fc);
       } else {
         const fc = { type: 'FeatureCollection', features: [] } as any;
-        console.log('[TRACE] setData trace (resyncAllOverlays)', {
-          featureCount: 0,
-          coordCount: 0,
-          tracePointsLen: currentTracePoints.length,
-          filteredLen: filtered.length,
-          selectedMissionId,
-          userId: user?.id,
-        });
         traceSource.setData(fc);
       }
     }
@@ -4439,7 +4379,7 @@ export default function MapLibreMap() {
     const ensureJoined = async (): Promise<boolean> => {
       return new Promise<boolean>((resolve) => {
         try {
-          socket.emit('mission:join', { missionId }, (res: any) => {
+          socket.emit('mission:join', { missionId, retentionSeconds: historyWindowSeconds }, (res: any) => {
             resolve(Boolean(res?.ok));
           });
         } catch {
@@ -4455,7 +4395,6 @@ export default function MapLibreMap() {
       flushDelayRef.current = 1000;
       flushPendingInternal();
       void flushPendingActions(missionId);
-      requestSnapshot();
     };
 
     const pendingKey = user?.id ? `geogn.pendingPos.${missionId}.${user.id}` : null;
@@ -4566,7 +4505,10 @@ export default function MapLibreMap() {
         const joined = await ensureJoined();
         if (!joined) return;
         if (activeMissionRef.current !== missionId) return;
-        requestSnapshot();
+        const now = Date.now();
+        if (now - lastSnapshotAtRef.current > 60_000) {
+          requestSnapshot();
+        }
         flushDelayRef.current = 1000;
         flushPendingInternal();
       })();
@@ -4584,6 +4526,7 @@ export default function MapLibreMap() {
     const onSnapshot = (msg: any) => {
       if (!msg || msg.missionId !== selectedMissionId) return;
       const now = Date.now();
+      lastSnapshotAtRef.current = now;
 
       const positions = (msg.positions && typeof msg.positions === 'object' ? msg.positions : {}) as Record<
         string,
@@ -4660,14 +4603,6 @@ export default function MapLibreMap() {
               }
 
               const next = deduped.slice(-effectiveMaxTracePoints);
-              console.log('[TRACE] setTracePoints call (snapshot self trace)', {
-                prevLen: prev.length,
-                nextLen: next.length,
-                selectedMissionId,
-                userId: user?.id,
-                trackingEnabled,
-                mapReady,
-              });
               return next;
             });
             const last = normalizedSelf[normalizedSelf.length - 1];
@@ -4705,14 +4640,6 @@ export default function MapLibreMap() {
           const next = [...prev, { lng: msg.lng, lat: msg.lat, t: now }]
             .filter((p) => p.t >= cutoff)
             .slice(-maxTracePoints);
-          console.log('[TRACE] setTracePoints call (applyRemotePosition self)', {
-            prevLen: prev.length,
-            nextLen: next.length,
-            selectedMissionId,
-            userId: user?.id,
-            trackingEnabled,
-            mapReady,
-          });
           return next;
         });
         return;
@@ -4770,6 +4697,15 @@ export default function MapLibreMap() {
     const onPoiCreated = (msg: any) => {
       if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.poi?.id) return;
+      try {
+        const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
+        if (createdBy && user?.id && createdBy !== user.id) {
+          const name = memberNames[createdBy] || createdBy;
+          setActivityToast(`${name} vient de créer un POI`);
+        }
+      } catch {
+        // ignore
+      }
       setPois((prev) => {
         const exists = prev.some((p) => p.id === msg.poi.id);
         if (exists) return prev;
@@ -4790,11 +4726,40 @@ export default function MapLibreMap() {
     const onZoneCreated = (msg: any) => {
       if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.zone?.id) return;
+      try {
+        const createdBy = typeof msg.zone.createdBy === 'string' ? msg.zone.createdBy : null;
+        if (createdBy && user?.id && createdBy !== user.id) {
+          const name = memberNames[createdBy] || createdBy;
+          setActivityToast(`${name} vient de créer une zone`);
+        }
+      } catch {
+        // ignore
+      }
       setZones((prev) => {
         const exists = prev.some((z) => z.id === msg.zone.id);
         if (exists) return prev;
         return [msg.zone as ApiZone, ...prev];
       });
+    };
+
+    const onPersonCaseUpserted = (msg: any) => {
+      if (msg?.missionId !== selectedMissionId) return;
+      if (!msg?.case?.id) return;
+
+      setPersonCase(msg.case as ApiPersonCase);
+
+      const created = msg?.created === true;
+      const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
+      if (created && actorUserId && user?.id && actorUserId !== user.id) {
+        const name = memberNames[actorUserId] || actorUserId;
+        setActivityToast(`${name} vient de créer une piste`);
+      }
+    };
+
+    const onPersonCaseDeleted = (msg: any) => {
+      if (msg?.missionId && msg.missionId !== selectedMissionId) return;
+      setPersonCase(null);
+      setProjectionNotification(false);
     };
     const onZoneUpdated = (msg: any) => {
       if (msg?.missionId !== selectedMissionId) return;
@@ -4814,6 +4779,9 @@ export default function MapLibreMap() {
     socket.on('zone:created', onZoneCreated);
     socket.on('zone:updated', onZoneUpdated);
     socket.on('zone:deleted', onZoneDeleted);
+
+    socket.on('person-case:upserted', onPersonCaseUpserted);
+    socket.on('person-case:deleted', onPersonCaseDeleted);
     let cancelled = false;
     (async () => {
       try {
@@ -4851,6 +4819,9 @@ export default function MapLibreMap() {
       socket.off('zone:updated', onZoneUpdated);
       socket.off('zone:deleted', onZoneDeleted);
 
+      socket.off('person-case:upserted', onPersonCaseUpserted);
+      socket.off('person-case:deleted', onPersonCaseDeleted);
+
       // prevent late callbacks from rescheduling
       activeMissionRef.current = null;
 
@@ -4883,14 +4854,6 @@ export default function MapLibreMap() {
       setLastPos(null);
       setTracePoints((prev) => {
         const next: typeof prev = [];
-        console.log('[TRACE] RESET reason=trackingDisabled', {
-          prevLen: prev.length,
-          nextLen: next.length,
-          selectedMissionId,
-          userId: user?.id,
-          trackingEnabled,
-          mapReady,
-        });
         return next;
       });
 
@@ -4931,14 +4894,6 @@ export default function MapLibreMap() {
           const cutoff = Date.now() - traceRetentionMs;
           const next = [...prev, { lng, lat, t }].filter((p) => p.t >= cutoff);
           const sliced = next.slice(-maxTracePoints);
-          console.log('[TRACE] setTracePoints call (local GPS)', {
-            prevLen: prev.length,
-            nextLen: sliced.length,
-            selectedMissionId,
-            userId: user?.id,
-            trackingEnabled,
-            mapReady,
-          });
           return sliced;
         });
 
@@ -5320,14 +5275,6 @@ export default function MapLibreMap() {
       }
 
       const fc = { type: 'FeatureCollection', features: selfFeatures } as any;
-      console.log('[TRACE] setData trace (update self)', {
-        featureCount: fc.features.length,
-        coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
-        tracePointsLen: tracePoints.length,
-        filteredLen: filtered.length,
-        selectedMissionId,
-        userId: user?.id,
-      });
       traceSource.setData(fc);
     };
 
@@ -5743,11 +5690,9 @@ export default function MapLibreMap() {
                 onClick={() => {
                   const map = mapInstanceRef.current;
 
-                  if (!isAdmin) {
-                    setProjectionNotification(false);
-                    if (selectedMissionId && personCase) {
-                      setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                    }
+                  setProjectionNotification(false);
+                  if (selectedMissionId && personCase && !(user?.id && personCase.createdBy === user.id)) {
+                    setDismissedPersonCaseId(selectedMissionId, personCase.id);
                   }
 
                   if (!personCase) {
@@ -5794,7 +5739,7 @@ export default function MapLibreMap() {
                 title="Activité"
               >
                 <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                {!isAdmin && projectionNotification ? (
+                {projectionNotification && !(user?.id && personCase?.createdBy === user.id) ? (
                   <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
                 ) : null}
               </button>
@@ -5817,6 +5762,36 @@ export default function MapLibreMap() {
             </div>
           </div>
         </div>
+
+        {typeof mission?.traceRetentionSeconds === 'number' &&
+        Number.isFinite(mission.traceRetentionSeconds) &&
+        historyWindowSeconds < mission.traceRetentionSeconds ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedMissionId) return;
+              const next = historyWindowSeconds + 3600;
+              setHistoryWindowSeconds(next);
+              const socket = socketRef.current;
+              if (socket) {
+                socket.emit('mission:join', { missionId: selectedMissionId, retentionSeconds: next });
+              }
+            }}
+            className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
+              historyWindowSeconds > 1800 ? 'ring-1 ring-inset ring-blue-500/25' : ''
+            }`}
+          >
+            <span
+              className={
+                historyWindowSeconds > 1800
+                  ? 'mx-auto block text-blue-600 text-sm font-semibold'
+                  : 'mx-auto block text-gray-600 text-sm font-semibold'
+              }
+            >
+              +1h
+            </span>
+          </button>
+        ) : null}
 
         {isMapRotated ? (
           <button
@@ -6788,6 +6763,14 @@ export default function MapLibreMap() {
         <div className="pointer-events-none fixed inset-0 z-[1400] flex items-center justify-center p-4">
           <div className="pointer-events-auto max-w-sm rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
             Aucune projection active pour cette mission.
+          </div>
+        </div>
+      ) : null}
+
+      {activityToast ? (
+        <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
+          <div className="pointer-events-auto max-w-[min(90vw,540px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
+            {activityToast}
           </div>
         </div>
       ) : null}

@@ -159,7 +159,7 @@ export default function CurrentMissionPage() {
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Accueil</h1>
+        <h1 className="text-xl font-bold text-gray-900">GeoGN</h1>
       </div>
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
@@ -218,11 +218,18 @@ export default function CurrentMissionPage() {
         ) : (
           <div className="mt-3 grid gap-2">
             {missions.map((m) => (
-              <button
+              <div
                 key={m.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpenMission(m.id)}
-                className="w-full rounded-2xl border bg-white p-4 text-left shadow-sm hover:bg-gray-50"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onOpenMission(m.id);
+                  }
+                }}
+                className="w-full rounded-2xl border bg-white p-4 text-left shadow-sm hover:bg-gray-50 cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -276,7 +283,7 @@ export default function CurrentMissionPage() {
                     </div>
                   ) : null}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
