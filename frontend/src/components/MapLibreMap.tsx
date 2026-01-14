@@ -1498,6 +1498,7 @@ export default function MapLibreMap() {
   const mapViewKey = selectedMissionId ? `geotacops.mapView.${selectedMissionId}` : null;
 
   const tracesLoadedRef = useRef(false);
+  const prevTrackingRef = useRef<boolean | null>(null);
   const autoCenterMissionIdRef = useRef<string | null>(null);
   const autoCenterDoneRef = useRef(false);
 
@@ -1536,7 +1537,19 @@ export default function MapLibreMap() {
     if (traceRetentionMs >= prev) return;
 
     const cutoff = Date.now() - traceRetentionMs;
-    setTracePoints((prevPts) => prevPts.filter((p) => p.t >= cutoff));
+
+    setTracePoints((prevPts) => {
+      const next = prevPts.filter((p) => p.t >= cutoff);
+      console.log('[TRACE] setTracePoints call (retention decrease)', {
+        prevLen: prevPts.length,
+        nextLen: next.length,
+        selectedMissionId,
+        userId: user?.id,
+        trackingEnabled,
+        mapReady,
+      });
+      return next;
+    });
 
     const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
@@ -2033,7 +2046,18 @@ export default function MapLibreMap() {
                 t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
               }));
 
-            setTracePoints(normalized);
+            setTracePoints((prev) => {
+              const next = normalized;
+              console.log('[TRACE] setTracePoints call (load self from localStorage)', {
+                prevLen: prev.length,
+                nextLen: next.length,
+                selectedMissionId,
+                userId: user?.id,
+                trackingEnabled,
+                mapReady,
+              });
+              return next;
+            });
             if (normalized.length) {
               const last = normalized[normalized.length - 1];
               setLastPos({ lng: last.lng, lat: last.lat });
@@ -2082,7 +2106,18 @@ export default function MapLibreMap() {
     const now = Date.now();
     const cutoff = now - traceRetentionMs;
 
-    setTracePoints((prev) => prev.filter((p) => p.t >= cutoff));
+    setTracePoints((prev) => {
+      const next = prev.filter((p) => p.t >= cutoff);
+      console.log('[TRACE] setTracePoints call (initial retention on mission/change)', {
+        prevLen: prev.length,
+        nextLen: next.length,
+        selectedMissionId,
+        userId: user?.id,
+        trackingEnabled,
+        mapReady,
+      });
+      return next;
+    });
 
     const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
@@ -2108,7 +2143,18 @@ export default function MapLibreMap() {
   useEffect(() => {
     if (!selectedMissionId) return;
     if (traceRetentionMs <= 0) {
-      setTracePoints([]);
+      setTracePoints((prev) => {
+        const next: typeof prev = [];
+        console.log('[TRACE] RESET reason=traceRetentionMs<=0', {
+          prevLen: prev.length,
+          nextLen: next.length,
+          selectedMissionId,
+          userId: user?.id,
+          trackingEnabled,
+          mapReady,
+        });
+        return next;
+      });
       otherTracesRef.current = {};
       setOtherPositions({});
       return;
@@ -2118,7 +2164,18 @@ export default function MapLibreMap() {
       const now = Date.now();
       const cutoff = now - traceRetentionMs;
 
-      setTracePoints((prev) => prev.filter((p) => p.t >= cutoff));
+      setTracePoints((prev) => {
+        const next = prev.filter((p) => p.t >= cutoff);
+        console.log('[TRACE] setTracePoints call (periodic retention)', {
+          prevLen: prev.length,
+          nextLen: next.length,
+          selectedMissionId,
+          userId: user?.id,
+          trackingEnabled,
+          mapReady,
+        });
+        return next;
+      });
 
       const nextOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
       for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
@@ -3041,7 +3098,8 @@ export default function MapLibreMap() {
       const now = Date.now();
       const filtered = tracePoints.filter((p) => now - p.t <= traceRetentionMs);
 
-      if (filtered.length >= 2) {
+      const coords = filtered.map((p) => [p.lng, p.lat] as [number, number]);
+      if (coords.length >= 2) {
         traceSource.setData({
           type: 'FeatureCollection',
           features: [
@@ -3049,7 +3107,25 @@ export default function MapLibreMap() {
               type: 'Feature',
               geometry: {
                 type: 'LineString',
-                coordinates: filtered.map((p) => [p.lng, p.lat]),
+                coordinates: coords,
+              },
+              properties: {},
+            },
+          ],
+        } as any);
+      } else if (coords.length === 1) {
+        const [lng, lat] = coords[0];
+        traceSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [lng, lat],
+                  [lng + 1e-9, lat + 1e-9],
+                ],
               },
               properties: {},
             },
@@ -4532,7 +4608,18 @@ export default function MapLibreMap() {
             .slice(-maxTracePointsFromSnapshot);
 
           if (normalizedSelf.length) {
-            setTracePoints(normalizedSelf);
+            setTracePoints((prev) => {
+              const next = normalizedSelf;
+              console.log('[TRACE] setTracePoints call (snapshot self trace)', {
+                prevLen: prev.length,
+                nextLen: next.length,
+                selectedMissionId,
+                userId: user?.id,
+                trackingEnabled,
+                mapReady,
+              });
+              return next;
+            });
             const last = normalizedSelf[normalizedSelf.length - 1];
             setLastPos({ lng: last.lng, lat: last.lat });
           }
@@ -4568,6 +4655,14 @@ export default function MapLibreMap() {
           const next = [...prev, { lng: msg.lng, lat: msg.lat, t: now }]
             .filter((p) => p.t >= cutoff)
             .slice(-maxTracePoints);
+          console.log('[TRACE] setTracePoints call (applyRemotePosition self)', {
+            prevLen: prev.length,
+            nextLen: next.length,
+            selectedMissionId,
+            userId: user?.id,
+            trackingEnabled,
+            mapReady,
+          });
           return next;
         });
         return;
@@ -4724,18 +4819,31 @@ export default function MapLibreMap() {
     }
     if (!navigator.geolocation) return;
 
+    const prevTracking = prevTrackingRef.current;
+    prevTrackingRef.current = trackingEnabled;
+
     // Stop any existing watcher before applying new tracking state.
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
 
-    if (!trackingEnabled) {
-      // Tracking has been disabled: clear our own position and trace locally
+    // Only reset when transitioning from true -> false
+    if (prevTracking === true && trackingEnabled === false) {
       setLastPos(null);
-      setTracePoints([]);
+      setTracePoints((prev) => {
+        const next: typeof prev = [];
+        console.log('[TRACE] RESET reason=trackingDisabled', {
+          prevLen: prev.length,
+          nextLen: next.length,
+          selectedMissionId,
+          userId: user?.id,
+          trackingEnabled,
+          mapReady,
+        });
+        return next;
+      });
 
-      // Persist cleared self trace for this mission
       if (selectedMissionId && user?.id) {
         const key = `geogn.trace.self.${selectedMissionId}.${user.id}`;
         try {
@@ -4745,12 +4853,16 @@ export default function MapLibreMap() {
         }
       }
 
-      // Notify other clients so they remove our point and trace
       const socket = socketRef.current;
       if (socket) {
         socket.emit('position:clear', {});
       }
 
+      return;
+    }
+
+    if (!trackingEnabled) {
+      // Do not reset if we didn't come from an active tracking state
       return;
     }
 
@@ -4768,7 +4880,16 @@ export default function MapLibreMap() {
         setTracePoints((prev) => {
           const cutoff = Date.now() - traceRetentionMs;
           const next = [...prev, { lng, lat, t }].filter((p) => p.t >= cutoff);
-          return next.slice(-maxTracePoints);
+          const sliced = next.slice(-maxTracePoints);
+          console.log('[TRACE] setTracePoints call (local GPS)', {
+            prevLen: prev.length,
+            nextLen: sliced.length,
+            selectedMissionId,
+            userId: user?.id,
+            trackingEnabled,
+            mapReady,
+          });
+          return sliced;
         });
 
         const socket = socketRef.current;
@@ -5079,7 +5200,20 @@ export default function MapLibreMap() {
       const retentionMs = traceRetentionMs;
       const now = Date.now();
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
-      if (filtered.length !== tracePoints.length) setTracePoints(filtered);
+      if (filtered.length !== tracePoints.length) {
+        setTracePoints((prev) => {
+          const next = filtered;
+          console.log('[TRACE] setTracePoints call (update() self fading)', {
+            prevLen: prev.length,
+            nextLen: next.length,
+            selectedMissionId,
+            userId: user?.id,
+            trackingEnabled,
+            mapReady,
+          });
+          return next;
+        });
+      }
 
       const segmentGapMs = 30_000;
       const opacities = [1, 0.8, 0.6, 0.4, 0.2];
@@ -5130,7 +5264,33 @@ export default function MapLibreMap() {
 
       flush(prevBucket);
 
-      traceSource.setData({ type: 'FeatureCollection', features: selfFeatures } as any);
+      // If we only have a single point in the filtered trace, emit a tiny
+      // 2-point LineString to keep the trace visible instead of clearing it.
+      if (selfFeatures.length === 0 && filtered.length === 1) {
+        const only = filtered[0];
+        const lng = only.lng;
+        const lat = only.lat;
+        selfFeatures.push({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [lng, lat],
+              [lng + 1e-9, lat + 1e-9],
+            ],
+          },
+          properties: { opacity: opacities[0] ?? 0.9 },
+        });
+      }
+
+      const fc = { type: 'FeatureCollection', features: selfFeatures } as any;
+      console.log('[TRACE] setData trace (update self)', {
+        featureCount: fc.features.length,
+        coordCount: fc.features[0]?.geometry?.coordinates?.length ?? 0,
+        selectedMissionId,
+        userId: user?.id,
+      });
+      traceSource.setData(fc);
     };
 
     update();
