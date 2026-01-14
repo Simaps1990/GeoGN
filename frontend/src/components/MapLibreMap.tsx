@@ -2025,9 +2025,17 @@ export default function MapLibreMap() {
         if (rawSelf) {
           const parsed = JSON.parse(rawSelf) as { lng: number; lat: number; t: number }[];
           if (Array.isArray(parsed)) {
-            setTracePoints(parsed);
-            if (parsed.length) {
-              const last = parsed[parsed.length - 1];
+            const normalized = parsed
+              .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
+              .map((p) => ({
+                lng: p.lng,
+                lat: p.lat,
+                t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
+              }));
+
+            setTracePoints(normalized);
+            if (normalized.length) {
+              const last = normalized[normalized.length - 1];
               setLastPos({ lng: last.lng, lat: last.lat });
             }
           }
@@ -2038,9 +2046,21 @@ export default function MapLibreMap() {
       if (rawOthers) {
         const parsed = JSON.parse(rawOthers) as Record<string, { lng: number; lat: number; t: number }[]>;
         if (parsed && typeof parsed === 'object') {
-          otherTracesRef.current = parsed;
-          const nextPositions: Record<string, { lng: number; lat: number; t: number }> = {};
+          const normalizedOthers: Record<string, { lng: number; lat: number; t: number }[]> = {};
           for (const [userId, pts] of Object.entries(parsed)) {
+            if (!Array.isArray(pts) || pts.length === 0) continue;
+            normalizedOthers[userId] = pts
+              .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
+              .map((p) => ({
+                lng: p.lng,
+                lat: p.lat,
+                t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
+              }));
+          }
+
+          otherTracesRef.current = normalizedOthers;
+          const nextPositions: Record<string, { lng: number; lat: number; t: number }> = {};
+          for (const [userId, pts] of Object.entries(normalizedOthers)) {
             if (!Array.isArray(pts) || pts.length === 0) continue;
             const last = pts[pts.length - 1];
             nextPositions[userId] = { lng: last.lng, lat: last.lat, t: last.t };
