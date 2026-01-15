@@ -2142,6 +2142,45 @@ export default function MapLibreMap() {
     setLastPos(null);
   }, [selectedMissionId]);
 
+  // Réagir à une purge explicite de l'historique de mission (bouton "Purger l'historique")
+  // en vidant immédiatement les traces et positions locales pour cette mission.
+  useEffect(() => {
+    const clearLocalTraces = (missionId: string | undefined) => {
+      if (!missionId || missionId !== selectedMissionId) return;
+
+      setTracePoints([]);
+      tracePointsRef.current = [];
+      setLastPos(null);
+      otherTracesRef.current = {};
+      setOtherPositions({});
+      setOthersActivityTick((v) => (v + 1) % 1_000_000);
+      tracesLoadedRef.current = false;
+    };
+
+    const onWindowEvent = (e: any) => {
+      const missionId = e?.detail?.missionId as string | undefined;
+      clearLocalTraces(missionId);
+    };
+
+    const socket = socketRef.current;
+    const onSocketEvent = (msg: any) => {
+      const missionId = typeof msg?.missionId === 'string' ? msg.missionId : undefined;
+      clearLocalTraces(missionId);
+    };
+
+    window.addEventListener('geogn:mission:tracesCleared', onWindowEvent as any);
+    if (socket) {
+      socket.on('mission:tracesCleared', onSocketEvent);
+    }
+
+    return () => {
+      window.removeEventListener('geogn:mission:tracesCleared', onWindowEvent as any);
+      if (socket) {
+        socket.off('mission:tracesCleared', onSocketEvent);
+      }
+    };
+  }, [selectedMissionId]);
+
   useEffect(() => {
     if (!selectedMissionId) return;
     const now = Date.now();
@@ -4750,9 +4789,9 @@ export default function MapLibreMap() {
       if (!msg?.poi?.id) return;
       try {
         const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
-        if (createdBy && user?.id && createdBy !== user.id) {
+        if (createdBy) {
           const name = buildUserDisplayName(createdBy);
-          setActivityToast(`${name} vient de créer un POI`);
+          setActivityToast(`[v-test] ${name} vient de créer un POI`);
         }
       } catch {
         // ignore
@@ -4779,9 +4818,9 @@ export default function MapLibreMap() {
       if (!msg?.zone?.id) return;
       try {
         const createdBy = typeof msg.zone.createdBy === 'string' ? msg.zone.createdBy : null;
-        if (createdBy && user?.id && createdBy !== user.id) {
+        if (createdBy) {
           const name = buildUserDisplayName(createdBy);
-          setActivityToast(`${name} vient de créer une zone`);
+          setActivityToast(`[v-test] ${name} vient de créer une zone`);
         }
       } catch {
         // ignore
@@ -4801,9 +4840,9 @@ export default function MapLibreMap() {
 
       const created = msg?.created === true;
       const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
-      if (created && actorUserId && user?.id && actorUserId !== user.id) {
+      if (created && actorUserId) {
         const name = buildUserDisplayName(actorUserId);
-        setActivityToast(`${name} vient de créer une piste`);
+        setActivityToast(`[v-test] ${name} vient de créer une piste`);
       }
     };
 
