@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { PersonCaseModel } from '../models/personCase.js';
+import { UserModel } from '../models/user.js';
 
 type PersonCaseBody = {
   lastKnown: {
@@ -296,7 +297,26 @@ export async function personCasesRoutes(app: FastifyInstance) {
       ).lean();
 
       const dto = toDto(doc);
-      app.io?.to(`mission:${missionId}`).emit('person-case:upserted', { missionId, case: dto, actorUserId: req.userId, created });
+
+      let actorDisplayName: string | undefined;
+      try {
+        const user = await UserModel.findById(req.userId).select({ displayName: 1, appUserId: 1 }).lean();
+        if (user) {
+          const dn = typeof (user as any).displayName === 'string' ? (user as any).displayName.trim() : '';
+          const appId = typeof (user as any).appUserId === 'string' ? (user as any).appUserId.trim() : '';
+          actorDisplayName = dn || appId || undefined;
+        }
+      } catch {
+        // non bloquant
+      }
+
+      app.io?.to(`mission:${missionId}`).emit('person-case:upserted', {
+        missionId,
+        case: dto,
+        actorUserId: req.userId,
+        actorDisplayName,
+        created,
+      });
 
       return reply.send({ case: dto });
     }

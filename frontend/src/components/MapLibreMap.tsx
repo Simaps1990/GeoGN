@@ -4695,16 +4695,11 @@ export default function MapLibreMap() {
         }
       }
 
-      // Éviter les micro-sauts: lors d'un reconnect / retour foreground, il peut arriver
-      // de recevoir un snapshot vide/partiel. Dans ce cas, ne pas écraser l'état courant.
-      const hasAnySnapshotData = Object.keys(nextOthers).length > 0 || Object.keys(nextOthersTraces).length > 0;
-      setOtherPositions((prev) => {
-        const hasAnyCurrentData = Object.keys(otherTracesRef.current).length > 0 || Object.keys(prev).length > 0;
-        if (!hasAnySnapshotData && hasAnyCurrentData) return prev;
-
-        otherTracesRef.current = { ...otherTracesRef.current, ...nextOthersTraces };
-        return { ...prev, ...nextOthers };
-      });
+      // Le snapshot est la source de vérité pour les autres utilisateurs :
+      // remplacer complètement les positions et traces locales par celles reçues,
+      // même si le snapshot est vide (utile après une purge explicite).
+      otherTracesRef.current = nextOthersTraces;
+      setOtherPositions(nextOthers);
       setOthersActivityTick((v) => (v + 1) % 1_000_000);
     };
 
@@ -4790,7 +4785,8 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
         if (createdBy) {
-          const name = buildUserDisplayName(createdBy);
+          const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
+          const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
           setActivityToast(`[v-test] ${name} vient de créer un POI`);
         }
       } catch {
@@ -4819,7 +4815,8 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.zone.createdBy === 'string' ? msg.zone.createdBy : null;
         if (createdBy) {
-          const name = buildUserDisplayName(createdBy);
+          const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
+          const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
           setActivityToast(`[v-test] ${name} vient de créer une zone`);
         }
       } catch {
@@ -4841,7 +4838,8 @@ export default function MapLibreMap() {
       const created = msg?.created === true;
       const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
       if (created && actorUserId) {
-        const name = buildUserDisplayName(actorUserId);
+        const rawName = typeof msg.actorDisplayName === 'string' ? msg.actorDisplayName : null;
+        const name = (rawName && rawName.trim()) || buildUserDisplayName(actorUserId);
         setActivityToast(`[v-test] ${name} vient de créer une piste`);
       }
     };

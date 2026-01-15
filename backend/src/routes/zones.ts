@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { ZoneModel, type ZoneType } from '../models/zone.js';
+import { UserModel } from '../models/user.js';
 
 type GeoJSONPolygon = {
   type: 'Polygon';
@@ -158,7 +159,20 @@ export async function zonesRoutes(app: FastifyInstance) {
         updatedAt: zone.updatedAt,
       };
 
-      app.io?.to(`mission:${missionId}`).emit('zone:created', { missionId, zone: dto });
+      // Inclure le surnom du créateur directement dans l'événement socket.
+      let createdByDisplayName: string | undefined;
+      try {
+        const user = await UserModel.findById(req.userId).select({ displayName: 1, appUserId: 1 }).lean();
+        if (user) {
+          const dn = typeof (user as any).displayName === 'string' ? (user as any).displayName.trim() : '';
+          const appId = typeof (user as any).appUserId === 'string' ? (user as any).appUserId.trim() : '';
+          createdByDisplayName = dn || appId || undefined;
+        }
+      } catch {
+        // non bloquant
+      }
+
+      app.io?.to(`mission:${missionId}`).emit('zone:created', { missionId, zone: dto, createdByDisplayName });
 
       return reply.code(201).send(dto);
     }
