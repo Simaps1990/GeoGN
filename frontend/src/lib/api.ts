@@ -290,6 +290,18 @@ export async function createMission(title: string) {
   return (await res.json()) as ApiMission;
 }
 
+export async function clearMissionTraces(missionId: string) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/clear-traces`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CLEAR_TRACES_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
 export async function deleteMission(missionId: string) {
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}`, { method: 'DELETE' });
   if (!res.ok) {

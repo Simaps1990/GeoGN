@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionModel } from '../models/mission.js';
 import { MissionMemberModel } from '../models/missionMember.js';
+import { TraceModel } from '../models/trace.js';
+import { PositionModel } from '../models/position.js';
+import { PositionCurrentModel } from '../models/positionCurrent.js';
 
 type CreateMissionBody = {
   title: string;
@@ -165,6 +168,40 @@ export async function missionsRoutes(app: FastifyInstance) {
         joinedAt: membership.joinedAt ?? null,
       },
     });
+  });
+
+  app.post<{ Params: { id: string } }>('/missions/:id/clear-traces', async (req, reply) => {
+    try {
+      requireAuth(req);
+    } catch (e: any) {
+      return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({ error: 'INVALID_ID' });
+    }
+
+    const membership = await MissionMemberModel.findOne({ missionId: id, userId: req.userId, removedAt: null }).lean();
+    if (!membership || membership.role !== 'admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN' });
+    }
+
+    const missionObjectId = new mongoose.Types.ObjectId(id);
+
+    await Promise.all([
+      TraceModel.deleteMany({ missionId: missionObjectId }),
+      PositionModel.deleteMany({ missionId: missionObjectId }),
+      PositionCurrentModel.deleteMany({ missionId: missionObjectId }),
+    ]);
+
+    try {
+      (app as any).io?.to(`mission:${id}`)?.emit('mission:tracesCleared', { missionId: id });
+    } catch {
+      // ignore
+    }
+
+    return reply.send({ ok: true });
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateMissionBody }>('/missions/:id', async (req, reply) => {

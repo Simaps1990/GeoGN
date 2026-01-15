@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
+import { clearMissionTraces, createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
 
 export default function CurrentMissionPage() {
@@ -156,9 +156,27 @@ export default function CurrentMissionPage() {
     }
   }
 
+  async function onClearTraces() {
+    if (!selectedMissionId) return;
+    const ok = window.confirm('Purger l\'historique des points pour cette mission ? Cette action est définitive.');
+    if (!ok) return;
+    try {
+      await clearMissionTraces(selectedMissionId);
+      try {
+        window.dispatchEvent(
+          new CustomEvent('geogn:mission:tracesCleared', { detail: { missionId: selectedMissionId } })
+        );
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Erreur lors de la purge des traces');
+    }
+  }
+
   return (
     <div className="p-4 pb-24">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-center">
         <h1 className="text-xl font-bold text-gray-900">GeoGN</h1>
       </div>
 
@@ -309,6 +327,13 @@ export default function CurrentMissionPage() {
               className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
             >
               Enregistrer
+            </button>
+            <button
+              type="button"
+              onClick={() => void onClearTraces()}
+              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-red-500 text-sm font-semibold text-red-600 hover:bg-red-50"
+            >
+              Purger l'historique des points de la mission
             </button>
           </div>
 

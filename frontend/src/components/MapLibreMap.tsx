@@ -460,6 +460,24 @@ export default function MapLibreMap() {
     return userId;
   }
 
+  function buildUserDisplayName(userId: string | null | undefined): string {
+    if (!userId) return 'Inconnu';
+
+    // Si c'est l'utilisateur courant, préférer user.displayName
+    if (user?.id && userId === user.id && user.displayName && user.displayName.trim()) {
+      return user.displayName.trim();
+    }
+
+    // Sinon, utiliser le nom depuis les membres de mission si disponible
+    const memberName = memberNames[userId];
+    if (memberName && memberName.trim()) {
+      return memberName.trim();
+    }
+
+    // Fallback sur le helper existant
+    return getUserDisplayName(userId);
+  }
+
   const [followMyBearing, setFollowMyBearing] = useState(false);
   const centerOnMeNextActionRef = useRef<'center' | 'follow'>('center');
   const lastHeadingRef = useRef<number | null>(null);
@@ -4744,7 +4762,7 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
         if (createdBy && user?.id && createdBy !== user.id) {
-          const name = getUserDisplayName(createdBy);
+          const name = buildUserDisplayName(createdBy);
           setActivityToast(`${name} vient de créer un POI`);
         }
       } catch {
@@ -4773,7 +4791,7 @@ export default function MapLibreMap() {
       try {
         const createdBy = typeof msg.zone.createdBy === 'string' ? msg.zone.createdBy : null;
         if (createdBy && user?.id && createdBy !== user.id) {
-          const name = getUserDisplayName(createdBy);
+          const name = buildUserDisplayName(createdBy);
           setActivityToast(`${name} vient de créer une zone`);
         }
       } catch {
@@ -4795,7 +4813,7 @@ export default function MapLibreMap() {
       const created = msg?.created === true;
       const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
       if (created && actorUserId && user?.id && actorUserId !== user.id) {
-        const name = getUserDisplayName(actorUserId);
+        const name = buildUserDisplayName(actorUserId);
         setActivityToast(`${name} vient de créer une piste`);
       }
     };
@@ -5200,6 +5218,34 @@ export default function MapLibreMap() {
         if ((isGap || bucketChanged) && segment.length) {
           flush(prevBucket);
 
+      // Si après filtrage on n'a au final qu'un seul point pour cet utilisateur,
+      // créer un tout petit segment 2-points pour que la pointe de la trace
+      // arrive exactement sous le marker (comme pour la trace "me").
+      if (features.length === 0 && n === 1) {
+        const only = pts[0];
+        if (
+          only &&
+          typeof only.lng === 'number' &&
+          typeof only.lat === 'number' &&
+          typeof only.t === 'number' &&
+          Number.isFinite(only.t)
+        ) {
+          const lng = only.lng;
+          const lat = only.lat;
+          features.push({
+            type: 'Feature',
+            properties: { userId, color, inactive: isInactive ? 1 : 0, opacity: opacities[0] ?? 0.9 },
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [lng, lat],
+                [lng + 1e-9, lat + 1e-9],
+              ],
+            },
+          });
+        }
+      }
+
           // Si on change de bucket (mais pas de trou), dupliquer le point précédent pour éviter un trou visuel.
           if (!isGap && prevPoint) {
             segment.push(prevPoint, p);
@@ -5372,37 +5418,8 @@ export default function MapLibreMap() {
                 {(() => {
                   const id = selectedPoi.createdBy as string | undefined;
                   if (!id) return 'Créé par inconnu';
-
-                  const lines: string[] = [];
-                  let idx = 1;
-
-                  // Variante brute: identifiant
-                  lines.push(`${idx++}. id: ${id}`);
-
-                  // Si c'est l'utilisateur courant, afficher aussi ses infos connues
-                  if (user?.id && id === user.id) {
-                    if (user.displayName && user.displayName.trim()) {
-                      lines.push(`${idx++}. user.displayName: ${user.displayName.trim()}`);
-                    }
-                    const anyUser = user as any;
-                    if (anyUser && typeof anyUser.appUserId === 'string' && anyUser.appUserId.trim()) {
-                      lines.push(`${idx++}. user.appUserId: ${anyUser.appUserId.trim()}`);
-                    }
-                  }
-
-                  // Variante depuis la liste des membres de mission
-                  const memberName = memberNames[id];
-                  if (memberName && memberName.trim()) {
-                    lines.push(`${idx++}. memberNames[id]: ${memberName.trim()}`);
-                  }
-
-                  // Variante calculée par le helper global (fallbacks combinés)
-                  const resolved = getUserDisplayName(id);
-                  if (resolved && resolved.trim() && !lines.some((l) => l.endsWith(resolved.trim()))) {
-                    lines.push(`${idx++}. getUserDisplayName: ${resolved.trim()}`);
-                  }
-
-                  return lines.join('\n');
+                  const name = buildUserDisplayName(id);
+                  return `Créé par ${name}`;
                 })()}
               </div>
             </div>
@@ -5841,9 +5858,7 @@ export default function MapLibreMap() {
           </div>
         </div>
 
-        {typeof mission?.traceRetentionSeconds === 'number' &&
-        Number.isFinite(mission.traceRetentionSeconds) &&
-        historyWindowSeconds < mission.traceRetentionSeconds ? (
+        {false ? (
           <button
             type="button"
             onClick={() => {
