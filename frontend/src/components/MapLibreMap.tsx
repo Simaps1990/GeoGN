@@ -2089,7 +2089,7 @@ export default function MapLibreMap() {
     }
   }, [memberColors]);
 
-  // Load previously saved traces for this mission (self + others) once per mission.
+  // Load previously saved traces for this mission (ONLY others) once per mission.
   useEffect(() => {
     if (!selectedMissionId) {
       tracesLoadedRef.current = false;
@@ -2098,32 +2098,9 @@ export default function MapLibreMap() {
 
     if (tracesLoadedRef.current) return;
 
-    const selfKey = user?.id ? `geogn.trace.self.${selectedMissionId}.${user.id}` : null;
     const othersKey = `geogn.trace.others.${selectedMissionId}`;
 
     try {
-      if (selfKey) {
-        const rawSelf = localStorage.getItem(selfKey);
-        if (rawSelf) {
-          const parsed = JSON.parse(rawSelf) as { lng: number; lat: number; t: number }[];
-          if (Array.isArray(parsed)) {
-            const normalized = parsed
-              .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
-              .map((p) => ({
-                lng: p.lng,
-                lat: p.lat,
-                t: p.t < 1_000_000_000_000 ? p.t * 1000 : p.t,
-              }));
-
-            setTracePoints(() => normalized);
-            if (normalized.length) {
-              const last = normalized[normalized.length - 1];
-              setLastPos({ lng: last.lng, lat: last.lat });
-            }
-          }
-        }
-      }
-
       const rawOthers = localStorage.getItem(othersKey);
       if (rawOthers) {
         const parsed = JSON.parse(rawOthers) as Record<string, { lng: number; lat: number; t: number }[]>;
@@ -2158,6 +2135,12 @@ export default function MapLibreMap() {
 
     tracesLoadedRef.current = true;
   }, [selectedMissionId, user?.id]);
+
+  // À chaque changement de mission, réinitialiser immédiatement la dernière position locale
+  // pour éviter qu'un ancien point "fantôme" ne se recolore au reconnect.
+  useEffect(() => {
+    setLastPos(null);
+  }, [selectedMissionId]);
 
   useEffect(() => {
     if (!selectedMissionId) return;
@@ -4683,6 +4666,7 @@ export default function MapLibreMap() {
         otherTracesRef.current = { ...otherTracesRef.current, ...nextOthersTraces };
         return { ...prev, ...nextOthers };
       });
+      setOthersActivityTick((v) => (v + 1) % 1_000_000);
     };
 
     const applyRemotePosition = (msg: any) => {
@@ -4713,12 +4697,14 @@ export default function MapLibreMap() {
         otherColorsRef.current[msg.userId] = memberColor;
       }
       const now = normalizeRemoteTime(msg.t, Date.now());
+
       const traces = otherTracesRef.current[msg.userId] ?? [];
       const cutoff = Date.now() - traceRetentionMs;
       const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }]
         .filter((p) => p.t >= cutoff)
         .slice(-maxTracePoints);
       otherTracesRef.current[msg.userId] = nextTraces;
+      setOthersActivityTick((v) => (v + 1) % 1_000_000);
 
       setOtherPositions((prev) => ({
         ...prev,
@@ -4751,7 +4737,10 @@ export default function MapLibreMap() {
         delete next[msg.userId];
         return next;
       });
-      delete otherTracesRef.current[msg.userId];
+      if (otherTracesRef.current[msg.userId]) {
+        delete otherTracesRef.current[msg.userId];
+        setOthersActivityTick((v) => (v + 1) % 1_000_000);
+      }
     };
 
     socket.on('position:clear', onPosClear);

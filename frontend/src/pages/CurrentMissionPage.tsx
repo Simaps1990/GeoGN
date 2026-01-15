@@ -122,13 +122,8 @@ export default function CurrentMissionPage() {
     if (!selectedMissionId) return;
     setSavingSettings(true);
     try {
-      const payload: { title?: string } = {};
       const trimmedTitle = missionTitle.trim();
-      if (trimmedTitle && trimmedTitle !== mission?.title) {
-        payload.title = trimmedTitle;
-      }
-
-      if (!payload.title) return;
+      const payload: { title: string } = { title: trimmedTitle || (mission?.title ?? '') };
 
       const updated = await updateMission(selectedMissionId, payload);
       setMission(updated);
@@ -149,6 +144,7 @@ export default function CurrentMissionPage() {
         )
       );
       setMissionTitle(updated.title ?? missionTitle);
+      setShowSettings(false);
     } catch (e: any) {
       setError(e?.message ?? 'Erreur');
     } finally {
@@ -322,18 +318,18 @@ export default function CurrentMissionPage() {
             />
             <button
               type="button"
-              disabled={savingSettings}
-              onClick={() => void onSaveSettings()}
-              className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              Enregistrer
-            </button>
-            <button
-              type="button"
               onClick={() => void onClearTraces()}
               className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-red-500 text-sm font-semibold text-red-600 hover:bg-red-50"
             >
               Purger l'historique des points de la mission
+            </button>
+            <button
+              type="button"
+              disabled={savingSettings}
+              onClick={() => void onSaveSettings()}
+              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Valider
             </button>
           </div>
 
