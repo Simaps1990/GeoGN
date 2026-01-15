@@ -4820,7 +4820,7 @@ export default function MapLibreMap() {
         if (createdBy) {
           const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
           const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
-          setActivityToast(`[v-test] ${name} vient de créer une zone`);
+          setActivityToast(`${name} vient de créer une zone`);
         }
       } catch {
         // ignore
@@ -4843,7 +4843,7 @@ export default function MapLibreMap() {
       if (created && actorUserId) {
         const rawName = typeof msg.actorDisplayName === 'string' ? msg.actorDisplayName : null;
         const name = (rawName && rawName.trim()) || buildUserDisplayName(actorUserId);
-        setActivityToast(`[v-test] ${name} vient de créer une piste`);
+        setActivityToast(`${name} vient de créer une piste`);
       }
     };
 
@@ -6285,7 +6285,7 @@ export default function MapLibreMap() {
                             lastKnownWhen: e.target.value,
                           }))
                         }
-                        className="mt-1 h-10 w-full max-w-[180px] rounded-2xl border px-3 text-xs mx-auto"
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs"
                       />
                     </div>
                   </div>
@@ -6386,7 +6386,7 @@ export default function MapLibreMap() {
                               nextClueWhen: e.target.value,
                             }))
                           }
-                          className="mt-1 h-9 w-full max-w-[180px] rounded-2xl border px-2 text-xs mx-auto"
+                          className="mt-1 h-9 w-full rounded-2xl border px-2 text-xs"
                         />
                       </div>
                     </div>
