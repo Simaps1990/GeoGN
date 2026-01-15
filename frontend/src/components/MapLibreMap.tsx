@@ -4645,6 +4645,9 @@ export default function MapLibreMap() {
       const nextOthersTraces: Record<string, { lng: number; lat: number; t: number }[]> = {};
       for (const [userId, pts] of Object.entries(traces)) {
         if (!userId) continue;
+        // Ne jamais ranger la propre trace de l'utilisateur courant dans "others"
+        // pour éviter d'avoir un double rendu (trace self + trace grise "autre").
+        if (user?.id && userId === user.id) continue;
         if (!Array.isArray(pts) || pts.length === 0) continue;
         const filtered = pts
           .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number')
@@ -4787,7 +4790,7 @@ export default function MapLibreMap() {
         if (createdBy) {
           const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
           const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
-          setActivityToast(`[v-test] ${name} vient de créer un POI`);
+          setActivityToast(`${name} vient de créer un POI`);
         }
       } catch {
         // ignore
@@ -5166,7 +5169,13 @@ export default function MapLibreMap() {
     const inactiveAfterMs = 30_000;
     const inactiveColor = '#9ca3af';
     const features = Object.entries(otherTracesRef.current)
-      .filter(([userId, pts]) => !hiddenUserIds[userId] && Array.isArray(pts) && pts.length > 0)
+      .filter(([userId, pts]) => {
+        if (!Array.isArray(pts) || pts.length === 0) return false;
+        // Ne pas afficher "me" dans la couche des autres.
+        if (user?.id && userId === user.id) return false;
+        if (hiddenUserIds[userId]) return false;
+        return true;
+      })
       .map(([userId, pts]) => {
         const last = pts[pts.length - 1];
         if (!last || typeof last.lng !== 'number' || typeof last.lat !== 'number' || typeof last.t !== 'number') {
@@ -5207,6 +5216,8 @@ export default function MapLibreMap() {
     const opacities = [1, 0.8, 0.6, 0.4, 0.2];
 
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+      // Ne jamais rendre la trace "others" pour l'utilisateur courant.
+      if (user?.id && userId === user.id) continue;
       if (hiddenUserIds[userId]) continue;
       if (pts.length < 2) continue;
 
