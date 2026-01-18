@@ -10,6 +10,7 @@ export type ConfirmDialogOptions = {
   variant?: ConfirmVariant;
 };
 
+
 function ConfirmDialog(props: {
   open: boolean;
   options: ConfirmDialogOptions;
