@@ -448,6 +448,23 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
           lat: originLat,
           when: originWhen,
         };
+
+        // Recalcul requis si l'origine change.
+        updateUnset.cache = 1;
+        updateUnset.lastComputedAt = 1;
+      }
+
+      if (typeof body.startedAt === 'string' && body.startedAt.trim()) {
+        const d = new Date(body.startedAt);
+        if (Number.isNaN(d.getTime())) {
+          return reply.code(400).send({ error: 'INVALID_STARTED_AT' });
+        }
+        if (d.getTime() > Date.now()) {
+          return reply.code(400).send({ error: 'FUTURE_STARTED_AT' });
+        }
+        updateSet.startedAt = d;
+        updateUnset.cache = 1;
+        updateUnset.lastComputedAt = 1;
       }
 
       if (typeof body.status === 'string') {
