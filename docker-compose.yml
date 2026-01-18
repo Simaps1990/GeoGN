@@ -36,5 +36,48 @@ services:
     depends_on:
       - keycloak-db
 
+  # ----------------------------------------------------------------------------
+  # GeoGN traffic / road-graph stack (désactivée par défaut)
+  # Décommente et adapte ces services si tu souhaites tout lancer via
+  # docker-compose. Pour l'instant ils sont fournis uniquement à titre
+  # documentaire, afin d'expliquer l'architecture attendue.
+  #
+  # backend:
+  #   build: ./backend
+  #   depends_on:
+  #     - mongo
+  #     - road-graph
+  #   environment:
+  #     - TRAFFIC_PROVIDER=tomtom
+  #     - TOMTOM_API_KEY=changeme
+  #
+  # frontend:
+  #   build: ./frontend
+  #   depends_on:
+  #     - backend
+  #
+  # mongo:
+  #   image: mongo:7
+  #   volumes:
+  #     - mongo-data:/data/db
+  #
+  # road-graph:
+  #   image: your-org/road-graph:latest
+  #   # Ce microservice wrappe OSRM/Valhalla et expose:
+  #   #   GET /snap?lng=&lat=&profile=
+  #   #   GET /tile?z=&x=&y=&profile=
+  #   environment:
+  #     - ROAD_GRAPH_ENGINE=osrm
+  #     - OSRM_BASE_URL=http://osrm-backend:5000
+  #   depends_on:
+  #     - osrm-backend
+  #
+  # osrm-backend:
+  #   image: osrm/osrm-backend
+  #   command: "osrm-routed /data/region.osrm"
+  #   volumes:
+  #     - ./data/osrm:/data
+
 volumes:
   keycloak-db-data:
+  # mongo-data:

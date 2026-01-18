@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { PersonCaseModel } from '../models/personCase.js';
+import { VehicleTrackModel } from '../models/vehicleTrack.js';
 import { UserModel } from '../models/user.js';
 
 type PersonCaseBody = {
@@ -131,7 +132,26 @@ export async function personCasesRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      const res = await PersonCaseModel.deleteOne({ missionId });
+      const missionObjectId = new mongoose.Types.ObjectId(missionId);
+
+      // Cascade delete: when removing the person case, also remove all vehicle tracks
+      // (isochrone / road_graph) for the mission so nothing can persist in Mongo.
+      const existingTracks = await VehicleTrackModel.find({ missionId: missionObjectId })
+        .select({ _id: 1 })
+        .lean();
+
+      if (existingTracks.length) {
+        await VehicleTrackModel.deleteMany({ missionId: missionObjectId });
+        for (const t of existingTracks) {
+          app.io?.to(`mission:${missionId}`).emit('vehicle-track:deleted', {
+            missionId,
+            trackId: (t as any)._id.toString(),
+            actorUserId: req.userId,
+          });
+        }
+      }
+
+      const res = await PersonCaseModel.deleteOne({ missionId: missionObjectId });
       if ((res as any)?.deletedCount) {
         app.io?.to(`mission:${missionId}`).emit('person-case:deleted', { missionId, actorUserId: req.userId });
       }
@@ -207,6 +227,10 @@ export async function personCasesRoutes(app: FastifyInstance) {
       if (typeof body?.lastKnown?.when === 'string' && body.lastKnown.when.trim()) {
         const d = new Date(body.lastKnown.when);
         if (!Number.isNaN(d.getTime())) when = d;
+      }
+
+      if (when && when.getTime() > Date.now()) {
+        return reply.code(400).send({ error: 'FUTURE_WHEN' });
       }
 
       let nextClue: any = undefined;

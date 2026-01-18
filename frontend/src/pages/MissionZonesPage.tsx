@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CircleDot, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 
 export default function MissionZonesPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirmDialog();
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +123,56 @@ export default function MissionZonesPage() {
     }
   }
 
+  async function flushOfflineActions() {
+    if (!missionId) return;
+    if (!navigator.onLine) return;
+    const key = `geogn.pendingActions.${missionId}`;
+    let list: any[] = [];
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      list = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return;
+    }
+    if (!list.length) return;
+
+    const remaining: any[] = [];
+    for (const a of list) {
+      if (!a || a.entity !== 'zone' || !a.op || typeof a.id !== 'string') {
+        remaining.push(a);
+        continue;
+      }
+      try {
+        if (a.op === 'update') {
+          await updateZone(missionId, a.id, a.payload ?? {});
+          continue;
+        }
+        if (a.op === 'delete') {
+          await deleteZone(missionId, a.id);
+          continue;
+        }
+        remaining.push(a);
+      } catch {
+        remaining.push(a);
+      }
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify(remaining.slice(-5000)));
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (!missionId) return;
+    void flushOfflineActions();
+    const onOnline = () => void flushOfflineActions();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [missionId]);
+
   async function setZoneGrid(zoneId: string, nextGrid: ApiZone['grid']) {
     if (!missionId) return;
     setGridErrorByZoneId((prev) => {
@@ -151,6 +203,7 @@ export default function MissionZonesPage() {
 
   return (
     <div className="p-4 pb-24">
+      {dialog}
       <h1 className="text-xl font-bold text-gray-900">Gestion des Zones</h1>
       {loading ? (
         <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
@@ -366,7 +419,13 @@ export default function MissionZonesPage() {
                           disabled={!missionId || busyId === z.id}
                           onClick={async () => {
                             if (!missionId) return;
-                            const ok = window.confirm('Supprimer cette zone ?');
+                            const ok = await confirm({
+                              title: 'Supprimer cette zone ?',
+                              message: 'Cette action est définitive.',
+                              confirmText: 'Supprimer',
+                              cancelText: 'Annuler',
+                              variant: 'danger',
+                            });
                             if (!ok) return;
                             setBusyId(z.id);
                             try {

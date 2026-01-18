@@ -22,6 +22,7 @@ import {
   HelpCircle,
   House,
   Layers,
+  Loader2,
   MapPin,
   Mic,
   Navigation2,
@@ -62,11 +63,19 @@ import {
   updatePoi,
   updateZone,
   updateMission,
+  createVehicleTrack,
+  listVehicleTracks,
+  deleteVehicleTrack,
+  getVehicleTrackState,
   type ApiMission,
   type ApiPoi,
   type ApiPersonCase,
   type ApiZone,
+  type ApiVehicleTrack,
+  type ApiVehicleTrackStatus,
+  type ApiVehicleTrackVehicleType,
 } from '../lib/api';
+import { useConfirmDialog } from './ConfirmDialog';
 import {
   DiseaseId,
   InjuryId,
@@ -143,6 +152,8 @@ function cloneStyle<T>(style: T): T {
     return JSON.parse(JSON.stringify(style)) as T;
   }
 }
+
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: number, steps = 64) {
   const latRad = (center.lat * Math.PI) / 180;
@@ -398,8 +409,10 @@ export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirmDialog();
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastSnapshotAtRef = useRef<number>(0);
+  const lastHiddenAtRef = useRef<number | null>(null);
   const pendingBulkRef = useRef<{
     lng: number;
     lat: number;
@@ -494,6 +507,17 @@ export default function MapLibreMap() {
   // Compteur de version du style de carte pour forcer la resynchro des overlays (dont la zone d'estimation)
   const [styleVersion, setStyleVersion] = useState(0);
 
+  const ts = () => {
+    try {
+      const d = new Date();
+      const p2 = (n: number) => String(n).padStart(2, '0');
+      const p3 = (n: number) => String(n).padStart(3, '0');
+      return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+    } catch {
+      return '';
+    }
+  };
+
   useEffect(() => {
     if (!navPickerTarget) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -555,7 +579,65 @@ export default function MapLibreMap() {
   const [personError, setPersonError] = useState<string | null>(null);
   const [personCase, setPersonCase] = useState<ApiPersonCase | null>(null);
   const [personEdit, setPersonEdit] = useState(false);
+  const [confirmDeletePersonCaseOpen, setConfirmDeletePersonCaseOpen] = useState(false);
   const [estimationNowMs, setEstimationNowMs] = useState<number>(() => Date.now());
+
+  const onConfirmDeletePersonCase = async () => {
+    if (!selectedMissionId || !personCase) return;
+    setConfirmDeletePersonCaseOpen(false);
+    setPersonLoading(true);
+    setPersonError(null);
+    try {
+      await deletePersonCase(selectedMissionId);
+
+      try {
+        const { tracks } = await listVehicleTracks(selectedMissionId, {
+          limit: 200,
+          offset: 0,
+        });
+        for (const t of tracks) {
+          try {
+            await deleteVehicleTrack(selectedMissionId, t.id);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      setVehicleTracks([]);
+      setVehicleTracksTotal(0);
+      setVehicleTrackGeojsonById({});
+      setActiveVehicleTrackId(null);
+      clearVehicleTrackVisual('person-case-deleted');
+      setPersonCase(null);
+      setPersonEdit(true);
+      setPersonDraft({
+        lastKnownQuery: '',
+        lastKnownType: 'address',
+        lastKnownPoiId: undefined,
+        lastKnownLng: undefined,
+        lastKnownLat: undefined,
+        lastKnownWhen: '',
+        mobility: 'none',
+        age: '',
+        sex: 'unknown',
+        healthStatus: 'stable',
+        diseases: [],
+        diseasesFreeText: '',
+        injuries: [],
+        injuriesFreeText: '',
+      });
+      setShowEstimationHeatmap(false);
+      const map = mapInstanceRef.current;
+      if (map && mapReady) applyHeatmapVisibility(map, false);
+    } catch (e: any) {
+      setPersonError(e?.message ?? 'Erreur');
+    } finally {
+      setPersonLoading(false);
+    }
+  };
   const [personDraft, setPersonDraft] = useState<{
     lastKnownQuery: string;
     lastKnownType: 'address' | 'poi';
@@ -563,12 +645,6 @@ export default function MapLibreMap() {
     lastKnownLng?: number;
     lastKnownLat?: number;
     lastKnownWhen: string;
-    nextClueQuery: string;
-    nextClueType: 'address' | 'poi';
-    nextCluePoiId?: string;
-    nextClueLng?: number;
-    nextClueLat?: number;
-    nextClueWhen: string;
     mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
     age: string;
     sex: 'unknown' | 'female' | 'male';
@@ -584,12 +660,6 @@ export default function MapLibreMap() {
     lastKnownLng: undefined,
     lastKnownLat: undefined,
     lastKnownWhen: '',
-    nextClueQuery: '',
-    nextClueType: 'address',
-    nextCluePoiId: undefined,
-    nextClueLng: undefined,
-    nextClueLat: undefined,
-    nextClueWhen: '',
     mobility: 'none',
     age: '',
     sex: 'unknown',
@@ -635,10 +705,6 @@ export default function MapLibreMap() {
   const [lastKnownAddressSuggestions, setLastKnownAddressSuggestions] = useState<
     { label: string; lng: number; lat: number }[]
   >([]);
-  const [nextClueSuggestionsOpen, setNextClueSuggestionsOpen] = useState(false);
-  const [nextClueAddressSuggestions, setNextClueAddressSuggestions] = useState<
-    { label: string; lng: number; lat: number }[]
-  >([]);
 
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState<string | null>(null);
@@ -658,6 +724,206 @@ export default function MapLibreMap() {
   const [showEstimationHeatmap, setShowEstimationHeatmap] = useState<boolean>(true);
   const showEstimationHeatmapRef = useRef(true);
   const personPanelOpenRef = useRef(false);
+  const lastKnownWhenInputRef = useRef<HTMLInputElement | null>(null);
+  const vehicleTrackAnimFrameRef = useRef<number | null>(null);
+  const vehicleTrackPrevGeojsonRef = useRef<any>(null);
+  const vehicleTrackPrevKeyRef = useRef<string | null>(null);
+  const vehicleTrackPendingGeojsonRef = useRef<any>(null);
+  const vehicleTrackPendingKeyRef = useRef<string | null>(null);
+  const vehicleTrackPendingAttemptsRef = useRef<number>(0);
+  const vehicleTrackPendingTimerRef = useRef<number | null>(null);
+  const vehicleTrackLastAppliedGeojsonRef = useRef<any>(null);
+  const vehicleTrackMorphFrameRef = useRef<number | null>(null);
+  const vehicleTrackMorphDelayTimerRef = useRef<number | null>(null);
+  const vehicleTrackMorphKeyRef = useRef<string | null>(null);
+
+  const showActiveVehicleTrackRef = useRef<boolean>(true);
+  const activeVehicleTrackIdRef = useRef<string | null>(null);
+  const vehicleTrackGeojsonByIdRef = useRef<Record<string, GeoJSON.FeatureCollection>>({});
+
+  const reapplyVehicleTrackIfPending = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (!showActiveVehicleTrackRef.current) return;
+    if (!vehicleTrackPendingGeojsonRef.current || !vehicleTrackPendingKeyRef.current) return;
+    const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+    if (!src) return;
+    try {
+      src.setData(vehicleTrackPendingGeojsonRef.current as any);
+    } catch {
+      // ignore
+    }
+  };
+
+  const clearPendingVehicleTrack = () => {
+    vehicleTrackPendingGeojsonRef.current = null;
+    vehicleTrackPendingKeyRef.current = null;
+    vehicleTrackPendingAttemptsRef.current = 0;
+    if (vehicleTrackPendingTimerRef.current != null) {
+      try {
+        window.clearTimeout(vehicleTrackPendingTimerRef.current);
+      } catch {
+        // ignore
+      }
+      vehicleTrackPendingTimerRef.current = null;
+    }
+  };
+
+  const clearVehicleTrackVisual = (reason: string) => {
+    clearPendingVehicleTrack();
+    if (vehicleTrackMorphFrameRef.current != null) {
+      try {
+        cancelAnimationFrame(vehicleTrackMorphFrameRef.current);
+      } catch {
+        // ignore
+      }
+      vehicleTrackMorphFrameRef.current = null;
+    }
+    if (vehicleTrackMorphDelayTimerRef.current != null) {
+      try {
+        window.clearTimeout(vehicleTrackMorphDelayTimerRef.current);
+      } catch {
+        // ignore
+      }
+      vehicleTrackMorphDelayTimerRef.current = null;
+    }
+    vehicleTrackMorphKeyRef.current = null;
+    vehicleTrackPrevGeojsonRef.current = null;
+    vehicleTrackPrevKeyRef.current = null;
+    vehicleTrackLastAppliedGeojsonRef.current = null;
+
+    try {
+      const map = mapInstanceRef.current;
+      if (map) {
+        const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+        if (src) {
+          src.setData(EMPTY_FC as any);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[vehicle-track]', ts(), 'visual cleared', { reason });
+    } catch {
+      // ignore
+    }
+  };
+
+  const [vehicleTracks, setVehicleTracks] = useState<ApiVehicleTrack[]>([]);
+  const [vehicleTracksTotal, setVehicleTracksTotal] = useState(0);
+  // Indique si la liste des pistes véhicule a déjà été chargée au moins une fois
+  // pour la mission courante durant cette session.
+  const [vehicleTracksLoaded, setVehicleTracksLoaded] = useState(false);
+  const [vehicleTracksQuery, setVehicleTracksQuery] = useState<{
+    status?: ApiVehicleTrackStatus;
+    vehicleType?: ApiVehicleTrackVehicleType;
+    q: string;
+    limit: number;
+    offset: number;
+  }>({ status: undefined, vehicleType: undefined, q: '', limit: 20, offset: 0 });
+
+  // ID de la piste véhicule actuellement affichée sur la carte (persistée pour survivre aux rechargements).
+  const [activeVehicleTrackId, setActiveVehicleTrackId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const stored = window.localStorage.getItem('gtc_activeVehicleTrackId');
+      return stored && stored !== '' ? stored : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Contrôle de visibilité du tracé actif (lié au bouton Paw, persisté).
+  const [showActiveVehicleTrack, setShowActiveVehicleTrack] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const stored = window.localStorage.getItem('gtc_showActiveVehicleTrack');
+      if (stored === 'false') return false;
+      if (stored === 'true') return true;
+      return true;
+    } catch {
+      return true;
+    }
+  });
+  const [vehicleTrackGeojsonById, setVehicleTrackGeojsonById] = useState<Record<string, GeoJSON.FeatureCollection>>({});
+
+  useEffect(() => {
+    showActiveVehicleTrackRef.current = showActiveVehicleTrack;
+  }, [showActiveVehicleTrack]);
+
+  useEffect(() => {
+    activeVehicleTrackIdRef.current = activeVehicleTrackId;
+  }, [activeVehicleTrackId]);
+
+  useEffect(() => {
+    vehicleTrackGeojsonByIdRef.current = vehicleTrackGeojsonById;
+  }, [vehicleTrackGeojsonById]);
+
+  const isTestTrack = (track: ApiVehicleTrack | null | undefined): boolean => {
+    if (!track) return false;
+    if (track.algorithm === 'road_graph') return true;
+    return !!track.label && /TEST/i.test(track.label);
+  };
+
+  const filterAllowedVehicleTracks = (tracks: ApiVehicleTrack[]): ApiVehicleTrack[] => tracks.filter((t) => isTestTrack(t));
+
+  const activeVehicleTrack = useMemo(() => {
+    if (!activeVehicleTrackId) return null;
+    const found = vehicleTracks.find((t) => t.id === activeVehicleTrackId) ?? null;
+    if (!found) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[vehicle-track] active track not found in list', {
+          activeVehicleTrackId,
+          totalTracks: vehicleTracks.length,
+        });
+      } catch {
+        // ignore
+      }
+    }
+    return found;
+  }, [activeVehicleTrackId, vehicleTracks]);
+
+  const hasActiveTestVehicleTrack = !!(activeVehicleTrack && isTestTrack(activeVehicleTrack));
+
+  // Persiste les changements d'ID actif / visibilité dans localStorage.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (activeVehicleTrackId) {
+        window.localStorage.setItem('gtc_activeVehicleTrackId', activeVehicleTrackId);
+      } else {
+        window.localStorage.removeItem('gtc_activeVehicleTrackId');
+      }
+    } catch {
+      // ignore
+    }
+  }, [activeVehicleTrackId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('gtc_showActiveVehicleTrack', showActiveVehicleTrack ? 'true' : 'false');
+    } catch {
+      // ignore
+    }
+  }, [showActiveVehicleTrack]);
+
+  useEffect(() => {
+    return () => {
+      if (vehicleTrackAnimFrameRef.current != null) {
+        cancelAnimationFrame(vehicleTrackAnimFrameRef.current);
+        vehicleTrackAnimFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  // road_graph est désactivé pour l'instant : on ne montre plus le bandeau de chargement.
+  const roadGraphWarmingUp = false;
 
   useEffect(() => {
     showEstimationHeatmapRef.current = showEstimationHeatmap;
@@ -667,36 +933,40 @@ export default function MapLibreMap() {
     personPanelOpenRef.current = personPanelOpen;
 
     const map = mapInstanceRef.current;
-    if (!map || !mapReady) return;
-    // Heatmap visible seulement si le panneau est ouvert, qu'une fiche existe
-    // ET que le toggle utilisateur est à true.
-    applyHeatmapVisibility(map, personPanelOpen && !!personCase && showEstimationHeatmapRef.current);
+    if (!map) return;
+    if (!mapReady) return;
+    const isPedestrian = (personCase?.mobility ?? 'none') === 'none';
+    // Heatmap/zone visible seulement si le panneau est ouvert, qu'une fiche existe,
+    // que la mobilité est piétonne et que le toggle utilisateur est à true.
+    applyHeatmapVisibility(
+      map,
+      personPanelOpen && !!personCase && isPedestrian && showEstimationHeatmapRef.current
+    );
   }, [personPanelOpen, personCase, mapReady]);
 
   const lastKnownPoiSuggestions = useMemo(() => {
-    const q = personDraft.lastKnownQuery.trim().toLowerCase();
+    const q = (personDraft.lastKnownQuery ?? '').trim().toLowerCase();
     if (!q) return [] as ApiPoi[];
-    return pois
-      .filter((p) => (p.title ?? '').toLowerCase().includes(q))
-      .slice(0, 5);
+    const out: ApiPoi[] = [];
+    const seen = new Set<string>();
+    for (const p of pois) {
+      if (!p?.id || seen.has(p.id)) continue;
+      if (!((p.title ?? '').toLowerCase().includes(q))) continue;
+      seen.add(p.id);
+      out.push(p);
+      if (out.length >= 5) break;
+    }
+    return out;
   }, [personDraft.lastKnownQuery, pois]);
 
-  const nextCluePoiSuggestions = useMemo(() => {
-    const q = personDraft.nextClueQuery.trim().toLowerCase();
-    if (!q) return [] as ApiPoi[];
-    return pois
-      .filter((p) => (p.title ?? '').toLowerCase().includes(q))
-      .slice(0, 5);
-  }, [personDraft.nextClueQuery, pois]);
-
   useEffect(() => {
-    if (personDraft.mobility === 'none') return;
+    if (normalizeMobility(personDraft.mobility as any) === 'none') return;
     setDiseasesOpen(false);
     setInjuriesOpen(false);
   }, [personDraft.mobility]);
 
   useEffect(() => {
-    const q = personDraft.lastKnownQuery.trim();
+    const q = (personDraft.lastKnownQuery ?? '').trim();
     if (!lastKnownSuggestionsOpen) return;
     if (!q) {
       setLastKnownAddressSuggestions([]);
@@ -741,47 +1011,6 @@ export default function MapLibreMap() {
       window.clearTimeout(t);
     };
   }, [personDraft.lastKnownQuery, lastKnownSuggestionsOpen]);
-
-  useEffect(() => {
-    const q = personDraft.nextClueQuery.trim();
-    if (!nextClueSuggestionsOpen) return;
-    if (!q) {
-      setNextClueAddressSuggestions([]);
-      return;
-    }
-
-    let cancelled = false;
-    const t = window.setTimeout(() => {
-      (async () => {
-        try {
-          const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=5`;
-          const res = await fetch(url);
-          if (!res.ok) return;
-          const data = await res.json().catch(() => null);
-          if (cancelled) return;
-          const feats = Array.isArray(data?.features) ? data.features : [];
-          const next = feats
-            .map((f: any) => {
-              const label = f?.properties?.label;
-              const coords = f?.geometry?.coordinates;
-              const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
-              const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
-              if (!label || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-              return { label: String(label), lng, lat };
-            })
-            .filter(Boolean);
-          setNextClueAddressSuggestions(next as any);
-        } catch {
-          if (!cancelled) setNextClueAddressSuggestions([]);
-        }
-      })();
-    }, 300);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [personDraft.nextClueQuery, nextClueSuggestionsOpen]);
 
   useEffect(() => {
     if (!personPanelOpen) return;
@@ -1050,12 +1279,7 @@ export default function MapLibreMap() {
       );
     }
     const hasSecondClue =
-      typeof personDraft.nextClueLng === 'number' && typeof personDraft.nextClueLat === 'number';
-    if (hasSecondClue) {
-      reasoning.push(
-        "Un second indice permet de restreindre la zone probable dans un couloir de déplacement entre les deux points."
-      );
-    }
+      false;
     if (
       personCase.mobility === 'car' ||
       personCase.mobility === 'motorcycle' ||
@@ -1089,9 +1313,6 @@ export default function MapLibreMap() {
     personCase,
     weather,
     estimationNowMs,
-    personDraft.nextClueLng,
-    personDraft.nextClueLat,
-    personDraft.nextClueWhen,
   ]);
 
   useEffect(() => {
@@ -1102,8 +1323,17 @@ export default function MapLibreMap() {
     const src = map.getSource('person-estimation') as GeoJSONSource | undefined;
     if (!src) return;
 
-    if (!personCase || !estimation) {
-      src.setData({ type: 'FeatureCollection', features: [] });
+    const est = estimation;
+
+    // Règle métier :
+    // - Afficher le disque d'estimation si la mobilité est piétonne;
+    // - OU si un suivi véhicule non-TEST est actif;
+    // - Ne jamais l'afficher pour une piste TEST seule.
+    const isPedestrian = (personCase?.mobility ?? 'none') === 'none';
+    const hasActiveNonTestVehicle = !!(activeVehicleTrack && !isTestTrack(activeVehicleTrack));
+
+    if (!est || !personCase || (!isPedestrian && !hasActiveNonTestVehicle)) {
+      src.setData({ type: 'FeatureCollection', features: [] } as any);
       return;
     }
 
@@ -1207,38 +1437,8 @@ export default function MapLibreMap() {
     const src = map.getSource('person-estimation-corridor') as GeoJSONSource | undefined;
     if (!src) return;
 
-    const last = personCase?.lastKnown;
-    const aLng = typeof last?.lng === 'number' ? last!.lng : null;
-    const aLat = typeof last?.lat === 'number' ? last!.lat : null;
-    const bLng = typeof personDraft.nextClueLng === 'number' ? personDraft.nextClueLng : null;
-    const bLat = typeof personDraft.nextClueLat === 'number' ? personDraft.nextClueLat : null;
-
-    if (aLng === null || aLat === null || bLng === null || bLat === null) {
-      src.setData({ type: 'FeatureCollection', features: [] } as any);
-      return;
-    }
-
-    const ring = buildCorridorEllipseRing(
-      { lng: aLng, lat: aLat },
-      { lng: bLng, lat: bLat },
-      { baseWidthKm: 0.3, dispersionScaleKm: 0.7 }
-    );
-    if (!ring) {
-      src.setData({ type: 'FeatureCollection', features: [] } as any);
-      return;
-    }
-
-    src.setData({
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [ring] },
-          properties: {},
-        },
-      ],
-    } as any);
-  }, [mapReady, personCase?.lastKnown?.lng, personCase?.lastKnown?.lat, personDraft.nextClueLng, personDraft.nextClueLat]);
+    src.setData({ type: 'FeatureCollection', features: [] } as any);
+  }, [mapReady, personCase?.lastKnown?.lng, personCase?.lastKnown?.lat]);
 
   const poiColorOptions = useMemo(
     () => [
@@ -1395,6 +1595,20 @@ export default function MapLibreMap() {
     }
   };
 
+  type MobilityUi = ApiPersonCase['mobility'] | 'car_test' | 'motorcycle_test' | 'scooter_test' | 'truck_test' | 'bike_test';
+
+  const normalizeMobility = (m: MobilityUi): ApiPersonCase['mobility'] => {
+    if (m === 'car_test') return 'car';
+    if (m === 'motorcycle_test') return 'motorcycle';
+    if (m === 'scooter_test') return 'scooter';
+    if (m === 'truck_test') return 'car';
+    if (m === 'bike_test') return 'bike';
+    return m;
+  };
+
+  const isMobilityTest = (m: MobilityUi): boolean =>
+    m === 'car_test' || m === 'motorcycle_test' || m === 'scooter_test' || m === 'truck_test' || m === 'bike_test';
+
   const sexLabel = (s: ApiPersonCase['sex']) => {
     if (s === 'female') return 'Femme';
     if (s === 'male') return 'Homme';
@@ -1457,6 +1671,110 @@ export default function MapLibreMap() {
   }, [selectedMissionId, mission?.id, personPanelOpen, personEdit]);
 
   useEffect(() => {
+    if (!selectedMissionId) {
+      setVehicleTracks([]);
+      setVehicleTracksTotal(0);
+      setActiveVehicleTrackId(null);
+      setVehicleTracksLoaded(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const missionIdAtCall = selectedMissionId;
+        const { tracks, total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
+        if (cancelled) return;
+
+        setVehicleTracksLoaded(true);
+        const filtered = filterAllowedVehicleTracks(tracks);
+        setVehicleTracks(filtered);
+        setVehicleTracksTotal(filtered.length);
+
+        // Si la mission n'a plus aucune piste, on nettoie complètement l'état
+        // associé aux suivis pour éviter qu'une géométrie ancienne reste
+        // accrochée dans la carte ou dans la mémoire React.
+        if (!filtered.length) {
+          if (activeVehicleTrackId) {
+            setActiveVehicleTrackId(null);
+          }
+          if (Object.keys(vehicleTrackGeojsonById).length > 0) {
+            setVehicleTrackGeojsonById({});
+          }
+          return;
+        }
+
+        const currentId = activeVehicleTrackId;
+        // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
+        // existe encore côté API, on conserve l'ID. (Le status peut transiter,
+        // et un reset à null fait disparaître la forme avant le prochain isochrone.)
+        const stillExists = currentId ? tracks.some((t) => t.id === currentId) : false;
+        let nextActiveId = currentId && stillExists ? currentId : null;
+
+        if (!nextActiveId) {
+          // Fallback : on prend la première piste autorisée (TEST) si aucune piste
+          // n'est marquée explicitement "active".
+          const active = tracks.find((t) => t.status === 'active');
+          nextActiveId = active?.id ?? (filtered[0]?.id ?? null);
+        }
+
+        if (!nextActiveId) {
+          // Aucune piste active trouvée : on s'assure de bien
+          // réinitialiser l'ID actif pour éviter qu'une ancienne
+          // piste supprimée ou stoppée ne revienne par erreur.
+          if (activeVehicleTrackId) {
+            setActiveVehicleTrackId(null);
+          }
+        } else {
+          if (nextActiveId !== activeVehicleTrackId) {
+            setActiveVehicleTrackId(nextActiveId);
+          }
+
+          if (!vehicleTrackGeojsonById[nextActiveId]) {
+            try {
+              const state = await getVehicleTrackState(missionIdAtCall, nextActiveId);
+              if (cancelled) return;
+              if (missionIdAtCall !== selectedMissionId) return;
+
+              const cacheGeo = state.cache?.payloadGeojson;
+              const provider = (state.cache?.meta as any)?.provider as string | undefined;
+              const track = tracks.find((t) => t.id === nextActiveId) ?? null;
+              const isTest = isTestTrack(track as any);
+              const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+
+              if (cacheGeo && (!isTest || allowTomtom)) {
+                setVehicleTrackGeojsonById((prev) => ({
+                  ...prev,
+                  [nextActiveId!]: cacheGeo as any,
+                }));
+              }
+            } catch {
+              if (cancelled) return;
+              // non bloquant
+            }
+          }
+        }
+      } catch {
+        if (cancelled) return;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedMissionId,
+    vehicleTracksQuery.status,
+    vehicleTracksQuery.vehicleType,
+    vehicleTracksQuery.q,
+    vehicleTracksQuery.limit,
+    vehicleTracksQuery.offset,
+    activeVehicleTrackId,
+    vehicleTrackGeojsonById,
+  ]);
+
+  useEffect(() => {
     if (!personPanelOpen) return;
     if (!selectedMissionId) return;
     if (!mission) return;
@@ -1481,12 +1799,6 @@ export default function MapLibreMap() {
               lastKnownLng: undefined,
               lastKnownLat: undefined,
               lastKnownWhen: '',
-              nextClueQuery: '',
-              nextClueType: 'address',
-              nextCluePoiId: undefined,
-              nextClueLng: undefined,
-              nextClueLat: undefined,
-              nextClueWhen: '',
               mobility: 'none',
               age: '',
               sex: 'unknown',
@@ -1509,12 +1821,6 @@ export default function MapLibreMap() {
           lastKnownLng: typeof c.lastKnown.lng === 'number' ? c.lastKnown.lng : undefined,
           lastKnownLat: typeof c.lastKnown.lat === 'number' ? c.lastKnown.lat : undefined,
           lastKnownWhen: c.lastKnown.when ? c.lastKnown.when.slice(0, 16) : '',
-          nextClueQuery: c.nextClue?.query ?? '',
-          nextClueType: c.nextClue?.type ?? 'address',
-          nextCluePoiId: c.nextClue?.poiId,
-          nextClueLng: typeof c.nextClue?.lng === 'number' ? c.nextClue!.lng : undefined,
-          nextClueLat: typeof c.nextClue?.lat === 'number' ? c.nextClue!.lat : undefined,
-          nextClueWhen: c.nextClue?.when ? c.nextClue.when.slice(0, 16) : '',
           mobility: c.mobility,
           age: c.age === null || typeof c.age !== 'number' ? '' : String(c.age),
           sex: c.sex,
@@ -1553,6 +1859,12 @@ export default function MapLibreMap() {
   const [timerSaving, setTimerSaving] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
 
+  const nowLocalMinute = useMemo(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
+
   // Toast discret pour informer qu'aucune projection n'est active
   const [noProjectionToast, setNoProjectionToast] = useState(false);
 
@@ -1562,10 +1874,22 @@ export default function MapLibreMap() {
   const activityToastHideRef = useRef<number | null>(null);
 
   const [historyWindowSeconds, setHistoryWindowSeconds] = useState(1800);
+  const historyWindowUserSetRef = useRef(false);
 
   useEffect(() => {
+    historyWindowUserSetRef.current = false;
     setHistoryWindowSeconds(1800);
   }, [selectedMissionId]);
+
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    if (historyWindowUserSetRef.current) return;
+    const s = mission?.traceRetentionSeconds;
+    const sec = typeof s === 'number' && Number.isFinite(s) ? Math.max(0, Math.floor(s)) : null;
+    if (sec === null) return;
+    const capped = Math.min(3600, sec);
+    if (capped > 0) setHistoryWindowSeconds(capped);
+  }, [selectedMissionId, mission?.traceRetentionSeconds]);
 
   useEffect(() => {
     if (!noProjectionToast) return;
@@ -1845,6 +2169,7 @@ export default function MapLibreMap() {
     setTimerSaving(true);
     setTimerError(null);
     try {
+      const prevRetentionForEvent = typeof mission?.traceRetentionSeconds === 'number' ? mission.traceRetentionSeconds : null;
       const trimmed = timerSecondsInput.trim();
       const parsed = trimmed ? Number(trimmed) : NaN;
       if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
@@ -1855,9 +2180,41 @@ export default function MapLibreMap() {
       const updated = await updateMission(selectedMissionId, { traceRetentionSeconds: nextRetention });
       const merged = { ...(mission ?? {}), ...(updated ?? {}) } as any;
       setMission(merged);
+
+      // Garder la fenêtre snapshot alignée sur la rétention mission.
+      // (Sinon un snapshot demandé avec 1800s peut "rétrécir" la trace localement.)
+      historyWindowUserSetRef.current = false;
+      const nextWindowSeconds = Math.min(3600, Math.max(0, nextRetention));
+      if (nextWindowSeconds > 0) {
+        setHistoryWindowSeconds(nextWindowSeconds);
+        const socket = socketRef.current;
+        if (socket) {
+          try {
+            socket.emit('mission:join', { missionId: selectedMissionId, retentionSeconds: nextWindowSeconds });
+          } catch {
+            // ignore
+          }
+          try {
+            socket.emit('mission:snapshot:request', { missionId: selectedMissionId });
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       setTimerModalOpen(false);
       try {
-        window.dispatchEvent(new CustomEvent('geotacops:mission:updated', { detail: { mission: merged } }));
+        window.dispatchEvent(
+          new CustomEvent('geotacops:mission:updated', {
+            detail: {
+              mission: merged,
+              prevTraceRetentionSeconds: prevRetentionForEvent,
+              traceRetentionSeconds: typeof merged?.traceRetentionSeconds === 'number' ? merged.traceRetentionSeconds : null,
+              actorUserId: typeof user?.id === 'string' ? user.id : null,
+              actorDisplayName: typeof user?.displayName === 'string' ? user.displayName : null,
+            },
+          })
+        );
       } catch {
         // ignore
       }
@@ -1975,6 +2332,24 @@ export default function MapLibreMap() {
           : null;
       if (nextRetention === null) return;
 
+      try {
+        const prevFromMsg =
+          typeof msg.prevTraceRetentionSeconds === 'number' && Number.isFinite(msg.prevTraceRetentionSeconds)
+            ? msg.prevTraceRetentionSeconds
+            : null;
+        const actorUserId = typeof msg.actorUserId === 'string' ? msg.actorUserId : null;
+        const rawName = typeof msg.actorDisplayName === 'string' ? msg.actorDisplayName : null;
+        const name = (rawName && rawName.trim()) || (actorUserId ? buildUserDisplayName(actorUserId) : null);
+
+        const prevFallback = mission?.traceRetentionSeconds;
+        const prev = prevFromMsg ?? (typeof prevFallback === 'number' ? prevFallback : null);
+        if (name && typeof prev === 'number' && prev !== nextRetention) {
+          setActivityToast(`${name} vient de passer le temps de suivi de ${prev} secondes à ${nextRetention} secondes`);
+        }
+      } catch {
+        // ignore
+      }
+
       setMission((prev) => {
         const prevRetention = prev?.traceRetentionSeconds;
         const next = prev ? { ...prev, traceRetentionSeconds: nextRetention } : prev;
@@ -1995,7 +2370,13 @@ export default function MapLibreMap() {
     const onMissionUpdatedWindow = (e: any) => {
       const m = e?.detail?.mission as ApiMission | undefined;
       if (!m || m.id !== selectedMissionId) return;
-      onMissionUpdated({ missionId: m.id, traceRetentionSeconds: m.traceRetentionSeconds });
+      onMissionUpdated({
+        missionId: m.id,
+        traceRetentionSeconds: e?.detail?.traceRetentionSeconds ?? m.traceRetentionSeconds,
+        prevTraceRetentionSeconds: e?.detail?.prevTraceRetentionSeconds,
+        actorUserId: e?.detail?.actorUserId,
+        actorDisplayName: e?.detail?.actorDisplayName,
+      });
     };
 
     socket.on('mission:updated', onMissionUpdated);
@@ -2004,7 +2385,7 @@ export default function MapLibreMap() {
       socket.off('mission:updated', onMissionUpdated);
       window.removeEventListener('geotacops:mission:updated', onMissionUpdatedWindow as any);
     };
-  }, [selectedMissionId]);
+  }, [selectedMissionId, mission, historyWindowSeconds]);
 
   useEffect(() => {
     const onMissionUpdated = (e: Event) => {
@@ -2165,6 +2546,19 @@ export default function MapLibreMap() {
     const socket = socketRef.current;
     const onSocketEvent = (msg: any) => {
       const missionId = typeof msg?.missionId === 'string' ? msg.missionId : undefined;
+
+      try {
+        if (missionId && missionId === selectedMissionId) {
+          const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
+          const rawName = typeof msg?.actorDisplayName === 'string' ? msg.actorDisplayName : null;
+          const name = (rawName && rawName.trim()) || (actorUserId ? buildUserDisplayName(actorUserId) : null);
+          if (name) {
+            setActivityToast(`${name} vient de vider la trame de la mission`);
+          }
+        }
+      } catch {
+        // ignore
+      }
       clearLocalTraces(missionId);
     };
 
@@ -2672,6 +3066,12 @@ export default function MapLibreMap() {
     safeMoveToTop('zones-grid-lines');
     safeMoveToTop('zones-grid-labels');
 
+    // Zones véhicule (doivent rester sous les POI/traces mais au-dessus du fond)
+    safeMoveToTop('vehicle-track-reached-prev-fill');
+    safeMoveToTop('vehicle-track-reached-prev-outline');
+    safeMoveToTop('vehicle-track-reached-fill');
+    safeMoveToTop('vehicle-track-reached-outline');
+
     // Zone d'estimation (doit rester sous les points/POI)
     safeMoveToTop('person-estimation-outer-fill');
     safeMoveToTop('person-estimation-inner-fill');
@@ -2687,8 +3087,10 @@ export default function MapLibreMap() {
     safeMoveToTop('others-points');
     safeMoveToTop('others-points-inactive-dot');
     safeMoveToTop('others-labels');
-    safeMoveToTop('me-dot');
     safeMoveToTop('zones-labels');
+
+    // Toujours au-dessus de tout le reste (POI, zones, traces, labels, etc.)
+    safeMoveToTop('me-dot');
   }
 
   function ensureOverlays(map: MapLibreMapInstance) {
@@ -2951,7 +3353,10 @@ export default function MapLibreMap() {
         id: 'zones-fill',
         type: 'fill',
         source: 'zones',
-        paint: { 'fill-color': ['coalesce', ['get', 'color'], '#22c55e'], 'fill-opacity': 0 },
+        paint: {
+          'fill-color': ['coalesce', ['get', 'color'], '#22c55e'],
+          'fill-opacity': 0,
+        },
       });
     }
     if (!map.getLayer('zones-outline')) {
@@ -2959,7 +3364,130 @@ export default function MapLibreMap() {
         id: 'zones-outline',
         type: 'line',
         source: 'zones',
-        paint: { 'line-color': ['coalesce', ['get', 'color'], '#16a34a'], 'line-width': 2 },
+        paint: {
+          'line-color': ['coalesce', ['get', 'color'], '#16a34a'],
+          'line-width': 2,
+        },
+      });
+    }
+
+    if (!map.getSource('vehicle-track-reached')) {
+      const fromAnyState = (() => {
+        const paw = showActiveVehicleTrackRef.current;
+        if (!paw) return null;
+        const id = activeVehicleTrackIdRef.current;
+        const byId = vehicleTrackGeojsonByIdRef.current;
+        if (id && (byId as any)?.[id]) return (byId as any)[id] as any;
+        const anyId = Object.keys(byId ?? {}).find((k) => Boolean((byId as any)?.[k]));
+        return anyId ? ((byId as any)[anyId] as any) : null;
+      })();
+      const initial =
+        fromAnyState ??
+        (showActiveVehicleTrackRef.current && vehicleTrackPrevGeojsonRef.current
+          ? (vehicleTrackPrevGeojsonRef.current as any)
+          : (EMPTY_FC as any));
+      map.addSource('vehicle-track-reached', { type: 'geojson', data: initial });
+      try {
+        const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+        if (src && showActiveVehicleTrackRef.current) {
+          if (fromAnyState) {
+            src.setData(fromAnyState as any);
+          } else if (vehicleTrackPrevGeojsonRef.current) {
+            src.setData(vehicleTrackPrevGeojsonRef.current as any);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (!map.getSource('vehicle-track-reached-prev')) {
+      map.addSource('vehicle-track-reached-prev', { type: 'geojson', data: EMPTY_FC });
+    }
+    if (!map.getLayer('vehicle-track-reached-prev-fill')) {
+      map.addLayer({
+        id: 'vehicle-track-reached-prev-fill',
+        type: 'fill',
+        source: 'vehicle-track-reached-prev',
+        paint: {
+          'fill-color': [
+            'case',
+            ['==', ['get', 'status'], 'DONE'],
+            '#eab308',
+            '#ef4444',
+          ],
+          'fill-opacity': 0,
+        },
+      });
+    }
+    if (!map.getLayer('vehicle-track-reached-fill')) {
+      map.addLayer({
+        id: 'vehicle-track-reached-fill',
+        type: 'fill',
+        source: 'vehicle-track-reached',
+        paint: {
+          // Rouge pour les tuiles encore en calcul (status !== 'DONE'),
+          // jaune pour les tuiles stabilisées (status === 'DONE').
+          'fill-color': [
+            'case',
+            ['==', ['get', 'status'], 'DONE'],
+            '#eab308', // jaune pour anciennes tuiles non recalculées
+            '#ef4444', // rouge pour nouvelles tuiles / frontière
+          ],
+          'fill-opacity': 0.18,
+        },
+      });
+    }
+    // Affiche la vitesse TomTom moyenne au centre de chaque tuile (si disponible).
+    if (!map.getLayer('vehicle-track-reached-speed')) {
+      map.addLayer({
+        id: 'vehicle-track-reached-speed',
+        type: 'symbol',
+        source: 'vehicle-track-reached',
+        layout: {
+          'text-field': [
+            'case',
+            ['has', 'avgSpeedKmh'],
+            ['to-string', ['round', ['coalesce', ['get', 'avgSpeedKmh'], 0]]],
+            '',
+          ],
+          'text-size': 10,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1,
+        },
+      });
+    }
+    if (!map.getLayer('vehicle-track-reached-outline')) {
+      map.addLayer({
+        id: 'vehicle-track-reached-outline',
+        type: 'line',
+        source: 'vehicle-track-reached',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#ef4444',
+          'line-width': 2,
+        },
+      });
+    }
+    if (!map.getLayer('vehicle-track-reached-prev-outline')) {
+      map.addLayer({
+        id: 'vehicle-track-reached-prev-outline',
+        type: 'line',
+        source: 'vehicle-track-reached-prev',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#ef4444',
+          'line-width': 2,
+          'line-opacity': 0,
+        },
       });
     }
 
@@ -4229,6 +4757,25 @@ export default function MapLibreMap() {
       enforceLayerOrder(map);
       applyGridLabelStyle(map);
       applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpenRef.current);
+
+      // IMPORTANT: après un rebuild de style, MapLibre recrée les sources.
+      // On réinjecte immédiatement la dernière géométrie vehicle-track disponible
+      // en utilisant des refs (pas des closures React potentiellement obsolètes).
+      try {
+        const paw = showActiveVehicleTrackRef.current;
+        const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+        if (paw && src) {
+          const byId = vehicleTrackGeojsonByIdRef.current;
+          const id = activeVehicleTrackIdRef.current;
+          const fromState = id && (byId as any)?.[id] ? (byId as any)[id] : null;
+          const anyId = !fromState ? Object.keys(byId ?? {}).find((k) => Boolean((byId as any)?.[k])) : null;
+          const fallback = anyId ? (byId as any)[anyId] : null;
+          const data = (fromState ?? fallback ?? vehicleTrackPrevGeojsonRef.current ?? EMPTY_FC) as any;
+          src.setData(data);
+        }
+      } catch {
+        // ignore
+      }
       // Forcer un bump de version pour que les effets React réinjectent les données dans les sources.
       setStyleVersion((v) => v + 1);
     };
@@ -4478,6 +5025,12 @@ export default function MapLibreMap() {
       const joined = await ensureJoined();
       if (!joined) return;
       if (activeMissionRef.current !== missionId) return;
+
+      // Après une (re)connexion, on redemande systématiquement un snapshot.
+      // Sur mobile / retour d'arrière-plan, on peut avoir perdu des événements
+      // et les positions actives ne se rafraîchissent pas sans snapshot.
+      requestSnapshot();
+
       flushDelayRef.current = 1000;
       flushPendingInternal();
       void flushPendingActions(missionId);
@@ -4579,7 +5132,10 @@ export default function MapLibreMap() {
     }
 
     const onVisibility = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        lastHiddenAtRef.current = Date.now();
+        return;
+      }
       if (!socket.connected) {
         try {
           socket.connect();
@@ -4591,10 +5147,19 @@ export default function MapLibreMap() {
         const joined = await ensureJoined();
         if (!joined) return;
         if (activeMissionRef.current !== missionId) return;
+
         const now = Date.now();
-        if (now - lastSnapshotAtRef.current > 60_000) {
+        const wasHiddenAt = lastHiddenAtRef.current;
+        const wasBackgrounded = typeof wasHiddenAt === 'number' ? now - wasHiddenAt > 1500 : false;
+
+        // Au retour dans l'app, on force le snapshot pour retrouver les positions actives.
+        // (même si le dernier snapshot est récent)
+        if (wasBackgrounded || Object.keys(otherPositions).length === 0) {
+          requestSnapshot();
+        } else if (now - lastSnapshotAtRef.current > 60_000) {
           requestSnapshot();
         }
+
         flushDelayRef.current = 1000;
         flushPendingInternal();
       })();
@@ -4625,12 +5190,13 @@ export default function MapLibreMap() {
 
       const retentionSecondsFromSnapshot =
         typeof msg.retentionSeconds === 'number' && Number.isFinite(msg.retentionSeconds) ? msg.retentionSeconds : null;
-      const retentionMsFromSnapshot = Math.max(
-        0,
-        (retentionSecondsFromSnapshot !== null ? retentionSecondsFromSnapshot * 1000 : traceRetentionMs)
-      );
-      const maxTracePointsFromSnapshot = Math.max(1, Math.ceil(retentionMsFromSnapshot / 1000) + 2);
-      const cutoff = now - retentionMsFromSnapshot;
+      const retentionMsFromSnapshot = Math.max(0, retentionSecondsFromSnapshot !== null ? retentionSecondsFromSnapshot * 1000 : 0);
+
+      // Ne jamais tronquer localement plus court que la rétention de la mission.
+      // Le snapshot peut être plus court si le client a demandé une fenêtre réduite.
+      const effectiveRetentionMs = Math.max(traceRetentionMs, retentionMsFromSnapshot);
+      const maxTracePointsFromSnapshot = Math.max(1, Math.ceil(effectiveRetentionMs / 1000) + 2);
+      const cutoff = now - effectiveRetentionMs;
 
       const nextOthers: Record<string, { lng: number; lat: number; t: number }> = {};
       for (const [userId, p] of Object.entries(positions)) {
@@ -4663,7 +5229,6 @@ export default function MapLibreMap() {
       if (user?.id) {
         const selfPts = traces[user.id];
         if (Array.isArray(selfPts)) {
-          const effectiveRetentionMs = retentionMsFromSnapshot > 0 ? retentionMsFromSnapshot : traceRetentionMs;
           const effectiveMaxTracePoints = Math.max(1, Math.ceil(effectiveRetentionMs / 1000) + 2);
           const effectiveCutoff = now - effectiveRetentionMs;
 
@@ -4786,19 +5351,44 @@ export default function MapLibreMap() {
       if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.poi?.id) return;
       try {
-        const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
-        if (createdBy) {
-          const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
-          const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
-          setActivityToast(`${name} vient de créer un POI`);
+        if (msg.poi.createdBy === user?.id) {
+          setProjectionNotification(false);
         }
       } catch {
         // ignore
       }
       setPois((prev) => {
-        const exists = prev.some((p) => p.id === msg.poi.id);
+        const incoming = msg.poi as ApiPoi;
+        const exists = prev.some((p) => p.id === incoming.id);
         if (exists) return prev;
-        return [msg.poi as ApiPoi, ...prev];
+
+        // Réconciliation avec un POI optimiste local-* pour éviter les doublons.
+        // Cas typique : on ajoute un POI offline/optimiste, puis on reçoit poi:created.
+        const eps = 1e-6;
+        const idxLocal = prev.findIndex((p) => {
+          if (!p?.id || typeof p.id !== 'string') return false;
+          if (!p.id.startsWith('local-')) return false;
+          if ((p.title ?? '') !== (incoming.title ?? '')) return false;
+          if ((p.type ?? '') !== (incoming.type ?? '')) return false;
+          if ((p.icon ?? '') !== (incoming.icon ?? '')) return false;
+          if ((p.color ?? '') !== (incoming.color ?? '')) return false;
+          if ((p.comment ?? '') !== (incoming.comment ?? '')) return false;
+          if (typeof p.lng !== 'number' || typeof p.lat !== 'number') return false;
+          if (typeof incoming.lng !== 'number' || typeof incoming.lat !== 'number') return false;
+          if (Math.abs(p.lng - incoming.lng) > eps) return false;
+          if (Math.abs(p.lat - incoming.lat) > eps) return false;
+          // si possible, vérifier aussi l'auteur
+          if (p.createdBy && incoming.createdBy && p.createdBy !== incoming.createdBy) return false;
+          return true;
+        });
+
+        if (idxLocal >= 0) {
+          const next = prev.slice();
+          next[idxLocal] = incoming;
+          return next;
+        }
+
+        return [incoming, ...prev];
       });
     };
     const onPoiUpdated = (msg: any) => {
@@ -4858,10 +5448,212 @@ export default function MapLibreMap() {
       setZones((prev) => prev.map((z) => (z.id === msg.zone.id ? (msg.zone as ApiZone) : z)));
     };
     const onZoneDeleted = (msg: any) => {
-      if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.zoneId) return;
       setZones((prev) => prev.filter((z) => z.id !== msg.zoneId));
     };
+
+    const upsertVehicleTrackKeepOrder = (prev: ApiVehicleTrack[], track: ApiVehicleTrack) => {
+      const idx = prev.findIndex((t) => t.id === track.id);
+      if (idx === -1) return [track, ...prev];
+      const next = prev.slice();
+      next[idx] = track;
+      return next;
+    };
+
+    function onVehicleTrackCreated(msg: any) {
+      if (!selectedMissionId || msg?.missionId !== selectedMissionId) return;
+      const track = msg?.track as ApiVehicleTrack | undefined;
+      if (!track || !track.id) return;
+
+      // Ne garder que les pistes TEST.
+      if (!isTestTrack(track)) return;
+
+      try {
+        const provider = (track.cache?.meta as any)?.provider as string | undefined;
+        const metaBudget = (track.cache?.meta as any)?.budgetSec as number | undefined;
+        const f0 = (track.cache?.payloadGeojson as any)?.features?.[0];
+        const b = f0?.properties?.budgetSec;
+        const ringLen = Array.isArray(f0?.geometry?.coordinates?.[0]) ? f0.geometry.coordinates[0].length : null;
+        // eslint-disable-next-line no-console
+        console.log('[vehicle-track] created', {
+          ts: ts(),
+          trackId: track.id,
+          provider: provider ?? null,
+          metaBudgetSec: typeof metaBudget === 'number' ? metaBudget : null,
+          geojsonBudgetSec: typeof b === 'number' ? b : null,
+          ringLen,
+        });
+      } catch {
+        // ignore logging errors
+      }
+
+      setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, track));
+
+      if (!activeVehicleTrackId) {
+        setActiveVehicleTrackId(track.id);
+      }
+
+      const cacheGeo = track.cache?.payloadGeojson;
+      const provider = (track.cache?.meta as any)?.provider as string | undefined;
+      const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+      if (cacheGeo && allowTomtom) {
+        setVehicleTrackGeojsonById((prev) => ({ ...prev, [track.id]: cacheGeo as any }));
+      }
+    }
+
+    function onVehicleTrackUpdated(msg: any) {
+      if (!selectedMissionId || msg?.missionId !== selectedMissionId) return;
+
+      const full = msg?.track as ApiVehicleTrack | undefined;
+      if (full && full.id) {
+        // Ne garder que les pistes TEST.
+        if (!isTestTrack(full)) {
+          setVehicleTracks((prev) => prev.filter((t) => t.id !== full.id));
+          setVehicleTrackGeojsonById((prev) => {
+            if (!prev[full.id]) return prev;
+            const next = { ...prev };
+            delete next[full.id];
+            return next;
+          });
+          setActiveVehicleTrackId((currentId) => (currentId === full.id ? null : currentId));
+          return;
+        }
+        setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, full));
+        const cacheGeo = full.cache?.payloadGeojson;
+        const provider = (full.cache?.meta as any)?.provider as string | undefined;
+        const isTest = isTestTrack(full);
+        const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+
+        // Si la piste n'est plus active, on coupe immédiatement tout affichage
+        // éventuel lié à cette piste (ID actif + GeoJSON), afin d'éviter que
+        // Paw puisse faire réapparaître un ancien carroyage.
+        if (full.status !== 'active') {
+          setActiveVehicleTrackId((currentId) => (currentId === full.id ? null : currentId));
+          setVehicleTrackGeojsonById((prev) => {
+            if (!prev[full.id]) return prev;
+            const next = { ...prev };
+            delete next[full.id];
+            return next;
+          });
+          return;
+        }
+
+        if (cacheGeo && (!isTest || allowTomtom)) {
+          try {
+            const budget = (full.cache?.meta as any)?.budgetSec;
+            // Trace les mises à jour d'isochrone côté front (branche full.track)
+            // pour comprendre la fréquence et le provider utilisé.
+            // eslint-disable-next-line no-console
+            console.log('[vehicle-track] update (full)', {
+              ts: ts(),
+              trackId: full.id,
+              provider,
+              budgetSec: budget,
+              receivedAt: new Date().toISOString(),
+            });
+          } catch {
+            // ignore logging errors
+          }
+          setVehicleTrackGeojsonById((prev) => ({ ...prev, [full.id]: cacheGeo as any }));
+        }
+        return;
+      }
+
+      const trackId = typeof msg?.trackId === 'string' ? msg.trackId : undefined;
+      if (!trackId) return;
+
+      setVehicleTracks((prev) =>
+        prev.map((t) => {
+          if (t.id !== trackId) return t;
+          const next: ApiVehicleTrack = { ...t };
+          if (typeof msg.status === 'string') {
+            next.status = msg.status as ApiVehicleTrackStatus;
+          }
+          if (msg.cache) {
+            next.cache = {
+              computedAt: msg.cache.computedAt ?? next.cache?.computedAt ?? null,
+              elapsedSeconds: typeof msg.cache.elapsedSeconds === 'number'
+                ? msg.cache.elapsedSeconds
+                : next.cache?.elapsedSeconds ?? 0,
+              payloadGeojson: msg.cache.payloadGeojson ?? next.cache?.payloadGeojson ?? null,
+              meta: msg.cache.meta ?? next.cache?.meta ?? null,
+            } as any;
+          }
+          if (typeof msg.lastComputedAt === 'string') {
+            next.lastComputedAt = msg.lastComputedAt;
+          }
+          return next;
+        })
+      );
+
+      const cacheGeo = msg?.cache?.payloadGeojson;
+      const provider = (msg?.cache?.meta as any)?.provider as string | undefined;
+      const track = vehicleTracks.find((t) => t.id === trackId);
+      const isTest = isTestTrack(track);
+      const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+      if (cacheGeo && (!isTest || allowTomtom)) {
+        try {
+          const budget = (msg?.cache?.meta as any)?.budgetSec;
+          const f0 = (cacheGeo as any)?.features?.[0];
+          const geoBudget = (f0?.properties as any)?.budgetSec;
+          const ringLen = Array.isArray(f0?.geometry?.coordinates?.[0]) ? f0.geometry.coordinates[0].length : null;
+          // Trace les mises à jour d'isochrone côté front (branche diff)
+          // pour suivre la fréquence réelle et le provider.
+          // eslint-disable-next-line no-console
+          console.log('[vehicle-track] update (delta)', {
+            ts: ts(),
+            trackId,
+            provider,
+            budgetSec: budget,
+            geojsonBudgetSec: geoBudget,
+            ringLen,
+            receivedAt: new Date().toISOString(),
+          });
+        } catch {
+          // ignore logging errors
+        }
+        setVehicleTrackGeojsonById((prev) => ({ ...prev, [trackId]: cacheGeo as any }));
+      }
+    }
+
+    function onVehicleTrackDeleted(msg: any) {
+      if (!selectedMissionId || msg?.missionId !== selectedMissionId) return;
+      const trackId = typeof msg?.trackId === 'string' ? msg.trackId : undefined;
+      if (!trackId) return;
+
+      // Supprime la piste côté liste
+      setVehicleTracks((prev) => prev.filter((t) => t.id !== trackId));
+
+      // Vide le GeoJSON associé
+      setVehicleTrackGeojsonById((prev) => {
+        const next = { ...prev };
+        delete next[trackId];
+        return next;
+      });
+
+      // Et désactive toute piste active pour masquer complètement la forme.
+      setActiveVehicleTrackId((currentId) => (currentId === trackId ? null : currentId));
+
+      // IMPORTANT: on nettoie aussi l'état "prev"/"pending" et on vide la source MapLibre,
+      // sinon le mode "render kept previous" peut conserver la géométrie supprimée.
+      try {
+        const prevKey = vehicleTrackPrevKeyRef.current;
+        const pendingKey = vehicleTrackPendingKeyRef.current;
+        const wasDisplayed =
+          (typeof prevKey === 'string' && prevKey.startsWith(`${trackId}:`)) ||
+          (typeof pendingKey === 'string' && pendingKey.startsWith(`${trackId}:`)) ||
+          activeVehicleTrackIdRef.current === trackId;
+        if (wasDisplayed) {
+          clearVehicleTrackVisual('track-deleted');
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    function onVehicleTrackExpired(msg: any) {
+      onVehicleTrackUpdated(msg);
+    }
 
     socket.on('poi:created', onPoiCreated);
     socket.on('poi:updated', onPoiUpdated);
@@ -4873,6 +5665,11 @@ export default function MapLibreMap() {
 
     socket.on('person-case:upserted', onPersonCaseUpserted);
     socket.on('person-case:deleted', onPersonCaseDeleted);
+
+    socket.on('vehicle-track:created', onVehicleTrackCreated);
+    socket.on('vehicle-track:updated', onVehicleTrackUpdated);
+    socket.on('vehicle-track:deleted', onVehicleTrackDeleted);
+    socket.on('vehicle-track:expired', onVehicleTrackExpired);
     let cancelled = false;
     (async () => {
       try {
@@ -4912,6 +5709,11 @@ export default function MapLibreMap() {
 
       socket.off('person-case:upserted', onPersonCaseUpserted);
       socket.off('person-case:deleted', onPersonCaseDeleted);
+
+      socket.off('vehicle-track:created', onVehicleTrackCreated);
+      socket.off('vehicle-track:updated', onVehicleTrackUpdated);
+      socket.off('vehicle-track:deleted', onVehicleTrackDeleted);
+      socket.off('vehicle-track:expired', onVehicleTrackExpired);
 
       // prevent late callbacks from rescheduling
       activeMissionRef.current = null;
@@ -5074,6 +5876,857 @@ export default function MapLibreMap() {
       })) as any,
     });
   }, [pois, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+    if (!src) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[vehicle-track] render skip (no source)', { ts: ts(), sourceId: 'vehicle-track-reached' });
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // Tant que la liste des pistes n'a pas été chargée au moins une fois pour
+    // cette mission, on force la source à rester vide pour éviter tout
+    // affichage résiduel basé uniquement sur un ancien ID persistant.
+    if (!vehicleTracksLoaded) {
+      // IMPORTANT: si Paw est activé et qu'on a déjà une géométrie affichée,
+      // ne pas créer de "trou" lors d'un état transitoire (refresh/401/etc.).
+      if (showActiveVehicleTrack && vehicleTrackPrevGeojsonRef.current && vehicleTrackPrevKeyRef.current) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[vehicle-track] render kept previous (tracks not loaded)', {
+            ts: ts(),
+            prevKey: vehicleTrackPrevKeyRef.current,
+          });
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      try {
+        src.setData(EMPTY_FC as any);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // On n'affiche le carroyage que s'il existe réellement une piste active
+    // correspondante dans la liste (status === 'active') ET que la visibilité
+    // est activée via le bouton Paw. Si activeVehicleTrack est null ou non-active,
+    // on envoie systématiquement un FeatureCollection vide à la source.
+    // IMPORTANT: ne pas créer de "trou" : tant que l'utilisateur a une piste sélectionnée,
+    // on la considère comme effective, même si le status est transitoire.
+    const fallbackTrackId = (() => {
+      if (activeVehicleTrackId) return activeVehicleTrackId;
+      const keys = Object.keys(vehicleTrackGeojsonById ?? {});
+      if (keys.length === 1) return keys[0];
+      return null;
+    })();
+
+    const effectiveTrack = (() => {
+      if (activeVehicleTrackId) return activeVehicleTrack;
+      if (!fallbackTrackId) return null;
+      return vehicleTracks.find((t) => t.id === fallbackTrackId) ?? null;
+    })();
+    const isTestEffective = effectiveTrack ? isTestTrack(effectiveTrack as any) : false;
+
+    let data =
+      showActiveVehicleTrack && effectiveTrack && fallbackTrackId
+        ? vehicleTrackGeojsonById[fallbackTrackId]
+        : null;
+
+    const key = (() => {
+      const f0 = (data as any)?.features?.[0];
+      const p = f0?.properties;
+      const budgetSec = typeof p?.budgetSec === 'number' ? String(p.budgetSec) : '';
+      return fallbackTrackId ? `${fallbackTrackId}:${budgetSec}` : null;
+    })();
+
+    if (!data || !key) {
+      // Si Paw est activé, on évite de "vider" la couche lors d'un état transitoire
+      // (refresh API/filtre/socket en retard). On garde la dernière géométrie affichée.
+      if (showActiveVehicleTrack && vehicleTrackPrevGeojsonRef.current && vehicleTrackPrevKeyRef.current) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[vehicle-track] render kept previous (transient missing)', {
+            ts: ts(),
+            reason: !data ? 'no-data' : 'no-key',
+            activeVehicleTrackId,
+            hasEffectiveTrack: Boolean(effectiveTrack),
+            prevKey: vehicleTrackPrevKeyRef.current,
+          });
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      try {
+        src.setData(EMPTY_FC as any);
+      } catch {
+        // ignore
+      }
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[vehicle-track]', ts(), 'render cleared', {
+          reason: !data ? 'no-data' : 'no-key',
+          showActiveVehicleTrack,
+          hasEffectiveTrack: Boolean(effectiveTrack),
+          activeVehicleTrackId,
+          isTestEffective,
+        });
+      } catch {
+        // ignore
+      }
+
+      try {
+        const map2 = mapInstanceRef.current;
+        if (map2) {
+          requestAnimationFrame(() => {
+            try {
+              const layerIds = ['vehicle-track-reached-fill', 'vehicle-track-reached-outline'];
+              const layersPresent = layerIds.map((id) => ({ id, present: Boolean(map2.getLayer(id as any)) }));
+              const vis = layerIds.map((id) => {
+                try {
+                  return {
+                    id,
+                    visibility: (map2.getLayoutProperty(id as any, 'visibility') as any) ?? 'visible',
+                  };
+                } catch {
+                  return { id, visibility: 'unknown' };
+                }
+              });
+              const rendered = map2.queryRenderedFeatures(undefined, { layers: layerIds as any });
+              // eslint-disable-next-line no-console
+              console.log('[vehicle-track]', ts(), 'VISUAL', {
+                phase: 'cleared',
+                displayed: rendered.length > 0,
+                renderedCount: rendered.length,
+                paw: showActiveVehicleTrackRef.current,
+                activeVehicleTrackId: activeVehicleTrackIdRef.current,
+                layersPresent,
+                vis,
+              });
+            } catch {
+              // ignore
+            }
+          });
+        }
+      } catch {
+        // ignore
+      }
+
+      // Ne pas effacer les refs "prev" : elles servent justement à éviter un trou
+      // quand l'état revient à la normale juste après.
+      return;
+    }
+
+    const prevKey = vehicleTrackPrevKeyRef.current;
+    const prevGeo = vehicleTrackPrevGeojsonRef.current;
+
+    const normalizeVehicleTrackFc = (fc: any): any => {
+      try {
+        const f0 = fc?.features?.[0];
+        const g = f0?.geometry;
+        if (!g || g.type !== 'Polygon') return fc;
+        const ring = g.coordinates?.[0];
+        if (!Array.isArray(ring) || ring.length < 3) return fc;
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        const eps = 1e-12;
+        const isClosed =
+          Array.isArray(first) &&
+          Array.isArray(last) &&
+          first.length >= 2 &&
+          last.length >= 2 &&
+          Math.abs(first[0] - last[0]) <= eps &&
+          Math.abs(first[1] - last[1]) <= eps;
+        if (isClosed) return fc;
+        const closedRing = [...ring, first];
+        return {
+          ...fc,
+          features: [
+            {
+              ...f0,
+              geometry: {
+                ...g,
+                coordinates: [closedRing, ...(Array.isArray(g.coordinates) ? g.coordinates.slice(1) : [])],
+              },
+            },
+            ...(Array.isArray(fc?.features) ? fc.features.slice(1) : []),
+          ],
+        };
+      } catch {
+        return fc;
+      }
+    };
+
+    const getRing = (fc: any): [number, number][] | null => {
+      const f0 = fc?.features?.[0];
+      const g = f0?.geometry;
+      if (!g || g.type !== 'Polygon') return null;
+      const ring = g.coordinates?.[0];
+      if (!Array.isArray(ring) || ring.length < 4) return null;
+      return ring as [number, number][];
+    };
+
+    const haversineMeters = (a: [number, number], b: [number, number]): number => {
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const R = 6371000;
+      const lat1 = toRad(a[1]);
+      const lat2 = toRad(b[1]);
+      const dLat = toRad(b[1] - a[1]);
+      const dLng = toRad(b[0] - a[0]);
+      const s1 = Math.sin(dLat / 2);
+      const s2 = Math.sin(dLng / 2);
+      const h = s1 * s1 + Math.cos(lat1) * Math.cos(lat2) * s2 * s2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+    };
+
+    const ensureClosed = (ring: [number, number][]): [number, number][] => {
+      if (!ring.length) return ring;
+      const a = ring[0];
+      const b = ring[ring.length - 1];
+      if (a[0] === b[0] && a[1] === b[1]) return ring;
+      return [...ring, [a[0], a[1]]];
+    };
+
+    const getCenter = (fc: any): { lng: number; lat: number } | null => {
+      const f0 = fc?.features?.[0];
+      const c = f0?.properties?.center;
+      if (c && typeof c.lng === 'number' && typeof c.lat === 'number') return { lng: c.lng, lat: c.lat };
+      const ring = getRing(fc);
+      if (!ring || ring.length < 3) return null;
+      // simple centroid approx (average of vertices)
+      let sumLng = 0;
+      let sumLat = 0;
+      let n = 0;
+      for (let i = 0; i < ring.length - 1; i += 1) {
+        const p = ring[i];
+        sumLng += p[0];
+        sumLat += p[1];
+        n += 1;
+      }
+      if (n <= 0) return null;
+      return { lng: sumLng / n, lat: sumLat / n };
+    };
+
+    function circleRingMeters(
+      center: { lng: number; lat: number },
+      radiusMeters: number,
+      points: number
+    ): [number, number][] {
+      const latRad = (center.lat * Math.PI) / 180;
+      const metersPerDegLat = 111_320;
+      const metersPerDegLng = 111_320 * Math.cos(latRad);
+      const coords: [number, number][] = [];
+      for (let i = 0; i < points; i += 1) {
+        const a = (i / points) * Math.PI * 2;
+        const dx = Math.cos(a) * radiusMeters;
+        const dy = Math.sin(a) * radiusMeters;
+        const lng = center.lng + dx / metersPerDegLng;
+        const lat = center.lat + dy / metersPerDegLat;
+        coords.push([lng, lat]);
+      }
+      if (coords.length) coords.push(coords[0]);
+      return coords;
+    }
+
+    const clampStartToNeverShrink = (args: {
+      center: { lng: number; lat: number };
+      startRing: [number, number][];
+      endRing: [number, number][];
+    }): [number, number][] => {
+      const { center, startRing, endRing } = args;
+      const cx = center.lng;
+      const cy = center.lat;
+      const out: [number, number][] = [];
+      const len = Math.min(startRing.length, endRing.length);
+      for (let i = 0; i < len; i += 1) {
+        const a = startRing[i];
+        const b = endRing[i];
+        const ax = a[0] - cx;
+        const ay = a[1] - cy;
+        const bx = b[0] - cx;
+        const by = b[1] - cy;
+        const da = Math.sqrt(ax * ax + ay * ay);
+        const db = Math.sqrt(bx * bx + by * by);
+        if (!Number.isFinite(da) || !Number.isFinite(db) || da <= 0) {
+          out.push([cx + bx, cy + by]);
+          continue;
+        }
+        if (da <= db) {
+          out.push([cx + ax, cy + ay]);
+          continue;
+        }
+        // da > db : on clamp à db pour éviter une animation de rétrécissement
+        const k = db / da;
+        out.push([cx + ax * k, cy + ay * k]);
+      }
+      return ensureClosed(out);
+    };
+
+    const smoothRing = (ringIn: [number, number][], passes: number): [number, number][] => {
+      let ring = ensureClosed(ringIn);
+      if (ring.length < 4) return ring;
+      const n = ring.length - 1; // last equals first
+      for (let p = 0; p < passes; p += 1) {
+        const next: [number, number][] = [];
+        for (let i = 0; i < n; i += 1) {
+          const prev = ring[(i - 1 + n) % n];
+          const cur = ring[i];
+          const nxt = ring[(i + 1) % n];
+          const lng = (prev[0] + 2 * cur[0] + nxt[0]) / 4;
+          const lat = (prev[1] + 2 * cur[1] + nxt[1]) / 4;
+          next.push([lng, lat]);
+        }
+        next.push(next[0]);
+        ring = next;
+      }
+      return ring;
+    };
+
+    const buildEnvelopeNeverShrink = (args: {
+      center: { lng: number; lat: number };
+      prevRing: [number, number][];
+      nextRing: [number, number][];
+    }): [number, number][] => {
+      const { center, prevRing, nextRing } = args;
+      const cx = center.lng;
+      const cy = center.lat;
+      const out: [number, number][] = [];
+      const len = Math.min(prevRing.length, nextRing.length);
+      for (let i = 0; i < len; i += 1) {
+        const a = prevRing[i];
+        const b = nextRing[i];
+        const ax = a[0] - cx;
+        const ay = a[1] - cy;
+        const bx = b[0] - cx;
+        const by = b[1] - cy;
+        const da = Math.sqrt(ax * ax + ay * ay);
+        const db = Math.sqrt(bx * bx + by * by);
+        if (!Number.isFinite(da) || !Number.isFinite(db)) {
+          out.push([cx + bx, cy + by]);
+          continue;
+        }
+        if (db >= da) {
+          out.push([cx + bx, cy + by]);
+          continue;
+        }
+        // db < da : on garde l'ancien point pour ne jamais rétrécir
+        out.push([cx + ax, cy + ay]);
+      }
+      return ensureClosed(out);
+    };
+
+    const resampleRing = (ringIn: [number, number][], points: number): [number, number][] => {
+      const ring = ensureClosed(ringIn);
+      if (ring.length < 2) return ring;
+
+      const cum: number[] = [0];
+      for (let i = 1; i < ring.length; i += 1) {
+        cum.push(cum[i - 1] + haversineMeters(ring[i - 1], ring[i]));
+      }
+      const total = cum[cum.length - 1];
+      if (!Number.isFinite(total) || total <= 0) return ring;
+
+      const out: [number, number][] = [];
+      for (let k = 0; k < points; k += 1) {
+        const dist = (total * k) / (points - 1);
+        let i = 1;
+        while (i < cum.length && cum[i] < dist) i += 1;
+        if (i >= cum.length) {
+          out.push([ring[ring.length - 1][0], ring[ring.length - 1][1]]);
+          continue;
+        }
+        const d0 = cum[i - 1];
+        const d1 = cum[i];
+        const t = d1 === d0 ? 0 : (dist - d0) / (d1 - d0);
+        const p0 = ring[i - 1];
+        const p1 = ring[i];
+        out.push([p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]);
+      }
+      return ensureClosed(out);
+    };
+
+    const summarizeFc = (fc: any) => {
+      try {
+        const f0 = fc?.features?.[0];
+        const p = f0?.properties;
+        const g = f0?.geometry;
+        const ring = g?.type === 'Polygon' ? g?.coordinates?.[0] : null;
+        const ringLen = Array.isArray(ring) ? ring.length : null;
+        let bbox: [number, number, number, number] | null = null;
+        if (Array.isArray(ring) && ring.length) {
+          let minLng = Infinity;
+          let minLat = Infinity;
+          let maxLng = -Infinity;
+          let maxLat = -Infinity;
+          for (const pt of ring) {
+            if (!Array.isArray(pt) || pt.length < 2) continue;
+            const lng = pt[0];
+            const lat = pt[1];
+            if (typeof lng !== 'number' || typeof lat !== 'number') continue;
+            if (lng < minLng) minLng = lng;
+            if (lat < minLat) minLat = lat;
+            if (lng > maxLng) maxLng = lng;
+            if (lat > maxLat) maxLat = lat;
+          }
+          if (Number.isFinite(minLng) && Number.isFinite(minLat) && Number.isFinite(maxLng) && Number.isFinite(maxLat)) {
+            bbox = [minLng, minLat, maxLng, maxLat];
+          }
+        }
+        const budgetSec = typeof p?.budgetSec === 'number' ? p.budgetSec : null;
+        return {
+          type: fc?.type,
+          features: Array.isArray(fc?.features) ? fc.features.length : null,
+          geomType: g?.type ?? null,
+          budgetSec,
+          ringLen,
+          bbox,
+        };
+      } catch {
+        return { error: 'summarize_failed' };
+      }
+    };
+
+    // IMPORTANT: MapLibre ne rend pas toujours les polygons non fermés.
+    // On normalise donc la géométrie avant setData (notamment pour le tout premier budget 20).
+    data = normalizeVehicleTrackFc(data);
+
+    const toRingRaw = getRing(data);
+    const toCenter = getCenter(data);
+    const toFeature = (data as any)?.features?.[0];
+    const props = toFeature?.properties ?? {};
+
+    const getBudgetSec = (fc: any): number | null => {
+      const f0 = fc?.features?.[0];
+      const p = f0?.properties;
+      const v = p?.budgetSec;
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    };
+
+    const cloneFcWithRing = (fc: any, ring: [number, number][]) => {
+      try {
+        const f0 = fc?.features?.[0];
+        const g = f0?.geometry;
+        if (!f0 || !g || g.type !== 'Polygon') return fc;
+        return {
+          ...fc,
+          features: [
+            {
+              ...f0,
+              geometry: {
+                ...g,
+                coordinates: [ring, ...(Array.isArray(g.coordinates) ? g.coordinates.slice(1) : [])],
+              },
+            },
+            ...(Array.isArray(fc?.features) ? fc.features.slice(1) : []),
+          ],
+        };
+      } catch {
+        return fc;
+      }
+    };
+
+    const cancelMorph = () => {
+      if (vehicleTrackMorphFrameRef.current != null) {
+        try {
+          cancelAnimationFrame(vehicleTrackMorphFrameRef.current);
+        } catch {
+          // ignore
+        }
+        vehicleTrackMorphFrameRef.current = null;
+      }
+      if (vehicleTrackMorphDelayTimerRef.current != null) {
+        try {
+          window.clearTimeout(vehicleTrackMorphDelayTimerRef.current);
+        } catch {
+          // ignore
+        }
+        vehicleTrackMorphDelayTimerRef.current = null;
+      }
+      vehicleTrackMorphKeyRef.current = null;
+    };
+
+    const applySmoothing = (fc: any): any => {
+      try {
+        const raw = getRing(fc);
+        if (!raw) return fc;
+        const points = Math.max(72, Math.min(160, Math.floor(raw.length * 1.35)));
+        const ring = smoothRing(resampleRing(raw, points), 3);
+        return normalizeVehicleTrackFc(cloneFcWithRing(fc, ring));
+      } catch {
+        return fc;
+      }
+    };
+
+    try {
+      const budgetLog = typeof props?.budgetSec === 'number' ? props.budgetSec : null;
+      // eslint-disable-next-line no-console
+      const nextSummary = summarizeFc(data);
+      const prevSummary = prevGeo ? summarizeFc(prevGeo) : null;
+      console.log('[vehicle-track] render decision', {
+        ts: ts(),
+        activeVehicleTrackId,
+        showActiveVehicleTrack,
+        isTestEffective,
+        budgetSec: budgetLog,
+        hasGeojson: Boolean(data),
+        prevKey,
+        nextKey: key,
+        nextBudgetSec: (nextSummary as any)?.budgetSec ?? null,
+        nextRingLen: (nextSummary as any)?.ringLen ?? null,
+        nextBbox: (nextSummary as any)?.bbox ?? null,
+        prevBudgetSec: (prevSummary as any)?.budgetSec ?? null,
+        prevRingLen: (prevSummary as any)?.ringLen ?? null,
+        prevBbox: (prevSummary as any)?.bbox ?? null,
+        next: nextSummary,
+        prev: prevSummary,
+      });
+    } catch {
+      // ignore logging errors
+    }
+
+    // Animation morph : on décale l'affichage du prochain isochrone puis on interpole le ring.
+    // Objectif: une transition douce et dynamique, même si cela retarde la visualisation.
+    const delayMs = 2000;
+    const durationMs = 1200;
+    const shouldAnimate = (() => {
+      if (!prevGeo || !prevKey) return false;
+      if (!key || prevKey === key) return false;
+      const prevBudget = getBudgetSec(prevGeo);
+      const nextBudget = getBudgetSec(data);
+      if (typeof prevBudget !== 'number' || typeof nextBudget !== 'number') return false;
+      if (nextBudget <= prevBudget) return false;
+      return true;
+    })();
+
+    if (!showActiveVehicleTrackRef.current) {
+      cancelMorph();
+      try {
+        src.setData(EMPTY_FC as any);
+        vehicleTrackLastAppliedGeojsonRef.current = EMPTY_FC;
+      } catch {
+        // ignore
+      }
+    } else if (!shouldAnimate) {
+      cancelMorph();
+      try {
+        const smoothed = applySmoothing(data);
+        src.setData(smoothed as any);
+        vehicleTrackLastAppliedGeojsonRef.current = smoothed;
+      } catch {
+        // ignore
+      }
+    } else {
+      // Keep previous geometry during delay, then animate to the next one.
+      cancelMorph();
+      vehicleTrackMorphKeyRef.current = key;
+
+      const prevRingRaw = getRing(prevGeo);
+      const nextRingRaw = getRing(data);
+
+      if (!prevRingRaw || !nextRingRaw) {
+        try {
+          src.setData(data as any);
+        } catch {
+          // ignore
+        }
+      } else {
+        // Normalize point counts + smooth corners.
+        const points = Math.max(72, Math.min(160, Math.floor(Math.max(prevRingRaw.length, nextRingRaw.length) * 1.35)));
+        const prevRing = smoothRing(resampleRing(prevRingRaw, points), 3);
+        const nextRing = smoothRing(resampleRing(nextRingRaw, points), 3);
+
+        const startFc = normalizeVehicleTrackFc(cloneFcWithRing(data, prevRing));
+        try {
+          src.setData(startFc as any);
+          vehicleTrackLastAppliedGeojsonRef.current = startFc;
+        } catch {
+          // ignore
+        }
+
+        const t0 = performance.now();
+        const startAfterDelay = () => {
+          const startAnimAt = performance.now();
+          const step = () => {
+            if (!mapReady) return;
+            if (!showActiveVehicleTrackRef.current) return;
+            if (vehicleTrackMorphKeyRef.current !== key) return;
+            const nowMs = performance.now();
+            const p = Math.min(1, Math.max(0, (nowMs - startAnimAt) / durationMs));
+            const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+            const out: [number, number][] = [];
+            const len = Math.min(prevRing.length, nextRing.length);
+            for (let i = 0; i < len; i += 1) {
+              const a = prevRing[i];
+              const b = nextRing[i];
+              out.push([a[0] + (b[0] - a[0]) * eased, a[1] + (b[1] - a[1]) * eased]);
+            }
+            const ringOut = ensureClosed(out);
+            const fcOut = normalizeVehicleTrackFc(cloneFcWithRing(data, ringOut));
+            try {
+              src.setData(fcOut as any);
+              vehicleTrackLastAppliedGeojsonRef.current = fcOut;
+            } catch {
+              // ignore
+            }
+            if (p >= 1) {
+              vehicleTrackMorphFrameRef.current = null;
+              vehicleTrackMorphKeyRef.current = null;
+              // La forme affichée est désormais la nouvelle : on met à jour les refs "prev".
+              vehicleTrackPrevGeojsonRef.current = data;
+              vehicleTrackPrevKeyRef.current = key;
+              return;
+            }
+            vehicleTrackMorphFrameRef.current = requestAnimationFrame(step);
+          };
+          vehicleTrackMorphFrameRef.current = requestAnimationFrame(step);
+        };
+
+        const delayLeft = Math.max(0, delayMs - (performance.now() - t0));
+        try {
+          vehicleTrackMorphDelayTimerRef.current = window.setTimeout(startAfterDelay, delayLeft);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    try {
+      const appliedSummary = summarizeFc(data);
+      // eslint-disable-next-line no-console
+      console.log('[vehicle-track] render applied', {
+        ts: ts(),
+        activeVehicleTrackId,
+        key,
+        appliedBudgetSec: (appliedSummary as any)?.budgetSec ?? null,
+        appliedRingLen: (appliedSummary as any)?.ringLen ?? null,
+        appliedBbox: (appliedSummary as any)?.bbox ?? null,
+        applied: appliedSummary,
+      });
+    } catch {
+      // ignore
+    }
+
+    try {
+      const map2 = mapInstanceRef.current;
+      if (map2) {
+        requestAnimationFrame(() => {
+          try {
+            const layerIds = ['vehicle-track-reached-fill', 'vehicle-track-reached-outline'];
+            const layersPresent = layerIds.map((id) => ({ id, present: Boolean(map2.getLayer(id as any)) }));
+            const vis = layerIds.map((id) => {
+              try {
+                return {
+                  id,
+                  visibility: (map2.getLayoutProperty(id as any, 'visibility') as any) ?? 'visible',
+                };
+              } catch {
+                return { id, visibility: 'unknown' };
+              }
+            });
+            const rendered = map2.queryRenderedFeatures(undefined, { layers: layerIds as any });
+            const displayed = rendered.length > 0;
+            // IMPORTANT: the retry loop must reapply the exact GeoJSON we actually set on the source.
+            // Otherwise, a transient renderedCount=0 (common right after Paw toggle / style rebuild)
+            // can cause the retry to push the raw (angular) geometry back onto the map.
+            vehicleTrackPendingGeojsonRef.current = vehicleTrackLastAppliedGeojsonRef.current ?? data;
+            vehicleTrackPendingKeyRef.current = key;
+            vehicleTrackPendingAttemptsRef.current = 0;
+            const diag = (() => {
+              try {
+                const s = summarizeFc(data);
+                const bbox = (s as any)?.bbox as [number, number, number, number] | null;
+                const f0 = (data as any)?.features?.[0];
+                const ring = f0?.geometry?.coordinates?.[0];
+                const first = Array.isArray(ring) ? ring[0] : null;
+                const last = Array.isArray(ring) ? ring[ring.length - 1] : null;
+                const eps2 = 1e-12;
+                const closed =
+                  Array.isArray(first) &&
+                  Array.isArray(last) &&
+                  first.length >= 2 &&
+                  last.length >= 2 &&
+                  Math.abs(first[0] - last[0]) <= eps2 &&
+                  Math.abs(first[1] - last[1]) <= eps2;
+
+                const bboxSizeMeters = (() => {
+                  if (!bbox) return null;
+                  const [minLng, minLat, maxLng, maxLat] = bbox;
+                  const midLat = (minLat + maxLat) / 2;
+                  // approx meters: use existing haversine util
+                  const width = haversineMeters([minLng, midLat], [maxLng, midLat]);
+                  const height = haversineMeters([minLng, minLat], [minLng, maxLat]);
+                  return { width, height };
+                })();
+
+                return {
+                  ringLen: (s as any)?.ringLen ?? null,
+                  bbox,
+                  closed,
+                  bboxSizeMeters,
+                  zoom: typeof map2?.getZoom === 'function' ? map2.getZoom() : null,
+                };
+              } catch {
+                return { ringLen: null, bbox: null, closed: null };
+              }
+            })();
+            // eslint-disable-next-line no-console
+            console.log('[vehicle-track]', ts(), 'VISUAL', {
+              phase: 'applied',
+              displayed,
+              renderedCount: rendered.length,
+              paw: showActiveVehicleTrackRef.current,
+              activeVehicleTrackId: activeVehicleTrackIdRef.current,
+              key,
+              diagRingLen: (diag as any)?.ringLen ?? null,
+              diagClosed: (diag as any)?.closed ?? null,
+              diagBbox: (diag as any)?.bbox ?? null,
+              diagBboxSizeMeters: (diag as any)?.bboxSizeMeters ?? null,
+              diagZoom: (diag as any)?.zoom ?? null,
+              diag,
+              layersPresent,
+              vis,
+            });
+
+            if (!displayed) {
+              const scheduleRetry = () => {
+                if (!map2 || !showActiveVehicleTrackRef.current) return;
+                if (vehicleTrackPendingKeyRef.current !== key) return;
+                if (vehicleTrackPendingAttemptsRef.current >= 10) return;
+
+                vehicleTrackPendingAttemptsRef.current += 1;
+                reapplyVehicleTrackIfPending();
+
+                requestAnimationFrame(() => {
+                  try {
+                    const rendered2 = map2.queryRenderedFeatures(undefined, { layers: layerIds as any });
+                    const displayed2 = rendered2.length > 0;
+                    const diag2 = (() => {
+                      try {
+                        const s = summarizeFc(vehicleTrackPendingGeojsonRef.current);
+                        const bbox = (s as any)?.bbox as [number, number, number, number] | null;
+                        const f0 = (vehicleTrackPendingGeojsonRef.current as any)?.features?.[0];
+                        const ring = f0?.geometry?.coordinates?.[0];
+                        const first = Array.isArray(ring) ? ring[0] : null;
+                        const last = Array.isArray(ring) ? ring[ring.length - 1] : null;
+                        const eps2 = 1e-12;
+                        const closed =
+                          Array.isArray(first) &&
+                          Array.isArray(last) &&
+                          first.length >= 2 &&
+                          last.length >= 2 &&
+                          Math.abs(first[0] - last[0]) <= eps2 &&
+                          Math.abs(first[1] - last[1]) <= eps2;
+
+                        const bboxSizeMeters = (() => {
+                          if (!bbox) return null;
+                          const [minLng, minLat, maxLng, maxLat] = bbox;
+                          const midLat = (minLat + maxLat) / 2;
+                          const width = haversineMeters([minLng, midLat], [maxLng, midLat]);
+                          const height = haversineMeters([minLng, minLat], [minLng, maxLat]);
+                          return { width, height };
+                        })();
+
+                        return {
+                          ringLen: (s as any)?.ringLen ?? null,
+                          bbox,
+                          closed,
+                          bboxSizeMeters,
+                          zoom: typeof map2?.getZoom === 'function' ? map2.getZoom() : null,
+                        };
+                      } catch {
+                        return { ringLen: null, bbox: null, closed: null };
+                      }
+                    })();
+                    // eslint-disable-next-line no-console
+                    console.log('[vehicle-track]', ts(), 'VISUAL', {
+                      phase: 'retry-reapply',
+                      displayed: displayed2,
+                      renderedCount: rendered2.length,
+                      paw: showActiveVehicleTrackRef.current,
+                      activeVehicleTrackId: activeVehicleTrackIdRef.current,
+                      key,
+                      attempt: vehicleTrackPendingAttemptsRef.current,
+                      diagRingLen: (diag2 as any)?.ringLen ?? null,
+                      diagClosed: (diag2 as any)?.closed ?? null,
+                      diagBbox: (diag2 as any)?.bbox ?? null,
+                      diagBboxSizeMeters: (diag2 as any)?.bboxSizeMeters ?? null,
+                      diagZoom: (diag2 as any)?.zoom ?? null,
+                      diag: diag2,
+                    });
+
+                    if (displayed2) {
+                      clearPendingVehicleTrack();
+                      return;
+                    }
+
+                    // Retry again shortly, even if 'idle' never fires (map busy).
+                    try {
+                      if (vehicleTrackPendingTimerRef.current != null) {
+                        window.clearTimeout(vehicleTrackPendingTimerRef.current);
+                      }
+                      vehicleTrackPendingTimerRef.current = window.setTimeout(scheduleRetry, 200);
+                    } catch {
+                      // ignore
+                    }
+                  } catch {
+                    // ignore
+                  }
+                });
+              };
+
+              // Try on idle once, plus a timed retry fallback.
+              try {
+                map2.once('idle', scheduleRetry);
+              } catch {
+                // ignore
+              }
+              try {
+                if (vehicleTrackPendingTimerRef.current != null) {
+                  window.clearTimeout(vehicleTrackPendingTimerRef.current);
+                }
+                vehicleTrackPendingTimerRef.current = window.setTimeout(scheduleRetry, 200);
+              } catch {
+                // ignore
+              }
+            } else {
+              clearPendingVehicleTrack();
+            }
+          } catch {
+            // ignore
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+
+    // IMPORTANT: ne pas écraser les refs prev pendant une animation en cours,
+    // sinon un rerender applique immédiatement la nouvelle géométrie et annule l'effet "delay".
+    if (!vehicleTrackMorphKeyRef.current) {
+      vehicleTrackPrevGeojsonRef.current = data;
+      vehicleTrackPrevKeyRef.current = key;
+    }
+  }, [
+    mapReady,
+    styleVersion,
+    showActiveVehicleTrack,
+    activeVehicleTrackId,
+    activeVehicleTrack,
+    vehicleTracksLoaded,
+    vehicleTrackGeojsonById,
+  ]);
 
   // HTML markers for POIs (circles with inner icon).
   // We fully rebuild them whenever POIs, map readiness, icon options or base style change,
@@ -5416,6 +7069,7 @@ export default function MapLibreMap() {
 
   return (
     <div className="relative w-full h-screen">
+      {confirmDialogEl}
       <div ref={mapRef} className="w-full h-full" />
 
       <div className="pointer-events-none fixed bottom-[calc(max(env(safe-area-inset-bottom),16px)+104px)] left-1/2 z-[1000] w-full -translate-x-1/2 max-w-md px-3 sm:max-w-lg md:max-w-xl">
@@ -5507,7 +7161,13 @@ export default function MapLibreMap() {
                     disabled={actionBusy}
                     onClick={async () => {
                       if (!selectedMissionId || !selectedPoi) return;
-                      const ok = window.confirm('Supprimer ce POI ?');
+                      const ok = await confirmDialog({
+                        title: 'Supprimer ce POI ?',
+                        message: 'Cette action est définitive.',
+                        confirmText: 'Supprimer',
+                        cancelText: 'Annuler',
+                        variant: 'danger',
+                      });
                       if (!ok) return;
                       setActionBusy(true);
                       setActionError(null);
@@ -5540,6 +7200,38 @@ export default function MapLibreMap() {
                   </button>
                 </div>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmDeletePersonCaseOpen ? (
+        <div
+          className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setConfirmDeletePersonCaseOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-base font-bold text-gray-900">Supprimer la piste ?</div>
+            <div className="mt-2 text-sm text-gray-700">Cette action est définitive.</div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50"
+                onClick={() => setConfirmDeletePersonCaseOpen(false)}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                disabled={personLoading}
+                onClick={() => void onConfirmDeletePersonCase()}
+              >
+                Supprimer
+              </button>
             </div>
           </div>
         </div>
@@ -5843,6 +7535,7 @@ export default function MapLibreMap() {
                   }
 
                   if (personPanelOpen && personPanelCollapsed) {
+                    setShowActiveVehicleTrack(false);
                     setPersonPanelOpen(false);
                     setPersonPanelCollapsed(false);
                     if (map && mapReady) applyHeatmapVisibility(map, false);
@@ -5850,6 +7543,7 @@ export default function MapLibreMap() {
                   }
 
                   if (personPanelOpen && !personPanelCollapsed) {
+                    setShowActiveVehicleTrack(true);
                     setPersonEdit(false);
                     setPersonPanelCollapsed(true);
                     if (map && mapReady) {
@@ -5861,6 +7555,7 @@ export default function MapLibreMap() {
                   setPersonEdit(false);
                   setPersonPanelCollapsed(true);
                   setPersonPanelOpen(true);
+                  setShowActiveVehicleTrack(true);
                   if (map && mapReady) {
                     applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
                   }
@@ -5901,6 +7596,7 @@ export default function MapLibreMap() {
             onClick={() => {
               if (!selectedMissionId) return;
               const next = historyWindowSeconds + 3600;
+              historyWindowUserSetRef.current = true;
               setHistoryWindowSeconds(next);
               const socket = socketRef.current;
               if (socket) {
@@ -5960,7 +7656,7 @@ export default function MapLibreMap() {
                         : '—'}
                 </div>
                 <div className="mt-1 text-xs text-gray-700">
-                  {estimation ? (
+                  {estimation && !hasActiveTestVehicleTrack ? (
                     <span>
                       <span className="font-semibold">Zone</span>
                       {`: De ${estimation.probableKm.toFixed(1)} km à ${estimation.maxKm.toFixed(1)} km de rayon`}
@@ -6000,7 +7696,7 @@ export default function MapLibreMap() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2">
-              <div className="text-base font-bold text-gray-900">Projection</div>
+              <div className="text-base font-bold text-gray-900">Démarrer une piste</div>
               <div className="flex flex-col items-end gap-2">
                 <div className="flex items-center gap-2">
                   {!personEdit && personCase ? (
@@ -6032,44 +7728,7 @@ export default function MapLibreMap() {
                       disabled={personLoading || !selectedMissionId}
                       onClick={async () => {
                         if (!selectedMissionId || !personCase) return;
-                        const ok = window.confirm('Supprimer la fiche personne ?');
-                        if (!ok) return;
-                        setPersonLoading(true);
-                        setPersonError(null);
-                        try {
-                          await deletePersonCase(selectedMissionId);
-                          setPersonCase(null);
-                          setPersonEdit(true);
-                          setPersonDraft({
-                            lastKnownQuery: '',
-                            lastKnownType: 'address',
-                            lastKnownPoiId: undefined,
-                            lastKnownLng: undefined,
-                            lastKnownLat: undefined,
-                            lastKnownWhen: '',
-                            nextClueQuery: '',
-                            nextClueType: 'address',
-                            nextCluePoiId: undefined,
-                            nextClueLng: undefined,
-                            nextClueLat: undefined,
-                            nextClueWhen: '',
-                            mobility: 'none',
-                            age: '',
-                            sex: 'unknown',
-                            healthStatus: 'stable',
-                            diseases: [],
-                            diseasesFreeText: '',
-                            injuries: [],
-                            injuriesFreeText: '',
-                          });
-                          setShowEstimationHeatmap(false);
-                          const map = mapInstanceRef.current;
-                          if (map && mapReady) applyHeatmapVisibility(map, false);
-                        } catch (e: any) {
-                          setPersonError(e?.message ?? 'Erreur');
-                        } finally {
-                          setPersonLoading(false);
-                        }
+                        setConfirmDeletePersonCaseOpen(true);
                       }}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
                       title="Supprimer la fiche"
@@ -6138,7 +7797,7 @@ export default function MapLibreMap() {
                     ) : null}
                   </div>
 
-                  {estimation ? (
+                  {estimation && !hasActiveTestVehicleTrack ? (
                     <div className="rounded-2xl border p-3 md:col-span-2">
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-xs font-semibold text-gray-700">Estimation</div>
@@ -6193,7 +7852,7 @@ export default function MapLibreMap() {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="relative">
-                      <div className="text-xs font-semibold text-gray-700">Adresse ou POI</div>
+                      <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
                       <input
                         type="text"
                         value={personDraft.lastKnownQuery}
@@ -6209,7 +7868,7 @@ export default function MapLibreMap() {
                         }
                         onFocus={() => setLastKnownSuggestionsOpen(true)}
                         onBlur={() => window.setTimeout(() => setLastKnownSuggestionsOpen(false), 150)}
-                        placeholder="Tape un POI ou une adresse"
+                        placeholder="Soit un POI soit une adresse"
                         className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
                       />
 
@@ -6274,121 +7933,33 @@ export default function MapLibreMap() {
                         </div>
                       ) : null}
                     </div>
-                    <div>
+                    <div
+                      onClick={() => {
+                        const el = lastKnownWhenInputRef.current;
+                        if (!el) return;
+                        // showPicker est supporté par la plupart des navigateurs modernes
+                        if (typeof (el as any).showPicker === 'function') {
+                          (el as any).showPicker();
+                        } else {
+                          el.focus();
+                        }
+                      }}
+                      className="cursor-pointer"
+                    >
                       <div className="text-xs font-semibold text-gray-700">Date / heure</div>
                       <input
+                        ref={lastKnownWhenInputRef}
                         type="datetime-local"
                         value={personDraft.lastKnownWhen}
+                        max={nowLocalMinute}
                         onChange={(e) =>
                           setPersonDraft((p) => ({
                             ...p,
                             lastKnownWhen: e.target.value,
                           }))
                         }
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs"
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs cursor-pointer"
                       />
-                    </div>
-                  </div>
-
-                  <div className="mt-3 rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Indice suivant (optionnel)</div>
-                    <div className="mt-2 grid grid-cols-2 gap-3">
-                      <div className="relative">
-                        <div className="text-[11px] font-medium text-gray-600">Adresse ou POI</div>
-                        <input
-                          type="text"
-                          value={personDraft.nextClueQuery}
-                          onChange={(e) =>
-                            setPersonDraft((p) => ({
-                              ...p,
-                              nextClueQuery: e.target.value,
-                              nextClueType: 'address',
-                              nextCluePoiId: undefined,
-                              nextClueLng: undefined,
-                              nextClueLat: undefined,
-                            }))
-                          }
-                          onFocus={() => setNextClueSuggestionsOpen(true)}
-                          onBlur={() => window.setTimeout(() => setNextClueSuggestionsOpen(false), 150)}
-                          placeholder="Adresse ou POI (optionnel)"
-                          className="h-9 w-full rounded-2xl border px-2 text-xs"
-                        />
-
-                        {nextClueSuggestionsOpen &&
-                        (nextCluePoiSuggestions.length > 0 || nextClueAddressSuggestions.length > 0) ? (
-                          <div className="absolute left-0 right-0 top-[52px] z-10 rounded-2xl border bg-white shadow">
-                            {nextCluePoiSuggestions.length > 0 ? (
-                              <div className="border-b p-2">
-                                <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">POI</div>
-                                <div className="grid gap-1">
-                                  {nextCluePoiSuggestions.map((p) => (
-                                    <button
-                                      key={p.id}
-                                      type="button"
-                                      className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setPersonDraft((prev) => ({
-                                          ...prev,
-                                          nextClueType: 'poi',
-                                          nextClueQuery: p.title,
-                                          nextCluePoiId: p.id,
-                                          nextClueLng: p.lng,
-                                          nextClueLat: p.lat,
-                                        }));
-                                        setNextClueSuggestionsOpen(false);
-                                      }}
-                                    >
-                                      {p.title}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
-
-                            {nextClueAddressSuggestions.length > 0 ? (
-                              <div className="p-2">
-                                <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">Adresse</div>
-                                <div className="grid gap-1">
-                                  {nextClueAddressSuggestions.map((a) => (
-                                    <button
-                                      key={`${a.label}-${a.lng}-${a.lat}`}
-                                      type="button"
-                                      className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setPersonDraft((prev) => ({
-                                          ...prev,
-                                          nextClueType: 'address',
-                                          nextClueQuery: a.label,
-                                          nextCluePoiId: undefined,
-                                          nextClueLng: a.lng,
-                                          nextClueLat: a.lat,
-                                        }));
-                                        setNextClueSuggestionsOpen(false);
-                                      }}
-                                    >
-                                      {a.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium text-gray-600">Date / heure</div>
-                        <input
-                          type="datetime-local"
-                          value={personDraft.nextClueWhen}
-                          onChange={(e) =>
-                            setPersonDraft((p) => ({
-                              ...p,
-                              nextClueWhen: e.target.value,
-                            }))
-                          }
-                          className="mt-1 h-9 w-full rounded-2xl border px-2 text-xs"
-                        />
-                      </div>
                     </div>
                   </div>
 
@@ -6400,10 +7971,11 @@ export default function MapLibreMap() {
                       className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
                     >
                       <option value="none">À pied</option>
-                      <option value="bike">Vélo</option>
-                      <option value="scooter">Scooter</option>
-                      <option value="motorcycle">Moto</option>
-                      <option value="car">Voiture</option>
+                      <option value="bike_test">Vélo</option>
+                      <option value="scooter_test">Scooter</option>
+                      <option value="motorcycle_test">Moto</option>
+                      <option value="car_test">Voiture</option>
+                      <option value="truck_test">Camion</option>
                     </select>
                   </div>
 
@@ -6445,9 +8017,9 @@ export default function MapLibreMap() {
                     </div>
                   </div>
 
-                  {personDraft.mobility === 'none' ? (
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div className="rounded-2xl border p-3">
+                  {normalizeMobility(personDraft.mobility as any) === 'none' ? (
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start">
+                      <div className="rounded-2xl border p-3 md:flex-1">
                         <button
                           type="button"
                           className="flex w-full items-center justify-between text-left"
@@ -6484,7 +8056,7 @@ export default function MapLibreMap() {
                         ) : null}
                       </div>
 
-                      <div className="rounded-2xl border p-3">
+                      <div className="rounded-2xl border p-3 md:flex-1">
                         <button
                           type="button"
                           className="flex w-full items-center justify-between text-left"
@@ -6541,7 +8113,6 @@ export default function MapLibreMap() {
                         if (personCase) {
                           setPersonEdit(false);
                           const last = personCase.lastKnown;
-                          const next = personCase.nextClue;
                           const cleanDis = cleanDiseases(personCase.diseases ?? []);
                           const cleanInj = cleanInjuries(personCase.injuries ?? []);
                           setPersonDraft({
@@ -6553,14 +8124,6 @@ export default function MapLibreMap() {
                             lastKnownLat:
                               typeof last.lat === 'number' ? last.lat : undefined,
                             lastKnownWhen: last.when ? last.when.slice(0, 16) : '',
-                            nextClueQuery: next?.query ?? '',
-                            nextClueType: next?.type ?? 'address',
-                            nextCluePoiId: next?.poiId,
-                            nextClueLng:
-                              typeof next?.lng === 'number' ? next!.lng : undefined,
-                            nextClueLat:
-                              typeof next?.lat === 'number' ? next!.lat : undefined,
-                            nextClueWhen: next?.when ? next.when.slice(0, 16) : '',
                             mobility: personCase.mobility,
                             age:
                               typeof personCase.age === 'number'
@@ -6590,13 +8153,13 @@ export default function MapLibreMap() {
                         personLoading ||
                         !selectedMissionId ||
                         !personDraft.lastKnownWhen ||
-                        !personDraft.lastKnownQuery.trim() ||
+                        !(personDraft.lastKnownQuery ?? '').trim() ||
                         !personDraft.mobility
                       }
                       onClick={async () => {
                         if (!selectedMissionId) return;
 
-                        const address = personDraft.lastKnownQuery.trim();
+                        const address = (personDraft.lastKnownQuery ?? '').trim();
                         if (!address) {
                           setPersonError('Adresse requise');
                           return;
@@ -6604,6 +8167,16 @@ export default function MapLibreMap() {
                         if (!personDraft.lastKnownWhen) {
                           setPersonError('Date / heure requise');
                           return;
+                        }
+
+                        try {
+                          const dt = new Date(personDraft.lastKnownWhen);
+                          if (!Number.isNaN(dt.getTime()) && dt.getTime() > Date.now()) {
+                            setPersonError("Date / heure ne peut pas être dans le futur");
+                            return;
+                          }
+                        } catch {
+                          // ignore
                         }
                         if (!personDraft.mobility) {
                           setPersonError('Mode de déplacement requis');
@@ -6615,6 +8188,8 @@ export default function MapLibreMap() {
                         try {
                           const ageTrimmed = personDraft.age.trim();
                           const ageParsed = ageTrimmed ? Number(ageTrimmed) : undefined;
+                          const mobilityUi = personDraft.mobility as any as MobilityUi;
+                          const mobility = normalizeMobility(mobilityUi);
                           const payload = {
                             lastKnown: {
                               type: personDraft.lastKnownType,
@@ -6626,21 +8201,10 @@ export default function MapLibreMap() {
                                 ? new Date(personDraft.lastKnownWhen).toISOString()
                                 : undefined,
                             },
-                            nextClue:
-                              personDraft.nextClueLng !== undefined && personDraft.nextClueLat !== undefined
-                                ? {
-                                    type: personDraft.nextClueType,
-                                    query: personDraft.nextClueQuery,
-                                    poiId: personDraft.nextCluePoiId,
-                                    lng: personDraft.nextClueLng,
-                                    lat: personDraft.nextClueLat,
-                                    when: personDraft.nextClueWhen
-                                      ? new Date(personDraft.nextClueWhen).toISOString()
-                                      : undefined,
-                                  }
-                                : undefined,
-                            mobility: personDraft.mobility,
-                            age: Number.isFinite(ageParsed as any) ? Math.floor(ageParsed as number) : undefined,
+                            mobility,
+                            age: Number.isFinite(ageParsed as any)
+                              ? Math.floor(ageParsed as number)
+                              : undefined,
                             sex: personDraft.sex,
                             healthStatus: personDraft.healthStatus,
                             diseases: cleanDiseases(personDraft.diseases) as string[],
@@ -6648,9 +8212,73 @@ export default function MapLibreMap() {
                             diseasesFreeText: personDraft.diseasesFreeText,
                             injuriesFreeText: personDraft.injuriesFreeText,
                           };
+
                           const saved = await upsertPersonCase(selectedMissionId, payload);
                           setPersonCase(saved.case);
                           setPersonEdit(false);
+
+                          if (isMobilityTest(mobilityUi) && canEditPerson) {
+                            const whenIso = personDraft.lastKnownWhen
+                              ? new Date(personDraft.lastKnownWhen).toISOString()
+                              : undefined;
+                            const vehicleType =
+                              mobilityUi === 'motorcycle_test'
+                                ? 'motorcycle'
+                                : mobilityUi === 'scooter_test'
+                                  ? 'scooter'
+                                  : mobilityUi === 'bike_test'
+                                    ? 'motorcycle'
+                                  : mobilityUi === 'truck_test'
+                                    ? 'truck'
+                                    : 'car';
+                            try {
+                              const created = await createVehicleTrack(selectedMissionId, {
+                                label:
+                                  mobilityUi === 'motorcycle_test'
+                                    ? 'Moto'
+                                  : mobilityUi === 'scooter_test'
+                                      ? 'Scooter'
+                                      : mobilityUi === 'bike_test'
+                                        ? 'Vélo'
+                                      : mobilityUi === 'truck_test'
+                                        ? 'Camion'
+                                        : 'Voiture',
+                                vehicleType: vehicleType as any,
+                                origin: {
+                                  type: personDraft.lastKnownType,
+                                  query: address,
+                                  poiId: personDraft.lastKnownPoiId,
+                                  lng: personDraft.lastKnownLng,
+                                  lat: personDraft.lastKnownLat,
+                                  when: whenIso,
+                                },
+                                algorithm: 'road_graph',
+                              });
+
+                              const createdTrack = created.track;
+                              if (createdTrack && createdTrack.id) {
+                                setActiveVehicleTrackId(createdTrack.id);
+                                try {
+                                  const state = await getVehicleTrackState(selectedMissionId, createdTrack.id);
+                                  if (state.cache?.payloadGeojson) {
+                                    const provider = (state.cache.meta as any)?.provider as string | undefined;
+                                    const isTest = isTestTrack(createdTrack as any);
+                                    const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+                                    if (!isTest || allowTomtom) {
+                                      setVehicleTrackGeojsonById((prev) => ({
+                                        ...prev,
+                                        [createdTrack.id]: state.cache!.payloadGeojson as any,
+                                      }));
+                                    }
+                                  }
+                                } catch {
+                                  // ignore state loading error
+                                }
+                              }
+                            } catch {
+                              // création de piste non bloquante pour la fiche personne
+                            }
+                          }
                         } catch (e: any) {
                           setPersonError(e?.message ?? 'Erreur');
                         } finally {
@@ -6892,7 +8520,16 @@ export default function MapLibreMap() {
       {noProjectionToast ? (
         <div className="pointer-events-none fixed inset-0 z-[1400] flex items-center justify-center p-4">
           <div className="pointer-events-auto max-w-sm rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
-            Aucune projection active pour cette mission.
+            Aucune piste n'est active pour cette mission.
+          </div>
+        </div>
+      ) : null}
+
+      {roadGraphWarmingUp ? (
+        <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Chargement en cours</span>
           </div>
         </div>
       ) : null}

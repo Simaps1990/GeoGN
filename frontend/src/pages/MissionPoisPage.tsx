@@ -31,10 +31,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { deletePoi, getMission, listMissionMembers, listPois, updatePoi, type ApiMission, type ApiMissionMember, type ApiPoi } from '../lib/api';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirmDialog();
   const [mission, setMission] = useState<ApiMission | null>(null);
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,8 +160,73 @@ export default function MissionPoisPage() {
   // Tant que la mission n'est pas chargée, masquer les contrôles d'édition
   const canEdit = !!mission && mission.membership?.role !== 'viewer';
 
+  function enqueueOfflineAction(action: any) {
+    if (!missionId) return;
+    const key = `geogn.pendingActions.${missionId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const next = [...list, action].slice(-5000);
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  }
+
+  async function flushOfflineActions() {
+    if (!missionId) return;
+    if (!navigator.onLine) return;
+    const key = `geogn.pendingActions.${missionId}`;
+    let list: any[] = [];
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      list = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return;
+    }
+    if (!list.length) return;
+
+    const remaining: any[] = [];
+    for (const a of list) {
+      if (!a || a.entity !== 'poi' || !a.op || typeof a.id !== 'string') {
+        remaining.push(a);
+        continue;
+      }
+      try {
+        if (a.op === 'update') {
+          await updatePoi(missionId, a.id, a.payload ?? {});
+          continue;
+        }
+        if (a.op === 'delete') {
+          await deletePoi(missionId, a.id);
+          continue;
+        }
+        remaining.push(a);
+      } catch {
+        remaining.push(a);
+      }
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify(remaining.slice(-5000)));
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (!missionId) return;
+    void flushOfflineActions();
+    const onOnline = () => void flushOfflineActions();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [missionId]);
+
   return (
     <div className="p-4 pb-24">
+      {dialog}
       <h1 className="text-xl font-bold text-gray-900">Gestion des Points d'Interet</h1>
       {loading ? (
         <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
@@ -387,12 +454,24 @@ export default function MissionPoisPage() {
                             disabled={!missionId || busyId === p.id}
                             onClick={async () => {
                               if (!missionId) return;
-                              const ok = window.confirm('Supprimer ce POI ?');
+                              const ok = await confirm({
+                                title: 'Supprimer ce POI ?',
+                                message: 'Cette action est définitive.',
+                                confirmText: 'Supprimer',
+                                cancelText: 'Annuler',
+                                variant: 'danger',
+                              });
                               if (!ok) return;
                               setBusyId(p.id);
                               try {
                                 await deletePoi(missionId, p.id);
                                 setPois((prev) => prev.filter((x) => x.id !== p.id));
+                              } catch {
+                                const offline = !navigator.onLine;
+                                if (offline) {
+                                  setPois((prev) => prev.filter((x) => x.id !== p.id));
+                                  enqueueOfflineAction({ entity: 'poi', op: 'delete', id: p.id, t: Date.now() });
+                                }
                               } finally {
                                 setBusyId(null);
                               }

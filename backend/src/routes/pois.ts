@@ -221,8 +221,8 @@ export async function poisRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      const res = await PoiModel.updateOne({ _id: poiId, missionId, deletedAt: { $exists: false } }, { $set: { deletedAt: new Date() } });
-      if (res.matchedCount === 0) {
+      const res = await PoiModel.deleteOne({ _id: poiId, missionId });
+      if (!res.deletedCount) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
       }
 

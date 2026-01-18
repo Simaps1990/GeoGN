@@ -19,6 +19,7 @@ import {
   type ApiMissionJoinRequest,
   type ApiMissionMember,
 } from '../lib/api';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 
 export default function MissionContactsPage() {
   const { missionId } = useParams();
@@ -26,6 +27,7 @@ export default function MissionContactsPage() {
   const { user } = useAuth();
   const { clearMission } = useMission();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirmDialog();
 
   const roleDescriptions = useMemo(
     () => ({
@@ -351,6 +353,7 @@ export default function MissionContactsPage() {
 
   return (
     <div className="p-4 pb-24">
+      {dialog}
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-bold text-gray-900">Gestion de mon équipe</h1>
         <button
@@ -670,7 +673,13 @@ export default function MissionContactsPage() {
                               disabled={busyKey === `memberRemove:${m.user.id}`}
                               onClick={async () => {
                                 if (!missionId || !m.user?.id) return;
-                                const ok = window.confirm(`Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`);
+                                const ok = await confirm({
+                                  title: 'Retirer ce membre ? ',
+                                  message: `Retirer ${m.user.displayName ?? 'ce membre'} de la mission ?`,
+                                  confirmText: 'Retirer',
+                                  cancelText: 'Annuler',
+                                  variant: 'danger',
+                                });
                                 if (!ok) return;
                                 setBusyKey(`memberRemove:${m.user.id}`);
                                 setError(null);
@@ -699,7 +708,13 @@ export default function MissionContactsPage() {
                           disabled={busyKey === 'leaveMission'}
                           onClick={async () => {
                             if (!missionId || !userId) return;
-                            const ok = window.confirm('Quitter cette mission ?');
+                            const ok = await confirm({
+                              title: 'Quitter cette mission ?',
+                              message: 'Vous serez retiré de la mission.',
+                              confirmText: 'Quitter',
+                              cancelText: 'Annuler',
+                              variant: 'danger',
+                            });
                             if (!ok) return;
                             setBusyKey('leaveMission');
                             setError(null);

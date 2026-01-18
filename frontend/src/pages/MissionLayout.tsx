@@ -14,6 +14,17 @@ export default function MissionLayout() {
   const watchIdRef = useRef<number | null>(null);
   const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
 
+  const ts = () => {
+    try {
+      const d = new Date();
+      const p2 = (n: number) => String(n).padStart(2, '0');
+      const p3 = (n: number) => String(n).padStart(3, '0');
+      return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+    } catch {
+      return '';
+    }
+  };
+
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [location.pathname]);
@@ -93,6 +104,18 @@ export default function MissionLayout() {
             accuracy: pos.coords.accuracy ?? undefined,
             t: Date.now(),
           };
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[position]', ts(), 'pushOnePositionNow', {
+              missionId,
+              lng: payload.lng,
+              lat: payload.lat,
+              t: payload.t,
+              socketConnected: socket.connected,
+            });
+          } catch {
+            // ignore
+          }
           if (socket.connected) {
             socket.emit('position:update', payload);
           } else {
@@ -136,6 +159,19 @@ export default function MissionLayout() {
             accuracy: pos.coords.accuracy ?? undefined,
             t,
           };
+
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[position]', ts(), 'watchPosition', {
+              missionId,
+              lng: payload.lng,
+              lat: payload.lat,
+              t: payload.t,
+              socketConnected: socket.connected,
+            });
+          } catch {
+            // ignore
+          }
 
           if (socket.connected) {
             socket.emit('position:update', payload);

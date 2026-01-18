@@ -6,6 +6,7 @@ import { MissionMemberModel } from '../models/missionMember.js';
 import { TraceModel } from '../models/trace.js';
 import { PositionModel } from '../models/position.js';
 import { PositionCurrentModel } from '../models/positionCurrent.js';
+import { UserModel } from '../models/user.js';
 
 type CreateMissionBody = {
   title: string;
@@ -195,8 +196,24 @@ export async function missionsRoutes(app: FastifyInstance) {
       PositionCurrentModel.deleteMany({ missionId: missionObjectId }),
     ]);
 
+    let actorDisplayName: string | undefined;
     try {
-      (app as any).io?.to(`mission:${id}`)?.emit('mission:tracesCleared', { missionId: id });
+      const user = await UserModel.findById(req.userId).select({ displayName: 1, appUserId: 1 }).lean();
+      if (user) {
+        const dn = typeof (user as any).displayName === 'string' ? (user as any).displayName.trim() : '';
+        const appId = typeof (user as any).appUserId === 'string' ? (user as any).appUserId.trim() : '';
+        actorDisplayName = dn || appId || undefined;
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      (app as any).io?.to(`mission:${id}`)?.emit('mission:tracesCleared', {
+        missionId: id,
+        actorUserId: req.userId,
+        actorDisplayName,
+      });
     } catch {
       // ignore
     }
@@ -234,17 +251,35 @@ export async function missionsRoutes(app: FastifyInstance) {
       if (t) update.title = t;
     }
 
+    const before = await MissionModel.findById(id).select({ traceRetentionSeconds: 1 }).lean();
+    const prevTraceRetentionSeconds = typeof before?.traceRetentionSeconds === 'number' ? before.traceRetentionSeconds : null;
+
     const mission = await MissionModel.findOneAndUpdate({ _id: id }, { $set: update }, { new: true }).lean();
     if (!mission) {
       return reply.code(404).send({ error: 'NOT_FOUND' });
     }
 
+    let actorDisplayName: string | undefined;
+    try {
+      const user = await UserModel.findById(req.userId).select({ displayName: 1, appUserId: 1 }).lean();
+      if (user) {
+        const dn = typeof (user as any).displayName === 'string' ? (user as any).displayName.trim() : '';
+        const appId = typeof (user as any).appUserId === 'string' ? (user as any).appUserId.trim() : '';
+        actorDisplayName = dn || appId || undefined;
+      }
+    } catch {
+      // ignore
+    }
+
     try {
       (app as any).io?.to(`mission:${id}`)?.emit('mission:updated', {
         missionId: id,
+        prevTraceRetentionSeconds,
         traceRetentionSeconds: mission.traceRetentionSeconds,
         title: mission.title,
         updatedAt: mission.updatedAt,
+        actorUserId: req.userId,
+        actorDisplayName,
       });
     } catch {
       // ignore

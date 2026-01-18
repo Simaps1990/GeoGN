@@ -10,3 +10,5 @@ export { TraceModel } from './trace.js';
 export { PoiModel } from './poi.js';
 export { PersonCaseModel } from './personCase.js';
 export { PositionCurrentModel } from './positionCurrent.js';
+export { VehicleTrackModel } from './vehicleTrack.js';
+export { HuntIsochroneModel } from './huntIsochrone.js';

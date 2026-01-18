@@ -1,3 +1,5 @@
+import type { FeatureCollection } from 'geojson';
+
 export type ApiUser = {
   id: string;
   appUserId: string;
@@ -72,6 +74,56 @@ export type ApiZone = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ApiVehicleTrackOrigin = {
+  type: 'address' | 'poi';
+  query: string;
+  poiId?: string;
+  lng?: number;
+  lat?: number;
+  when: string | null;
+};
+
+export type ApiVehicleTrackStatus = 'active' | 'stopped' | 'expired';
+export type ApiVehicleTrackVehicleType = 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+export type ApiVehicleTrackAlgorithm = 'mvp_isoline' | 'road_graph';
+
+export type ApiVehicleTrackCache = {
+  computedAt: string | null;
+  elapsedSeconds: number;
+  payloadGeojson: FeatureCollection | null;
+  meta: any | null;
+} | null;
+
+export type ApiVehicleTrack = {
+  id: string;
+  missionId: string;
+  createdBy: string;
+  label: string;
+  vehicleType: ApiVehicleTrackVehicleType;
+  origin: ApiVehicleTrackOrigin;
+  startedAt: string | null;
+  maxDurationSeconds: number;
+  trafficRefreshSeconds: number;
+  status: ApiVehicleTrackStatus;
+  algorithm: ApiVehicleTrackAlgorithm;
+  lastComputedAt: string | null;
+  cache: ApiVehicleTrackCache;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type ApiVehicleTrackListResponse = {
+  tracks: ApiVehicleTrack[];
+  total: number;
+};
+
+export type ApiVehicleTrackStateResponse = {
+  trackId: string;
+  missionId: string;
+  status: ApiVehicleTrackStatus;
+  cache: ApiVehicleTrackCache;
 };
 
 export type ApiMissionMember = {
@@ -270,6 +322,122 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
     throw new Error(body?.error ?? 'CHANGE_PASSWORD_FAILED');
   }
   return (await res.json()) as { ok: true };
+}
+
+export async function listVehicleTracks(
+  missionId: string,
+  params?: {
+    status?: ApiVehicleTrackStatus;
+    vehicleType?: ApiVehicleTrackVehicleType;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }
+) {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.vehicleType) searchParams.set('vehicleType', params.vehicleType);
+  if (params?.q && params.q.trim()) searchParams.set('q', params.q.trim());
+  if (typeof params?.limit === 'number') searchParams.set('limit', String(params.limit));
+  if (typeof params?.offset === 'number') searchParams.set('offset', String(params.offset));
+
+  const qs = searchParams.toString();
+  const path = `/missions/${encodeURIComponent(missionId)}/vehicle-tracks${qs ? `?${qs}` : ''}`;
+
+  const res = await apiFetch(path);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'LIST_VEHICLE_TRACKS_FAILED');
+  }
+  return (await res.json()) as ApiVehicleTrackListResponse;
+}
+
+export async function createVehicleTrack(
+  missionId: string,
+  input: {
+    label: string;
+    vehicleType: ApiVehicleTrackVehicleType;
+    origin: {
+      type: 'address' | 'poi';
+      query: string;
+      poiId?: string;
+      lng?: number;
+      lat?: number;
+      when?: string;
+    };
+    startedAt?: string;
+    maxDurationSeconds?: number;
+    algorithm?: ApiVehicleTrackAlgorithm;
+  }
+) {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/vehicle-tracks`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'CREATE_VEHICLE_TRACK_FAILED');
+  }
+  return (await res.json()) as { track: ApiVehicleTrack };
+}
+
+export async function updateVehicleTrack(
+  missionId: string,
+  trackId: string,
+  input: Partial<{
+    label: string;
+    vehicleType: ApiVehicleTrackVehicleType;
+    origin: {
+      type: 'address' | 'poi';
+      query: string;
+      poiId?: string;
+      lng?: number;
+      lat?: number;
+      when?: string;
+    };
+    status: ApiVehicleTrackStatus;
+  }>
+) {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/vehicle-tracks/${encodeURIComponent(trackId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UPDATE_VEHICLE_TRACK_FAILED');
+  }
+  return (await res.json()) as { track: ApiVehicleTrack };
+}
+
+export async function deleteVehicleTrack(missionId: string, trackId: string) {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/vehicle-tracks/${encodeURIComponent(trackId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_VEHICLE_TRACK_FAILED');
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function getVehicleTrackState(
+  missionId: string,
+  trackId: string
+): Promise<ApiVehicleTrackStateResponse> {
+  const res = await apiFetch(
+    `/missions/${encodeURIComponent(missionId)}/vehicle-tracks/${encodeURIComponent(trackId)}/state`
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'GET_VEHICLE_TRACK_STATE_FAILED');
+  }
+  return (await res.json()) as ApiVehicleTrackStateResponse;
 }
 
 export async function listMissions() {

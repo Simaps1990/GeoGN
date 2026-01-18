@@ -3,10 +3,12 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { clearMissionTraces, createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 
 export default function CurrentMissionPage() {
   const navigate = useNavigate();
   const { selectedMissionId, selectMission } = useMission();
+  const { confirm, dialog } = useConfirmDialog();
 
   const [missions, setMissions] = useState<ApiMission[]>([]);
   const [missionsLoading, setMissionsLoading] = useState(true);
@@ -76,7 +78,13 @@ export default function CurrentMissionPage() {
   }
 
   async function onDeleteMission(missionId: string) {
-    const ok = window.confirm('Supprimer cette mission ?');
+    const ok = await confirm({
+      title: 'Supprimer cette mission ?',
+      message: 'Cette action est définitive.',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      variant: 'danger',
+    });
     if (!ok) return;
     try {
       await deleteMission(missionId);
@@ -154,7 +162,13 @@ export default function CurrentMissionPage() {
 
   async function onClearTraces() {
     if (!selectedMissionId) return;
-    const ok = window.confirm('Purger l\'historique des points pour cette mission ? Cette action est définitive.');
+    const ok = await confirm({
+      title: "Purger l'historique des points ?",
+      message: 'Cette action est définitive.',
+      confirmText: 'Purger',
+      cancelText: 'Annuler',
+      variant: 'danger',
+    });
     if (!ok) return;
     try {
       await clearMissionTraces(selectedMissionId);
@@ -172,6 +186,7 @@ export default function CurrentMissionPage() {
 
   return (
     <div className="p-4 pb-24">
+      {dialog}
       <div className="flex items-center justify-center">
         <h1 className="text-xl font-bold text-gray-900">GeoGN</h1>
       </div>
