@@ -855,6 +855,27 @@ export default function MapLibreMap() {
     showActiveVehicleTrackRef.current = showActiveVehicleTrack;
   }, [showActiveVehicleTrack]);
 
+  // Quand l'utilisateur réactive l'affichage via le bouton Paw, réappliquer
+  // immédiatement la dernière géométrie connue (sans attendre un tick).
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const src = map.getSource('vehicle-track-reached') as GeoJSONSource | undefined;
+    if (!src) return;
+    if (!showActiveVehicleTrack) return;
+
+    try {
+      const id = activeVehicleTrackIdRef.current;
+      const byId = vehicleTrackGeojsonByIdRef.current;
+      const raw = id && (byId as any)?.[id] ? (byId as any)[id] : null;
+      const fc = (raw ?? vehicleTrackPrevGeojsonRef.current ?? EMPTY_FC) as any;
+      src.setData(fc);
+    } catch {
+      // ignore
+    }
+  }, [showActiveVehicleTrack, mapReady]);
+
   useEffect(() => {
     activeVehicleTrackIdRef.current = activeVehicleTrackId;
   }, [activeVehicleTrackId]);
@@ -6378,7 +6399,7 @@ export default function MapLibreMap() {
         const raw = getRing(fc);
         if (!raw) return fc;
         const points = Math.max(72, Math.min(160, Math.floor(raw.length * 1.35)));
-        const ring = smoothRing(resampleRing(raw, points), 3);
+        const ring = smoothRing(resampleRing(raw, points), 2);
         return normalizeVehicleTrackFc(cloneFcWithRing(fc, ring));
       } catch {
         return fc;
@@ -6428,6 +6449,15 @@ export default function MapLibreMap() {
 
     if (!showActiveVehicleTrackRef.current) {
       cancelMorph();
+      // IMPORTANT: on ne vide pas l'état interne quand l'utilisateur masque la piste.
+      // On continue de "rattraper" la forme en mémoire pour pouvoir la réafficher
+      // instantanément à la réactivation.
+      try {
+        vehicleTrackPrevGeojsonRef.current = data;
+        vehicleTrackPrevKeyRef.current = key;
+      } catch {
+        // ignore
+      }
       try {
         src.setData(EMPTY_FC as any);
         vehicleTrackLastAppliedGeojsonRef.current = EMPTY_FC;
@@ -6460,8 +6490,8 @@ export default function MapLibreMap() {
       } else {
         // Normalize point counts + smooth corners.
         const points = Math.max(72, Math.min(160, Math.floor(Math.max(prevRingRaw.length, nextRingRaw.length) * 1.35)));
-        const prevRing = smoothRing(resampleRing(prevRingRaw, points), 3);
-        const nextRing = smoothRing(resampleRing(nextRingRaw, points), 3);
+        const prevRing = smoothRing(resampleRing(prevRingRaw, points), 2);
+        const nextRing = smoothRing(resampleRing(nextRingRaw, points), 2);
 
         const startFc = normalizeVehicleTrackFc(cloneFcWithRing(data, prevRing));
         try {
