@@ -2397,7 +2397,9 @@ export default function MapLibreMap() {
         const prevFallback = mission?.traceRetentionSeconds;
         const prev = prevFromMsg ?? (typeof prevFallback === 'number' ? prevFallback : null);
         if (name && typeof prev === 'number' && prev !== nextRetention) {
-          setActivityToast(`${name} vient de passer le temps de suivi de ${prev} secondes à ${nextRetention} secondes`);
+          if (!user?.id || user.id !== actorUserId) {
+            setActivityToast(`${name} vient de passer le temps de suivi de ${prev} secondes à ${nextRetention} secondes`);
+          }
         }
       } catch {
         // ignore
@@ -2441,17 +2443,21 @@ export default function MapLibreMap() {
   }, [selectedMissionId, mission, historyWindowSeconds]);
 
   useEffect(() => {
-    const onMissionUpdated = (e: Event) => {
-      const ce = e as CustomEvent<any>;
-      const updated = ce?.detail?.mission;
-      if (!updated?.id) return;
-      if (!selectedMissionId) return;
-      if (updated.id !== selectedMissionId) return;
-      setMission((prev) => ({ ...(prev ?? updated), ...updated }));
+    if (!selectedMissionId) return;
+    const socket = getSocket();
+    const onMemberUpdated = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const userId = msg?.member?.userId;
+      if (!userId) return;
+      const color = msg?.member?.color;
+      if (typeof color === 'string' && color.trim()) {
+        setMemberColors((prev) => ({ ...prev, [userId]: color.trim() }));
+      }
     };
-    window.addEventListener('geotacops:mission:updated', onMissionUpdated as any);
+
+    socket.on('member:updated', onMemberUpdated);
     return () => {
-      window.removeEventListener('geotacops:mission:updated', onMissionUpdated as any);
+      socket.off('member:updated', onMemberUpdated);
     };
   }, [selectedMissionId]);
 
@@ -2965,7 +2971,7 @@ export default function MapLibreMap() {
             'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
             'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors'
+          'OpenStreetMap contributors'
         ),
       },
       {
@@ -2984,7 +2990,7 @@ export default function MapLibreMap() {
             'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
             'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors © CARTO'
+          'OpenStreetMap contributors CARTO'
         ),
       },
       {
@@ -2996,7 +3002,7 @@ export default function MapLibreMap() {
             'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
             'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors © CARTO'
+          'OpenStreetMap contributors CARTO'
         ),
       },
       {
@@ -3007,7 +3013,7 @@ export default function MapLibreMap() {
             'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
             'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
           ],
-          '© OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+          'OpenStreetMap contributors, SRTM | Map style: OpenTopoMap (CC-BY-SA)'
         ),
       },
     ],
@@ -5408,15 +5414,12 @@ export default function MapLibreMap() {
       if (!msg?.poi?.id) return;
       try {
         const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
-        if (createdBy && user?.id && createdBy === user.id) {
-          setProjectionNotification(false);
-        }
-
-        // Bulle d'info pour les autres participants uniquement (pas pour l'auteur).
-        if (createdBy && (!user?.id || user.id !== createdBy)) {
+        if (createdBy) {
           const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
           const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
-          setActivityToast(`${name} vient de créer un POI`);
+          if (!user?.id || user.id !== createdBy) {
+            setActivityToast(`${name} vient de créer un POI`);
+          }
         }
       } catch {
         // ignore
@@ -5475,7 +5478,9 @@ export default function MapLibreMap() {
         if (createdBy) {
           const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
           const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
-          setActivityToast(`${name} vient de créer une zone`);
+          if (!user?.id || user.id !== createdBy) {
+            setActivityToast(`${name} vient de créer une zone`);
+          }
         }
       } catch {
         // ignore
@@ -5498,7 +5503,10 @@ export default function MapLibreMap() {
       if (created && actorUserId) {
         const rawName = typeof msg.actorDisplayName === 'string' ? msg.actorDisplayName : null;
         const name = (rawName && rawName.trim()) || buildUserDisplayName(actorUserId);
-        setActivityToast(`${name} vient de créer une piste`);
+        // Ne pas afficher la bulle à l'utilisateur qui a créé la piste.
+        if (!user?.id || user.id !== actorUserId) {
+          setActivityToast(`${name} vient de créer une piste`);
+        }
       }
     };
 
@@ -7218,9 +7226,6 @@ export default function MapLibreMap() {
                       lastKnownPoiId: selectedPoi.id,
                       lastKnownLng: selectedPoi.lng,
                       lastKnownLat: selectedPoi.lat,
-                      // Si aucune date/heure n'est encore définie, on pré-remplit avec "maintenant"
-                      // pour permettre un démarrage rapide.
-                      lastKnownWhen: prev.lastKnownWhen ? prev.lastKnownWhen : nowLocalMinute,
                     }));
 
                     // Ouvre le popup "Démarrer une piste" (fiche en édition).
@@ -8652,11 +8657,11 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto w-[min(100vw-32px,1600px)] rounded-2xl bg-gray-900/90 px-6 py-3 text-sm text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto inline-flex max-w-[min(100vw-32px,1600px)] rounded-2xl bg-gray-900/90 px-6 py-3 text-sm text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            {activityToast}
+            <span className="w-full text-center">{activityToast}</span>
           </div>
         </div>
       ) : null}
