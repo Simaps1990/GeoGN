@@ -15,6 +15,7 @@ function clampElapsed(seconds: number, maxSeconds: number): number {
 
 export function startVehicleTrackScheduler(app: FastifyInstance) {
   let running = false;
+  let pendingTick = false;
   const schedulerBootTime = new Date();
 
   // Best-effort cleanup: stop any track still marked active from a previous backend run.
@@ -38,11 +39,12 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
   })();
 
   async function tick() {
-    if (running) return;
+    if (running) {
+      pendingTick = true;
+      return;
+    }
     running = true;
     try {
-      const now = new Date();
-
       // Ne traite que les pistes actives démarrées après le démarrage de ce processus.
       // Cela évite de continuer à consommer du TomTom pour d'anciens suivis laissés actifs
       // dans la base avant un redémarrage du backend.
@@ -110,6 +112,11 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
       }
 
       for (const track of tracksToProcess) {
+        // IMPORTANT: on capture "now" au moment de traiter cette piste.
+        // Si un tick dure longtemps (TomTom lent), on veut que l'isochrone publiée
+        // reflète l'instant réel du calcul et non l'instant de démarrage du tick.
+        const now = new Date();
+
         // Sécurité supplémentaire : il est possible qu'une piste ait été supprimée ou
         // passée en "stopped" entre le moment où on a listé les pistes actives et
         // maintenant. On revérifie donc qu'elle existe encore et qu'elle est toujours
@@ -166,9 +173,12 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
 
         const label = typeof (fresh as any).label === 'string' ? ((fresh as any).label as string) : '';
         const isTestTrack = /TEST/i.test(label);
+        // Les pistes road_graph (celles que tu crées côté UI) doivent rester à cadence rapide,
+        // même si on ne met plus "TEST" dans le label affiché.
+        const isFastTrack = isTestTrack || fresh.algorithm === 'road_graph';
 
         const lastComputedAtMs = fresh.lastComputedAt instanceof Date ? fresh.lastComputedAt.getTime() : 0;
-        const refreshSeconds = isTestTrack
+        const refreshSeconds = isFastTrack
           ? 20
           : Number.isFinite(fresh.trafficRefreshSeconds)
             ? Math.max(10, Math.min(3600, fresh.trafficRefreshSeconds))
@@ -176,7 +186,7 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
 
         // Pour les pistes TEST, on veut que le premier calcul réel ne se produise
         // qu'après ~20s d'écoulement, puis toutes les ~20s ensuite.
-        if (isTestTrack) {
+        if (isFastTrack) {
           // Pas encore de calcul : on attend au moins refreshSeconds d'elapsed avant de lancer TomTom.
           if (!lastComputedAtMs && elapsedSeconds < refreshSeconds) {
             continue;
@@ -210,7 +220,9 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
               const maxSec = Number.isFinite(fresh.maxDurationSeconds)
                 ? Math.max(1, fresh.maxDurationSeconds)
                 : maxDurationSeconds;
-              const stepped = Math.floor(elapsedSeconds / step) * step;
+              // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
+              // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
+              const stepped = Math.ceil(elapsedSeconds / step) * step;
 
               // Si un budget a déjà été calculé (ex: calcul immédiat à la création),
               // on force l'avancement au palier suivant pour éviter 20 -> 20.
@@ -324,7 +336,9 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
               const maxSec = Number.isFinite(fresh.maxDurationSeconds)
                 ? Math.max(1, fresh.maxDurationSeconds)
                 : maxDurationSeconds;
-              const stepped = Math.floor(elapsedSeconds / step) * step;
+              // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
+              // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
+              const stepped = Math.ceil(elapsedSeconds / step) * step;
 
               const prevBudget = (() => {
                 const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
@@ -454,6 +468,15 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
       app.log.error(e, 'vehicleTrackScheduler tick failed');
     } finally {
       running = false;
+
+      // Si un tick a été demandé pendant qu'on tournait, on le rejoue immédiatement
+      // pour éviter d'attendre le prochain setInterval (important en prod si TomTom est lent).
+      if (pendingTick) {
+        pendingTick = false;
+        setTimeout(() => {
+          void tick();
+        }, 0);
+      }
     }
   }
 

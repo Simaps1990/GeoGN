@@ -7132,11 +7132,33 @@ export default function MapLibreMap() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelectedPoi(null)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm hover:bg-gray-50 hover:text-gray-900"
-                  title="Fermer"
+                  onClick={() => {
+                    if (!selectedPoi) return;
+                    setPersonDraft((prev) => ({
+                      ...prev,
+                      lastKnownType: 'poi',
+                      lastKnownQuery: selectedPoi.title || 'POI',
+                      lastKnownPoiId: selectedPoi.id,
+                      lastKnownLng: selectedPoi.lng,
+                      lastKnownLat: selectedPoi.lat,
+                      // Si aucune date/heure n'est encore définie, on pré-remplit avec "maintenant"
+                      // pour permettre un démarrage rapide.
+                      lastKnownWhen: prev.lastKnownWhen ? prev.lastKnownWhen : nowLocalMinute,
+                    }));
+
+                    // Ouvre le popup "Démarrer une piste" (fiche en édition).
+                    setPersonEdit(true);
+                    setPersonPanelCollapsed(false);
+                    setPersonPanelOpen(true);
+                    setShowActiveVehicleTrack(true);
+
+                    // Ferme le popup POI.
+                    setSelectedPoi(null);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                  title="Démarrer une piste depuis ce POI"
                 >
-                  <X size={14} />
+                  <PawPrint size={16} />
                 </button>
               </div>
               {canEditMap ? (

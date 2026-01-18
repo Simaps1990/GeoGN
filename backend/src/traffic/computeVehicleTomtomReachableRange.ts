@@ -137,6 +137,20 @@ export async function computeVehicleTomtomReachableRange(
   const profileKey = vehicleProfileKey({ vehicleType: input.vehicleType, label: input.label });
   const rejected = unsupportedTravelModesByProfile.get(profileKey) ?? new Set<string>();
 
+  const timeoutMs = (() => {
+    const raw = process.env.TOMTOM_TIMEOUT_MS;
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n > 0) return Math.max(500, Math.min(30_000, Math.floor(n)));
+    return 10_000;
+  })();
+
+  const trafficParam = (() => {
+    const raw = (process.env.TOMTOM_TRAFFIC ?? '').toLowerCase();
+    if (raw === 'false' || raw === '0' || raw === 'no') return 'false';
+    if (raw === 'true' || raw === '1' || raw === 'yes') return 'true';
+    return 'true';
+  })();
+
   const fetchWithTimeout = async (url: string, timeoutMs: number) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -168,11 +182,11 @@ export async function computeVehicleTomtomReachableRange(
       );
       url.searchParams.set('key', apiKey);
       url.searchParams.set('timeBudgetInSec', String(scaled.budgetSec));
-      url.searchParams.set('traffic', 'true');
+      url.searchParams.set('traffic', trafficParam);
       url.searchParams.set('routeType', 'fastest');
       url.searchParams.set('travelMode', travelMode);
 
-      const res = await fetchWithTimeout(url.toString(), 10_000);
+      const res = await fetchWithTimeout(url.toString(), timeoutMs);
       lastHttpStatus = res.status;
       if (!res.ok) {
         // Si le mode est rejeté, on tente un fallback.
