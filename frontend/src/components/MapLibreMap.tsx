@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -885,6 +885,25 @@ export default function MapLibreMap() {
     vehicleTrackGeojsonByIdRef.current = vehicleTrackGeojsonById;
   }, [vehicleTrackGeojsonById]);
 
+  const mergeVehicleTracksPreferNewest = useCallback(
+    (prev: ApiVehicleTrack[], incoming: ApiVehicleTrack[]) => {
+      if (!prev.length) return incoming;
+      const prevById = new Map(prev.map((t) => [t.id, t] as const));
+      return incoming.map((t) => {
+        const existing = prevById.get(t.id);
+        if (!existing) return t;
+
+        const incAt = t.cache?.computedAt ? new Date(t.cache.computedAt).getTime() : 0;
+        const exAt = existing.cache?.computedAt ? new Date(existing.cache.computedAt).getTime() : 0;
+        if (exAt > incAt) {
+          return { ...t, cache: existing.cache };
+        }
+        return t;
+      });
+    },
+    []
+  );
+
   // Une "piste autorisée" est simplement une piste calculée avec l'algorithme road_graph.
   // On ne se base plus sur la présence de "TEST" dans le label : les anciennes pistes de test
   // sont devenues la norme.
@@ -1713,7 +1732,7 @@ export default function MapLibreMap() {
 
         setVehicleTracksLoaded(true);
         const filtered = filterAllowedVehicleTracks(tracks);
-        setVehicleTracks(filtered);
+        setVehicleTracks((prev) => mergeVehicleTracksPreferNewest(prev, filtered));
         setVehicleTracksTotal(filtered.length);
 
         // Si la mission n'a plus aucune piste, on nettoie complètement l'état
@@ -1729,7 +1748,7 @@ export default function MapLibreMap() {
           return;
         }
 
-        const currentId = activeVehicleTrackId;
+        const currentId = activeVehicleTrackIdRef.current;
         // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
         // existe encore côté API, on conserve l'ID. (Le status peut transiter,
         // et un reset à null fait disparaître la forme avant le prochain isochrone.)
@@ -1751,11 +1770,12 @@ export default function MapLibreMap() {
             setActiveVehicleTrackId(null);
           }
         } else {
-          if (nextActiveId !== activeVehicleTrackId) {
+          if (nextActiveId !== activeVehicleTrackIdRef.current) {
             setActiveVehicleTrackId(nextActiveId);
           }
 
-          if (!vehicleTrackGeojsonById[nextActiveId]) {
+          const geoById = vehicleTrackGeojsonByIdRef.current;
+          if (!geoById[nextActiveId]) {
             try {
               const state = await getVehicleTrackState(missionIdAtCall, nextActiveId);
               if (cancelled) return;
@@ -1795,8 +1815,7 @@ export default function MapLibreMap() {
     vehicleTracksQuery.q,
     vehicleTracksQuery.limit,
     vehicleTracksQuery.offset,
-    activeVehicleTrackId,
-    vehicleTrackGeojsonById,
+    mergeVehicleTracksPreferNewest,
   ]);
 
   useEffect(() => {
@@ -1939,6 +1958,10 @@ export default function MapLibreMap() {
       vehicleTrackTimeUpdateTimerRef.current = null;
       void (async () => {
         try {
+          // Si la piste a été changée/supprimée entre temps, ne rien faire.
+          if (activeVehicleTrackIdRef.current !== trackId) return;
+          if (!vehicleTracks.some((t) => t.id === trackId)) return;
+
           await updateVehicleTrack(selectedMissionId, trackId, {
             startedAt: whenIso,
             origin: {
@@ -1969,6 +1992,8 @@ export default function MapLibreMap() {
           // Non bloquant (ex: permissions / piste non admin) : on informe juste,
           // et on expose le message d'erreur backend pour faciliter le debug.
           const msg = e?.message ? String(e.message) : 'erreur inconnue';
+          // La piste peut avoir été supprimée juste avant l'exécution du debounce.
+          if (/NOT_FOUND/i.test(msg)) return;
           setActivityToast(`Impossible de mettre à jour l'heure de la piste (${msg})`);
         }
       })();
