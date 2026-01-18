@@ -2609,7 +2609,7 @@ export default function MapLibreMap() {
           const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
           const rawName = typeof msg?.actorDisplayName === 'string' ? msg.actorDisplayName : null;
           const name = (rawName && rawName.trim()) || (actorUserId ? buildUserDisplayName(actorUserId) : null);
-          if (name) {
+          if (name && (!user?.id || user.id !== actorUserId)) {
             setActivityToast(`${name} vient de vider la trame de la mission`);
           }
         }
@@ -4429,18 +4429,21 @@ export default function MapLibreMap() {
     const features: any[] = [];
 
     if (activeTool === 'zone_circle' && draftLngLat) {
-      features.push({
-        type: 'Feature',
-        properties: { kind: 'fill', color: draftColor },
-        geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
-      });
+      // Toujours afficher le point central dès le premier clic.
       features.push({
         type: 'Feature',
         properties: { kind: 'point', color: draftColor },
         geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
       });
 
+      // Ne dessiner le cercle et le rayon qu'une fois le deuxième point posé.
       if (draftCircleEdgeLngLat) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'fill', color: draftColor },
+          geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
+        });
+
         features.push({
           type: 'Feature',
           properties: { kind: 'line', color: draftColor },
@@ -5404,12 +5407,21 @@ export default function MapLibreMap() {
       if (msg?.missionId !== selectedMissionId) return;
       if (!msg?.poi?.id) return;
       try {
-        if (msg.poi.createdBy === user?.id) {
+        const createdBy = typeof msg.poi.createdBy === 'string' ? msg.poi.createdBy : null;
+        if (createdBy && user?.id && createdBy === user.id) {
           setProjectionNotification(false);
+        }
+
+        // Bulle d'info pour les autres participants uniquement (pas pour l'auteur).
+        if (createdBy && (!user?.id || user.id !== createdBy)) {
+          const rawName = typeof msg.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
+          const name = (rawName && rawName.trim()) || buildUserDisplayName(createdBy);
+          setActivityToast(`${name} vient de créer un POI`);
         }
       } catch {
         // ignore
       }
+
       setPois((prev) => {
         const incoming = msg.poi as ApiPoi;
         const exists = prev.some((p) => p.id === incoming.id);
@@ -7855,31 +7867,32 @@ export default function MapLibreMap() {
                     ) : null}
                     <div className="mt-1 text-xs text-gray-600">Déplacement: {mobilityLabel(personCase.mobility)}</div>
                   </div>
-
-                  <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Profil</div>
-                    <div className="mt-1 text-sm text-gray-900">
-                      Âge: {personCase.age ?? '—'}
-                      {' · '}Sexe: {sexLabel(personCase.sex)}
-                      {' · '}État: {personCase.healthStatus}
+                  {normalizeMobility(personCase.mobility as any) === 'none' ? (
+                    <div className="rounded-2xl border p-3">
+                      <div className="text-xs font-semibold text-gray-700">Profil</div>
+                      <div className="mt-1 text-sm text-gray-900">
+                        Âge: {personCase.age ?? '—'}
+                        {' · '}Sexe: {sexLabel(personCase.sex)}
+                        {' · '}État: {personCase.healthStatus}
+                      </div>
+                      {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
+                        <div className="mt-1 text-xs text-gray-600">Maladies: {personCase.diseases.join(', ')}</div>
+                      ) : null}
+                      {Array.isArray(personCase.injuries) && personCase.injuries.length ? (() => {
+                        const clean = cleanInjuries(personCase.injuries);
+                        if (!clean.length) return null;
+                        const labels = clean.map((inj) => {
+                          if (inj.id === 'plaie') return 'Plaie membre inférieur';
+                          return inj.id;
+                        });
+                        return (
+                          <div className="mt-1 text-xs text-gray-600">
+                            Blessures: {labels.join(', ')}
+                          </div>
+                        );
+                      })() : null}
                     </div>
-                    {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
-                      <div className="mt-1 text-xs text-gray-600">Maladies: {personCase.diseases.join(', ')}</div>
-                    ) : null}
-                    {Array.isArray(personCase.injuries) && personCase.injuries.length ? (() => {
-                      const clean = cleanInjuries(personCase.injuries);
-                      if (!clean.length) return null;
-                      const labels = clean.map((inj) => {
-                        if (inj.id === 'plaie') return 'Plaie membre inférieur';
-                        return inj.id;
-                      });
-                      return (
-                        <div className="mt-1 text-xs text-gray-600">
-                          Blessures: {labels.join(', ')}
-                        </div>
-                      );
-                    })() : null}
-                  </div>
+                  ) : null}
 
                   <div className="rounded-2xl border p-3">
                     <div className="text-xs font-semibold text-gray-700">Météo (sur le dernier point)</div>
@@ -8639,7 +8652,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(98vw,1120px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto w-[min(100vw-32px,1600px)] rounded-2xl bg-gray-900/90 px-6 py-3 text-sm text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
