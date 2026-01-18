@@ -137,6 +137,16 @@ export async function computeVehicleTomtomReachableRange(
   const profileKey = vehicleProfileKey({ vehicleType: input.vehicleType, label: input.label });
   const rejected = unsupportedTravelModesByProfile.get(profileKey) ?? new Set<string>();
 
+  const fetchWithTimeout = async (url: string, timeoutMs: number) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(id);
+    }
+  };
+
   try {
     let chosenMode: string | null = null;
     let chosenData: any = null;
@@ -162,7 +172,7 @@ export async function computeVehicleTomtomReachableRange(
       url.searchParams.set('routeType', 'fastest');
       url.searchParams.set('travelMode', travelMode);
 
-      const res = await fetch(url.toString());
+      const res = await fetchWithTimeout(url.toString(), 10_000);
       lastHttpStatus = res.status;
       if (!res.ok) {
         // Si le mode est rejeté, on tente un fallback.
