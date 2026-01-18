@@ -1963,9 +1963,11 @@ export default function MapLibreMap() {
           } catch {
             // ignore
           }
-        } catch {
-          // Non bloquant (ex: permissions / piste non admin) : on informe juste.
-          setActivityToast("Impossible de mettre à jour l'heure de la piste");
+        } catch (e: any) {
+          // Non bloquant (ex: permissions / piste non admin) : on informe juste,
+          // et on expose le message d'erreur backend pour faciliter le debug.
+          const msg = e?.message ? String(e.message) : 'erreur inconnue';
+          setActivityToast(`Impossible de mettre à jour l'heure de la piste (${msg})`);
         }
       })();
     }, 450);
