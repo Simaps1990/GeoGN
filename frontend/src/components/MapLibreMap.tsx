@@ -1793,21 +1793,32 @@ export default function MapLibreMap() {
           // Pas encore de fiche : seuls les admins peuvent en créer, les visualisateurs restent en lecture seule.
           if (canEditPerson) {
             setPersonEdit(true);
-            setPersonDraft({
-              lastKnownQuery: '',
-              lastKnownType: 'address',
-              lastKnownPoiId: undefined,
-              lastKnownLng: undefined,
-              lastKnownLat: undefined,
-              lastKnownWhen: '',
-              mobility: 'none',
-              age: '',
-              sex: 'unknown',
-              healthStatus: 'stable',
-              diseases: [],
-              diseasesFreeText: '',
-              injuries: [],
-              injuriesFreeText: '',
+            // Ne pas écraser un draft pré-rempli depuis un POI (ex: clic sur Paw dans un popup POI)
+            // pendant que le panneau charge la fiche.
+            setPersonDraft((prev) => {
+              const hasPrefill =
+                prev.lastKnownType === 'poi' &&
+                typeof prev.lastKnownPoiId === 'string' &&
+                prev.lastKnownPoiId !== '' &&
+                typeof prev.lastKnownLng === 'number' &&
+                typeof prev.lastKnownLat === 'number';
+              if (hasPrefill) return prev;
+              return {
+                lastKnownQuery: '',
+                lastKnownType: 'address',
+                lastKnownPoiId: undefined,
+                lastKnownLng: undefined,
+                lastKnownLat: undefined,
+                lastKnownWhen: '',
+                mobility: 'none',
+                age: '',
+                sex: 'unknown',
+                healthStatus: 'stable',
+                diseases: [],
+                diseasesFreeText: '',
+                injuries: [],
+                injuriesFreeText: '',
+              };
             });
           } else {
             setPersonEdit(false);
@@ -2544,7 +2555,11 @@ export default function MapLibreMap() {
       clearLocalTraces(missionId);
     };
 
-    const socket = socketRef.current;
+    // IMPORTANT: ne pas dépendre de socketRef.current ici.
+    // Le listener peut être enregistré avant que socketRef.current ne soit initialisé,
+    // ce qui fait que l'event temps réel n'est jamais reçu.
+    // getSocket() retourne un singleton : on s'abonne directement dessus.
+    const socket = getSocket();
     const onSocketEvent = (msg: any) => {
       const missionId = typeof msg?.missionId === 'string' ? msg.missionId : undefined;
 
@@ -2564,15 +2579,11 @@ export default function MapLibreMap() {
     };
 
     window.addEventListener('geogn:mission:tracesCleared', onWindowEvent as any);
-    if (socket) {
-      socket.on('mission:tracesCleared', onSocketEvent);
-    }
+    socket.on('mission:tracesCleared', onSocketEvent);
 
     return () => {
       window.removeEventListener('geogn:mission:tracesCleared', onWindowEvent as any);
-      if (socket) {
-        socket.off('mission:tracesCleared', onSocketEvent);
-      }
+      socket.off('mission:tracesCleared', onSocketEvent);
     };
   }, [selectedMissionId]);
 
@@ -4475,8 +4486,8 @@ export default function MapLibreMap() {
         const center = draftLngLat;
         const edge = { lng, lat };
         const computed = haversineMeters(center, edge);
-        const clamped = Math.max(50, Math.round(computed));
-        setDraftCircleRadius(clamped);
+        const nextRadius = Math.max(0, Math.round(computed));
+        setDraftCircleRadius(nextRadius);
         setDraftCircleEdgeLngLat(edge);
         setCircleRadiusReady(true);
         return;
@@ -7133,6 +7144,10 @@ export default function MapLibreMap() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (hasActiveTestVehicleTrack) {
+                      setActivityToast('une piste est deja en cours');
+                      return;
+                    }
                     if (!selectedPoi) return;
                     setPersonDraft((prev) => ({
                       ...prev,
@@ -7155,7 +7170,9 @@ export default function MapLibreMap() {
                     // Ferme le popup POI.
                     setSelectedPoi(null);
                   }}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 ${
+                    hasActiveTestVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
+                  }`}
                   title="Démarrer une piste depuis ce POI"
                 >
                   <PawPrint size={16} />
@@ -8565,7 +8582,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(90vw,540px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto max-w-[min(96vw,760px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >

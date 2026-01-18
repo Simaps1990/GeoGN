@@ -21,7 +21,7 @@ const MissionInviteSchema = new Schema<MissionInviteDoc>(
     status: { type: String, required: true, enum: ['pending', 'accepted', 'declined', 'revoked'], default: 'pending', index: true },
     token: { type: String, required: true, unique: true, index: true },
     createdAt: { type: Date, required: true, default: () => new Date() },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
   },
   { collection: 'missionInvites' }
 );

@@ -30,7 +30,7 @@ const TraceSchema = new Schema<TraceDoc>(
     color: { type: String, required: true },
     loc: { type: GeoPointSchema, required: true },
     createdAt: { type: Date, required: true, default: () => new Date(), index: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
   },
   { collection: 'traces' }
 );
