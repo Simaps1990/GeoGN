@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import { VehicleTrackModel, type VehicleTrackDoc } from './models/vehicleTrack.js';
 import { HuntIsochroneModel } from './models/huntIsochrone.js';
 import { computeVehicleIsoline } from './traffic/computeVehicleIsoline.js';
-import { computeVehicleTomtomIsoline, type VehicleTomtomState } from './traffic/computeVehicleTomtomIsoline.js';
 import { computeVehicleTomtomReachableRange } from './traffic/computeVehicleTomtomReachableRange.js';
 
 const SCHEDULER_INTERVAL_MS = 20_000;
@@ -316,39 +315,55 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
             };
           }
         } else if (fresh.algorithm === 'road_graph') {
-          const prevTomtomState: VehicleTomtomState | null =
-            ((track.cache?.meta as any)?.tomtomState as VehicleTomtomState | null) ?? null;
-
-          const baseSpeedKmh = (() => {
-            switch (fresh.vehicleType) {
-              case 'car':
-                return 90;
-              case 'motorcycle':
-                return 100;
-              case 'scooter':
-                return 45;
-              case 'truck':
-                return 70;
-              default:
-                return 80;
-            }
-          })();
-
+          // Legacy "tomtom_tiles" grid mode is disabled.
+          // For road_graph tracks we also use TomTom Reachable Range so the frontend
+          // always receives a polygon isochrone with a monotonically increasing budget.
           try {
-            const result = await computeVehicleTomtomIsoline({
+            const budgetSeconds = (() => {
+              const step = Math.max(10, refreshSeconds);
+              const maxSec = Number.isFinite(fresh.maxDurationSeconds)
+                ? Math.max(1, fresh.maxDurationSeconds)
+                : maxDurationSeconds;
+              const stepped = Math.floor(elapsedSeconds / step) * step;
+
+              const prevBudget = (() => {
+                const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
+                if (typeof metaBudget === 'number' && Number.isFinite(metaBudget)) return metaBudget;
+                const cacheElapsed = (fresh as any)?.cache?.elapsedSeconds;
+                if (typeof cacheElapsed === 'number' && Number.isFinite(cacheElapsed)) return cacheElapsed;
+                return null;
+              })();
+
+              let next = Math.max(step, stepped);
+              if (typeof prevBudget === 'number' && next <= prevBudget) {
+                next = prevBudget + step;
+              }
+              return Math.min(maxSec, next);
+            })();
+
+            const result = await computeVehicleTomtomReachableRange({
               lng,
               lat,
-              elapsedSeconds,
-              vehicleType: track.vehicleType,
-              baseSpeedKmh,
-              prevState: prevTomtomState,
+              elapsedSeconds: budgetSeconds,
+              maxBudgetSeconds: budgetSeconds,
+              vehicleType: fresh.vehicleType,
+              label,
             });
 
             geojson = result.geojson;
             meta = {
               ...result.meta,
-              tomtomState: result.nextState,
+              provider: 'tomtom_reachable_range',
+              budgetSec: budgetSeconds,
             };
+
+            try {
+              if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
+                geojson.features[0].properties.budgetSec = budgetSeconds;
+              }
+            } catch {
+              // ignore
+            }
 
             app.log.info(
               {
@@ -357,13 +372,13 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 label,
                 vehicleType: track.vehicleType,
                 algorithm: track.algorithm,
-                mode: 'tomtom_tiles',
+                mode: 'tomtom_reachable_range',
                 lng,
                 lat,
                 elapsedSeconds,
-                tilesCount: Object.keys(result.nextState.tiles).length,
+                budgetSec: budgetSeconds,
               },
-              'vehicleTrackScheduler tomtom_tiles computed'
+              'vehicleTrackScheduler tomtom_reachable_range computed'
             );
           } catch (e) {
             app.log.error(
@@ -378,7 +393,7 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 elapsedSeconds,
                 err: e,
               },
-              'vehicleTrackScheduler tomtom_tiles compute failed'
+              'vehicleTrackScheduler tomtom_reachable_range compute failed'
             );
 
             const fallback = await computeVehicleIsoline({
@@ -390,7 +405,7 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
             geojson = fallback.geojson;
             meta = {
               ...fallback.meta,
-              provider: 'tomtom_tiles_fallback_circle',
+              provider: 'tomtom_reachable_range_fallback_circle',
             };
           }
         } else {

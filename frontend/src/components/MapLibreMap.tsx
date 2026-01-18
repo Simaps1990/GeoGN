@@ -1741,7 +1741,8 @@ export default function MapLibreMap() {
               const provider = (state.cache?.meta as any)?.provider as string | undefined;
               const track = tracks.find((t) => t.id === nextActiveId) ?? null;
               const isTest = isTestTrack(track as any);
-              const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+              const allowTomtom =
+                provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
 
               if (cacheGeo && (!isTest || allowTomtom)) {
                 setVehicleTrackGeojsonById((prev) => ({
@@ -5495,7 +5496,8 @@ export default function MapLibreMap() {
 
       const cacheGeo = track.cache?.payloadGeojson;
       const provider = (track.cache?.meta as any)?.provider as string | undefined;
-      const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+      const allowTomtom =
+        provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
       if (cacheGeo && allowTomtom) {
         setVehicleTrackGeojsonById((prev) => ({ ...prev, [track.id]: cacheGeo as any }));
       }
@@ -5522,7 +5524,8 @@ export default function MapLibreMap() {
         const cacheGeo = full.cache?.payloadGeojson;
         const provider = (full.cache?.meta as any)?.provider as string | undefined;
         const isTest = isTestTrack(full);
-        const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+        const allowTomtom =
+          provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
 
         // Si la piste n'est plus active, on coupe immédiatement tout affichage
         // éventuel lié à cette piste (ID actif + GeoJSON), afin d'éviter que
@@ -5590,7 +5593,8 @@ export default function MapLibreMap() {
       const provider = (msg?.cache?.meta as any)?.provider as string | undefined;
       const track = vehicleTracks.find((t) => t.id === trackId);
       const isTest = isTestTrack(track);
-      const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+      const allowTomtom =
+        provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
       if (cacheGeo && (!isTest || allowTomtom)) {
         try {
           const budget = (msg?.cache?.meta as any)?.budgetSec;
@@ -8263,7 +8267,9 @@ export default function MapLibreMap() {
                                   if (state.cache?.payloadGeojson) {
                                     const provider = (state.cache.meta as any)?.provider as string | undefined;
                                     const isTest = isTestTrack(createdTrack as any);
-                                    const allowTomtom = provider === 'tomtom_tiles' || provider === 'tomtom_reachable_range';
+                                    const allowTomtom =
+                                      provider === 'tomtom_reachable_range' ||
+                                      provider === 'tomtom_reachable_range_fallback_circle';
                                     if (!isTest || allowTomtom) {
                                       setVehicleTrackGeojsonById((prev) => ({
                                         ...prev,
