@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -885,31 +885,10 @@ export default function MapLibreMap() {
     vehicleTrackGeojsonByIdRef.current = vehicleTrackGeojsonById;
   }, [vehicleTrackGeojsonById]);
 
-  const mergeVehicleTracksPreferNewest = useCallback(
-    (prev: ApiVehicleTrack[], incoming: ApiVehicleTrack[]) => {
-      if (!prev.length) return incoming;
-      const prevById = new Map(prev.map((t) => [t.id, t] as const));
-      return incoming.map((t) => {
-        const existing = prevById.get(t.id);
-        if (!existing) return t;
-
-        const incAt = t.cache?.computedAt ? new Date(t.cache.computedAt).getTime() : 0;
-        const exAt = existing.cache?.computedAt ? new Date(existing.cache.computedAt).getTime() : 0;
-        if (exAt > incAt) {
-          return { ...t, cache: existing.cache };
-        }
-        return t;
-      });
-    },
-    []
-  );
-
-  // Une "piste autorisée" est simplement une piste calculée avec l'algorithme road_graph.
-  // On ne se base plus sur la présence de "TEST" dans le label : les anciennes pistes de test
-  // sont devenues la norme.
   const isTestTrack = (track: ApiVehicleTrack | null | undefined): boolean => {
     if (!track) return false;
-    return track.algorithm === 'road_graph';
+    if (track.algorithm === 'road_graph') return true;
+    return !!track.label && /TEST/i.test(track.label);
   };
 
   const filterAllowedVehicleTracks = (tracks: ApiVehicleTrack[]): ApiVehicleTrack[] => tracks.filter((t) => isTestTrack(t));
@@ -1732,7 +1711,7 @@ export default function MapLibreMap() {
 
         setVehicleTracksLoaded(true);
         const filtered = filterAllowedVehicleTracks(tracks);
-        setVehicleTracks((prev) => mergeVehicleTracksPreferNewest(prev, filtered));
+        setVehicleTracks(filtered);
         setVehicleTracksTotal(filtered.length);
 
         // Si la mission n'a plus aucune piste, on nettoie complètement l'état
@@ -1748,7 +1727,7 @@ export default function MapLibreMap() {
           return;
         }
 
-        const currentId = activeVehicleTrackIdRef.current;
+        const currentId = activeVehicleTrackId;
         // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
         // existe encore côté API, on conserve l'ID. (Le status peut transiter,
         // et un reset à null fait disparaître la forme avant le prochain isochrone.)
@@ -1770,12 +1749,11 @@ export default function MapLibreMap() {
             setActiveVehicleTrackId(null);
           }
         } else {
-          if (nextActiveId !== activeVehicleTrackIdRef.current) {
+          if (nextActiveId !== activeVehicleTrackId) {
             setActiveVehicleTrackId(nextActiveId);
           }
 
-          const geoById = vehicleTrackGeojsonByIdRef.current;
-          if (!geoById[nextActiveId]) {
+          if (!vehicleTrackGeojsonById[nextActiveId]) {
             try {
               const state = await getVehicleTrackState(missionIdAtCall, nextActiveId);
               if (cancelled) return;
@@ -1815,7 +1793,8 @@ export default function MapLibreMap() {
     vehicleTracksQuery.q,
     vehicleTracksQuery.limit,
     vehicleTracksQuery.offset,
-    mergeVehicleTracksPreferNewest,
+    activeVehicleTrackId,
+    vehicleTrackGeojsonById,
   ]);
 
   useEffect(() => {
@@ -1958,10 +1937,6 @@ export default function MapLibreMap() {
       vehicleTrackTimeUpdateTimerRef.current = null;
       void (async () => {
         try {
-          // Si la piste a été changée/supprimée entre temps, ne rien faire.
-          if (activeVehicleTrackIdRef.current !== trackId) return;
-          if (!vehicleTracks.some((t) => t.id === trackId)) return;
-
           await updateVehicleTrack(selectedMissionId, trackId, {
             startedAt: whenIso,
             origin: {
@@ -1988,13 +1963,9 @@ export default function MapLibreMap() {
           } catch {
             // ignore
           }
-        } catch (e: any) {
-          // Non bloquant (ex: permissions / piste non admin) : on informe juste,
-          // et on expose le message d'erreur backend pour faciliter le debug.
-          const msg = e?.message ? String(e.message) : 'erreur inconnue';
-          // La piste peut avoir été supprimée juste avant l'exécution du debounce.
-          if (/NOT_FOUND/i.test(msg)) return;
-          setActivityToast(`Impossible de mettre à jour l'heure de la piste (${msg})`);
+        } catch {
+          // Non bloquant (ex: permissions / piste non admin) : on informe juste.
+          setActivityToast("Impossible de mettre à jour l'heure de la piste");
         }
       })();
     }, 450);
@@ -8736,7 +8707,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(98vw,1120px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto max-w-[min(calc(100vw-32px),1400px)] whitespace-nowrap rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
