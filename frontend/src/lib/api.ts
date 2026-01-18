@@ -395,7 +395,6 @@ export async function updateVehicleTrack(
       lat?: number;
       when?: string;
     };
-    startedAt: string;
     status: ApiVehicleTrackStatus;
   }>
 ) {

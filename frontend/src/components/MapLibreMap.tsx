@@ -63,7 +63,6 @@ import {
   updatePoi,
   updateZone,
   updateMission,
-  updateVehicleTrack,
   createVehicleTrack,
   listVehicleTracks,
   deleteVehicleTrack,
@@ -1893,105 +1892,11 @@ export default function MapLibreMap() {
   const [timerSaving, setTimerSaving] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
 
-  const vehicleTrackTimeUpdateTimerRef = useRef<number | null>(null);
-
   const nowLocalMinute = useMemo(() => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }, []);
-
-  // Si une piste est active, et que l'utilisateur change l'heure, on met à jour la piste côté backend
-  // (origin.when + startedAt) afin que le scheduler recalcule l'isochrone avec le bon elapsedSeconds.
-  useEffect(() => {
-    if (!selectedMissionId) return;
-    if (!canEditPerson) return;
-    if (!activeVehicleTrackId) return;
-    if (!personDraft.lastKnownWhen) return;
-
-    const whenInput = personDraft.lastKnownWhen;
-    const whenIso = (() => {
-      try {
-        const d = new Date(whenInput);
-        if (Number.isNaN(d.getTime())) return null;
-        if (d.getTime() > Date.now()) return null;
-        return d.toISOString();
-      } catch {
-        return null;
-      }
-    })();
-    if (!whenIso) return;
-
-    // Debounce pour éviter un PATCH à chaque frappe / sélection.
-    if (vehicleTrackTimeUpdateTimerRef.current != null) {
-      try {
-        window.clearTimeout(vehicleTrackTimeUpdateTimerRef.current);
-      } catch {
-        // ignore
-      }
-      vehicleTrackTimeUpdateTimerRef.current = null;
-    }
-
-    const trackId = activeVehicleTrackId;
-    vehicleTrackTimeUpdateTimerRef.current = window.setTimeout(() => {
-      vehicleTrackTimeUpdateTimerRef.current = null;
-      void (async () => {
-        try {
-          await updateVehicleTrack(selectedMissionId, trackId, {
-            startedAt: whenIso,
-            origin: {
-              type: personDraft.lastKnownType,
-              query: (personDraft.lastKnownQuery ?? '').trim() || 'Point',
-              poiId: personDraft.lastKnownPoiId,
-              lng: personDraft.lastKnownLng,
-              lat: personDraft.lastKnownLat,
-              when: whenIso,
-            },
-          });
-
-          // Best-effort: rafraîchir l'état pour obtenir immédiatement le nouveau GeoJSON.
-          try {
-            const state = await getVehicleTrackState(selectedMissionId, trackId);
-            const cacheGeo = state.cache?.payloadGeojson;
-            const provider = (state.cache?.meta as any)?.provider as string | undefined;
-            const track = vehicleTracks.find((t) => t.id === trackId) ?? null;
-            const isTest = isTestTrack(track as any);
-            const allowTomtom = provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
-            if (cacheGeo && (!isTest || allowTomtom)) {
-              setVehicleTrackGeojsonById((prev) => ({ ...prev, [trackId]: cacheGeo as any }));
-            }
-          } catch {
-            // ignore
-          }
-        } catch {
-          // Non bloquant (ex: permissions / piste non admin) : on informe juste.
-          setActivityToast("Impossible de mettre à jour l'heure de la piste");
-        }
-      })();
-    }, 450);
-
-    return () => {
-      if (vehicleTrackTimeUpdateTimerRef.current != null) {
-        try {
-          window.clearTimeout(vehicleTrackTimeUpdateTimerRef.current);
-        } catch {
-          // ignore
-        }
-        vehicleTrackTimeUpdateTimerRef.current = null;
-      }
-    };
-  }, [
-    selectedMissionId,
-    canEditPerson,
-    activeVehicleTrackId,
-    personDraft.lastKnownWhen,
-    personDraft.lastKnownType,
-    personDraft.lastKnownQuery,
-    personDraft.lastKnownPoiId,
-    personDraft.lastKnownLng,
-    personDraft.lastKnownLat,
-    vehicleTracks,
-  ]);
 
   // Toast discret pour informer qu'aucune projection n'est active
   const [noProjectionToast, setNoProjectionToast] = useState(false);
@@ -8707,7 +8612,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(calc(100vw-32px),1400px)] whitespace-nowrap rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto max-w-[min(96vw,760px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
