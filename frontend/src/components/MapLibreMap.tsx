@@ -885,10 +885,12 @@ export default function MapLibreMap() {
     vehicleTrackGeojsonByIdRef.current = vehicleTrackGeojsonById;
   }, [vehicleTrackGeojsonById]);
 
+  // Une "piste autorisée" est simplement une piste calculée avec l'algorithme road_graph.
+  // On ne se base plus sur la présence de "TEST" dans le label : les anciennes pistes de test
+  // sont devenues la norme.
   const isTestTrack = (track: ApiVehicleTrack | null | undefined): boolean => {
     if (!track) return false;
-    if (track.algorithm === 'road_graph') return true;
-    return !!track.label && /TEST/i.test(track.label);
+    return track.algorithm === 'road_graph';
   };
 
   const filterAllowedVehicleTracks = (tracks: ApiVehicleTrack[]): ApiVehicleTrack[] => tracks.filter((t) => isTestTrack(t));
@@ -8709,7 +8711,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(96vw,760px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto max-w-[min(98vw,1120px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
