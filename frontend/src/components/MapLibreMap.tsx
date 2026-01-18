@@ -145,6 +145,26 @@ function formatHoursToHM(hours: number) {
   return `${h} h ${m} min`;
 }
 
+function formatElapsedSince(iso: string | null | undefined): string {
+  try {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '';
+    const now = Date.now();
+    let diffMs = now - t;
+    if (diffMs < 0) diffMs = 0;
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours <= 0 && minutes <= 0) return "il y a moins d'une minute";
+    if (hours <= 0) return `il y a ${minutes} minute${minutes > 1 ? 's' : ''}`;
+    if (minutes <= 0) return `il y a ${hours} heure${hours > 1 ? 's' : ''}`;
+    return `il y a ${hours} heure${hours > 1 ? 's' : ''} ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  } catch {
+    return '';
+  }
+}
+
 function cloneStyle<T>(style: T): T {
   try {
     return (globalThis as any).structuredClone(style);
@@ -7719,25 +7739,29 @@ export default function MapLibreMap() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs text-gray-700">
-                  <span className="font-semibold text-gray-800">Météo:</span>{' '}
-                  {weatherLoading
-                    ? 'Chargement…'
-                    : weatherError
-                      ? 'Indisponible'
-                      : weather
-                        ? `${weatherStatusLabel(weather.weatherCode)} · ${typeof weather.temperatureC === 'number' ? `${weather.temperatureC.toFixed(1)}°C` : '—'} · Vent ${typeof weather.windSpeedKmh === 'number' ? `${weather.windSpeedKmh.toFixed(0)} km/h` : '—'}`
-                        : '—'}
+                  {personCase ? (
+                    <>
+                      <span className="font-semibold text-gray-800">Départ depuis</span>{' '}
+                      <span>
+                        {personCase.lastKnown?.query || '—'}
+                      </span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
                 </div>
                 <div className="mt-1 text-xs text-gray-700">
-                  {estimation && !hasActiveTestVehicleTrack ? (
-                    <span>
-                      <span className="font-semibold">Zone</span>
-                      {`: De ${estimation.probableKm.toFixed(1)} km à ${estimation.maxKm.toFixed(1)} km de rayon`}
-                    </span>
+                  {personCase && personCase.lastKnown?.when ? (
+                    <>
+                      <span>{new Date(personCase.lastKnown.when).toLocaleString()}</span>{' '}
+                      <span className="text-gray-500">
+                        ({formatElapsedSince(personCase.lastKnown.when)})
+                      </span>
+                    </>
+                  ) : personLoading ? (
+                    'Chargement…'
                   ) : (
-                    personLoading
-                      ? 'Chargement…'
-                      : '—'
+                    '—'
                   )}
                 </div>
               </div>
@@ -8008,6 +8032,7 @@ export default function MapLibreMap() {
                     </div>
                     <div
                       onClick={() => {
+                        if (hasActiveTestVehicleTrack) return;
                         const el = lastKnownWhenInputRef.current;
                         if (!el) return;
                         // showPicker est supporté par la plupart des navigateurs modernes
@@ -8025,13 +8050,14 @@ export default function MapLibreMap() {
                         type="datetime-local"
                         value={personDraft.lastKnownWhen}
                         max={nowLocalMinute}
+                        disabled={hasActiveTestVehicleTrack}
                         onChange={(e) =>
                           setPersonDraft((p) => ({
                             ...p,
                             lastKnownWhen: e.target.value,
                           }))
                         }
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs cursor-pointer"
+                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -8051,131 +8077,132 @@ export default function MapLibreMap() {
                       <option value="truck_test">Camion</option>
                     </select>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-700">Âge</div>
-                      <input
-                        type="number"
-                        min={0}
-                        max={120}
-                        value={personDraft.age}
-                        onChange={(e) => setPersonDraft((p) => ({ ...p, age: e.target.value }))}
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-700">Sexe</div>
-                      <select
-                        value={personDraft.sex}
-                        onChange={(e) => setPersonDraft((p) => ({ ...p, sex: e.target.value as any }))}
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                      >
-                        <option value="unknown">Inconnu</option>
-                        <option value="female">Femme</option>
-                        <option value="male">Homme</option>
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-700">État</div>
-                      <select
-                        value={personDraft.healthStatus}
-                        onChange={(e) => setPersonDraft((p) => ({ ...p, healthStatus: e.target.value as any }))}
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                      >
-                        <option value="stable">Stable</option>
-                        <option value="fragile">Fragile</option>
-                        <option value="critique">Critique</option>
-                      </select>
-                    </div>
-                  </div>
-
                   {normalizeMobility(personDraft.mobility as any) === 'none' ? (
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start">
-                      <div className="rounded-2xl border p-3 md:flex-1">
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between text-left"
-                          onClick={() => setDiseasesOpen((v) => !v)}
-                        >
-                          <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
-                          <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
-                        </button>
-                        {diseasesOpen ? (
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            {diseaseOptions.map((id) => {
-                              const checked = personDraft.diseases.includes(id);
-                              const raw = id.replace(/_/g, ' ');
-                              const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
-                              return (
-                                <div key={id} className="rounded-2xl border p-2">
-                                  <label className="flex items-center gap-2 text-sm text-gray-800">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(e) => {
-                                        const next = e.target.checked
-                                          ? Array.from(new Set([...personDraft.diseases, id]))
-                                          : personDraft.diseases.filter((x) => x !== id);
-                                        setPersonDraft((p) => ({ ...p, diseases: next }));
-                                      }}
-                                    />
-                                    <span className="font-normal">{label}</span>
-                                  </label>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <div className="text-xs font-semibold text-gray-700">Âge</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={120}
+                            value={personDraft.age}
+                            onChange={(e) => setPersonDraft((p) => ({ ...p, age: e.target.value }))}
+                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-gray-700">Sexe</div>
+                          <select
+                            value={personDraft.sex}
+                            onChange={(e) => setPersonDraft((p) => ({ ...p, sex: e.target.value as any }))}
+                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                          >
+                            <option value="unknown">Inconnu</option>
+                            <option value="female">Femme</option>
+                            <option value="male">Homme</option>
+                          </select>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-gray-700">État</div>
+                          <select
+                            value={personDraft.healthStatus}
+                            onChange={(e) => setPersonDraft((p) => ({ ...p, healthStatus: e.target.value as any }))}
+                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                          >
+                            <option value="stable">Stable</option>
+                            <option value="fragile">Fragile</option>
+                            <option value="critique">Critique</option>
+                          </select>
+                        </div>
                       </div>
 
-                      <div className="rounded-2xl border p-3 md:flex-1">
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between text-left"
-                          onClick={() => setInjuriesOpen((v) => !v)}
-                        >
-                          <div className="text-xs font-semibold text-gray-700">Blessures</div>
-                          <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
-                        </button>
-                        {injuriesOpen ? (
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            {injuryOptions.map((injuryId) => {
-                              const injury = personDraft.injuries.find((x) => x.id === injuryId);
-                              const checked = !!injury;
-                              return (
-                                <div key={injuryId} className="rounded-2xl border p-2">
-                                  <label className="flex items-center gap-2 text-sm text-gray-800">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setPersonDraft((p) => ({
-                                            ...p,
-                                            injuries: [...p.injuries, { id: injuryId, locations: [] }],
-                                          }));
-                                        } else {
-                                          setPersonDraft((p) => ({
-                                            ...p,
-                                            injuries: p.injuries.filter((x) => x.id !== injuryId),
-                                          }));
-                                        }
-                                      }}
-                                    />
-                                    <span className="font-normal">
-                                      {injuryId
-                                        .replace(/_/g, ' ')
-                                        .replace(/\b\w/g, (c) => c.toUpperCase())}
-                                    </span>
-                                  </label>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start">
+                        <div className="rounded-2xl border p-3 md:flex-1">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between text-left"
+                            onClick={() => setDiseasesOpen((v) => !v)}
+                          >
+                            <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
+                            <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
+                          </button>
+                          {diseasesOpen ? (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              {diseaseOptions.map((id) => {
+                                const checked = personDraft.diseases.includes(id);
+                                const raw = id.replace(/_/g, ' ');
+                                const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+                                return (
+                                  <div key={id} className="rounded-2xl border p-2">
+                                    <label className="flex items-center gap-2 text-sm text-gray-800">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          const next = e.target.checked
+                                            ? Array.from(new Set([...personDraft.diseases, id]))
+                                            : personDraft.diseases.filter((x) => x !== id);
+                                          setPersonDraft((p) => ({ ...p, diseases: next }));
+                                        }}
+                                      />
+                                      <span className="font-normal">{label}</span>
+                                    </label>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="rounded-2xl border p-3 md:flex-1">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between text-left"
+                            onClick={() => setInjuriesOpen((v) => !v)}
+                          >
+                            <div className="text-xs font-semibold text-gray-700">Blessures</div>
+                            <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
+                          </button>
+                          {injuriesOpen ? (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              {injuryOptions.map((injuryId) => {
+                                const injury = personDraft.injuries.find((x) => x.id === injuryId);
+                                const checked = !!injury;
+                                return (
+                                  <div key={injuryId} className="rounded-2xl border p-2">
+                                    <label className="flex items-center gap-2 text-sm text-gray-800">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setPersonDraft((p) => ({
+                                              ...p,
+                                              injuries: [...p.injuries, { id: injuryId, locations: [] }],
+                                            }));
+                                          } else {
+                                            setPersonDraft((p) => ({
+                                              ...p,
+                                              injuries: p.injuries.filter((x) => x.id !== injuryId),
+                                            }));
+                                          }
+                                        }}
+                                      />
+                                      <span className="font-normal">
+                                        {injuryId
+                                          .replace(/_/g, ' ')
+                                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                      </span>
+                                    </label>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
+                    </>
                   ) : null}
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
@@ -8612,7 +8639,7 @@ export default function MapLibreMap() {
       {activityToast ? (
         <div className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+12px)] left-1/2 z-[1400] -translate-x-1/2 px-4">
           <div
-            className={`pointer-events-auto max-w-[min(96vw,760px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
+            className={`pointer-events-auto max-w-[min(98vw,1120px)] rounded-2xl bg-gray-900/90 px-4 py-3 text-xs text-white shadow-lg backdrop-blur transition-opacity duration-300 ${
               activityToastVisible ? 'opacity-100' : 'opacity-0'
             }`}
           >
