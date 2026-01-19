@@ -573,11 +573,31 @@ export default function MapLibreMap() {
     activeToolRef.current = activeTool;
   }, [activeTool]);
 
+  const draftLngLatRef = useRef(draftLngLat);
+  useEffect(() => {
+    draftLngLatRef.current = draftLngLat;
+  }, [draftLngLat]);
+
+  const draftCircleEdgeLngLatRef = useRef(draftCircleEdgeLngLat);
+  useEffect(() => {
+    draftCircleEdgeLngLatRef.current = draftCircleEdgeLngLat;
+  }, [draftCircleEdgeLngLat]);
+
+  const draftCircleRadiusRef = useRef(draftCircleRadius);
+  useEffect(() => {
+    draftCircleRadiusRef.current = draftCircleRadius;
+  }, [draftCircleRadius]);
+
   const [showValidation, setShowValidation] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftComment, setDraftComment] = useState('');
   const [draftColor, setDraftColor] = useState('');
   const [draftIcon, setDraftIcon] = useState('');
+
+  const draftColorRef = useRef(draftColor);
+  useEffect(() => {
+    draftColorRef.current = draftColor;
+  }, [draftColor]);
 
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -4253,14 +4273,17 @@ export default function MapLibreMap() {
     }
 
     if (draftPoiSource) {
-      if (activeTool === 'poi' && draftLngLat) {
+      const tool = activeToolRef.current;
+      const d = draftLngLatRef.current;
+      const color = draftColorRef.current;
+      if (tool === 'poi' && d) {
         draftPoiSource.setData({
           type: 'FeatureCollection',
           features: [
             {
               type: 'Feature',
-              properties: { color: draftColor },
-              geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+              properties: { color },
+              geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
             },
           ],
         } as any);
@@ -4272,44 +4295,50 @@ export default function MapLibreMap() {
     if (draftZoneSource) {
       const features: any[] = [];
 
-      if (activeTool === 'zone_circle' && draftLngLat) {
+      const tool = activeToolRef.current;
+      const d = draftLngLatRef.current;
+      const edge = draftCircleEdgeLngLatRef.current;
+      const radius = draftCircleRadiusRef.current;
+      const color = draftColorRef.current;
+
+      if (tool === 'zone_circle' && d) {
         features.push({
           type: 'Feature',
-          properties: { kind: 'point', color: draftColor },
-          geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
+          properties: { kind: 'point', color },
+          geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
         });
 
-        if (draftCircleEdgeLngLat) {
+        if (edge) {
           features.push({
             type: 'Feature',
-            properties: { kind: 'fill', color: draftColor },
-            geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
+            properties: { kind: 'fill', color },
+            geometry: circleToPolygon({ lng: d.lng, lat: d.lat }, radius),
           });
           features.push({
             type: 'Feature',
-            properties: { kind: 'line', color: draftColor },
+            properties: { kind: 'line', color },
             geometry: {
               type: 'LineString',
               coordinates: [
-                [draftLngLat.lng, draftLngLat.lat],
-                [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat],
+                [d.lng, d.lat],
+                [edge.lng, edge.lat],
               ],
             },
           });
           features.push({
             type: 'Feature',
-            properties: { kind: 'point', color: draftColor },
-            geometry: { type: 'Point', coordinates: [draftCircleEdgeLngLat.lng, draftCircleEdgeLngLat.lat] },
+            properties: { kind: 'point', color },
+            geometry: { type: 'Point', coordinates: [edge.lng, edge.lat] },
           });
         }
       }
 
-      if (activeTool === 'zone_polygon') {
+      if (tool === 'zone_polygon') {
         const coords = polygonDraftRef.current;
         for (const c of coords) {
           features.push({
             type: 'Feature',
-            properties: { kind: 'point', color: draftColor },
+            properties: { kind: 'point', color },
             geometry: { type: 'Point', coordinates: c },
           });
         }
@@ -4317,7 +4346,7 @@ export default function MapLibreMap() {
         if (coords.length >= 2) {
           features.push({
             type: 'Feature',
-            properties: { kind: 'line', color: draftColor },
+            properties: { kind: 'line', color },
             geometry: { type: 'LineString', coordinates: coords },
           });
         }
@@ -4326,7 +4355,7 @@ export default function MapLibreMap() {
           const ring = [...coords, coords[0]];
           features.push({
             type: 'Feature',
-            properties: { kind: 'fill', color: draftColor },
+            properties: { kind: 'fill', color },
             geometry: { type: 'Polygon', coordinates: [ring] },
           });
         }
