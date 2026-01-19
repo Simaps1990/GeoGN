@@ -4859,7 +4859,6 @@ export default function MapLibreMap() {
       // On recrée donc les overlays (zones, POI, estimation, etc.), on remet l'ordre,
       // puis on réapplique la visibilité de la heatmap.
       ensureOverlays(map);
-      resyncAllOverlays(map);
       enforceLayerOrder(map);
       applyGridLabelStyle(map);
       applyHeatmapVisibility(map, showEstimationHeatmapRef.current && personPanelOpenRef.current);
