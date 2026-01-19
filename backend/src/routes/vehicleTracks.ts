@@ -238,24 +238,18 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
         if (!Number.isNaN(d.getTime())) startedAt = d;
       }
 
-      let maxDurationSeconds: number = 3600;
+      let maxDurationSeconds: number = 7200;
       if (typeof body?.maxDurationSeconds === 'number') {
         const v = Math.floor(body.maxDurationSeconds);
         if (Number.isFinite(v)) {
-          maxDurationSeconds = Math.max(60, Math.min(3600, v));
+          maxDurationSeconds = Math.max(60, Math.min(7200, v));
         }
       }
 
       const algorithm: 'mvp_isoline' | 'road_graph' =
         body?.algorithm === 'road_graph' ? 'road_graph' : 'mvp_isoline';
 
-      // Si l'utilisateur choisit une heure passée (origin.when) pour une piste TEST,
-      // on l'utilise comme startedAt afin que elapsedSeconds reflète bien ce choix.
-      // Sinon, le budget restera proche de 0 et l'isochrone ne se déploiera pas.
       const isTestCreate = /TEST/i.test(label) || algorithm === 'road_graph';
-      if (isTestCreate && originWhen) {
-        startedAt = originWhen;
-      }
 
       const doc = await VehicleTrackModel.create({
         missionId: missionObjectId,
@@ -289,9 +283,9 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
             const step = 20;
             const nowMs = Date.now();
             const startedAtMs = startedAt instanceof Date ? startedAt.getTime() : nowMs;
-            const elapsed = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
-            const stepped = Math.floor(elapsed / step) * step;
-            const maxSec = Math.max(60, Math.min(3600, Math.floor(maxDurationSeconds)));
+            const baseElapsed = originWhen ? Math.max(0, Math.floor((startedAtMs - originWhen.getTime()) / 1000)) : 0;
+            const stepped = Math.floor(baseElapsed / step) * step;
+            const maxSec = 43_200;
             return Math.min(maxSec, Math.max(40, stepped));
           })();
           const result = await computeVehicleTomtomReachableRange({

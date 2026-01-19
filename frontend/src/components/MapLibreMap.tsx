@@ -593,6 +593,11 @@ export default function MapLibreMap() {
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [scaleEnabled, setScaleEnabled] = useState(false);
 
+  const labelsEnabledRef = useRef(labelsEnabled);
+  useEffect(() => {
+    labelsEnabledRef.current = labelsEnabled;
+  }, [labelsEnabled]);
+
   const [personPanelOpen, setPersonPanelOpen] = useState(false);
   const [personPanelCollapsed, setPersonPanelCollapsed] = useState(false);
   const [personLoading, setPersonLoading] = useState(false);
@@ -1918,6 +1923,12 @@ export default function MapLibreMap() {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }, []);
 
+  const minLiveTrackWhenLocalMinute = useMemo(() => {
+    const d = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
+
   // Toast discret pour informer qu'aucune projection n'est active
   const [noProjectionToast, setNoProjectionToast] = useState(false);
 
@@ -2478,7 +2489,7 @@ export default function MapLibreMap() {
     const doCenter = (lng: number, lat: number) => {
       try {
         autoCenterDoneRef.current = true;
-        map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 16), duration: 800 });
+        map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
       } catch {
         // ignore
       }
@@ -2875,7 +2886,7 @@ export default function MapLibreMap() {
     if (zonesLabels) {
       map.setLayoutProperty('zones-labels', 'visibility', visibility);
     }
-  }, [labelsEnabled, mapReady]);
+  }, [labelsEnabled, mapReady, baseStyleIndex]);
 
   // Rendre les labels utilisateurs robustes: si la couche existait déjà (cache/style reload),
   // on force les propriétés nécessaires pour qu'ils soient effectivement rendus.
@@ -2892,7 +2903,7 @@ export default function MapLibreMap() {
     } catch {
       // ignore
     }
-  }, [mapReady, labelsEnabled]);
+  }, [mapReady, labelsEnabled, baseStyleIndex]);
 
   // S'assurer que les labels (users + POI + zones) sont au-dessus des tracés et des zones.
   useEffect(() => {
@@ -2906,7 +2917,7 @@ export default function MapLibreMap() {
         map.moveLayer(id);
       }
     }
-  }, [mapReady]);
+  }, [mapReady, baseStyleIndex]);
 
   // Ajuster la hauteur du label des zones (plus haut).
   useEffect(() => {
@@ -2919,7 +2930,7 @@ export default function MapLibreMap() {
     } catch {
       // ignore
     }
-  }, [mapReady]);
+  }, [mapReady, baseStyleIndex]);
 
   function centerOnMe() {
     const map = mapInstanceRef.current;
@@ -3836,7 +3847,11 @@ export default function MapLibreMap() {
           });
         }
         if (z.type === 'polygon' && z.polygon) {
-          features.push({ type: 'Feature', properties: { id: z.id, title: z.title, color: z.color }, geometry: z.polygon });
+          features.push({
+            type: 'Feature',
+            properties: { id: z.id, title: z.title, color: z.color },
+            geometry: z.polygon,
+          });
         }
         if (Array.isArray(z.sectors)) {
           for (const s of z.sectors) {
@@ -4260,16 +4275,16 @@ export default function MapLibreMap() {
       if (activeTool === 'zone_circle' && draftLngLat) {
         features.push({
           type: 'Feature',
-          properties: { kind: 'fill', color: draftColor },
-          geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
-        });
-        features.push({
-          type: 'Feature',
           properties: { kind: 'point', color: draftColor },
           geometry: { type: 'Point', coordinates: [draftLngLat.lng, draftLngLat.lat] },
         });
 
         if (draftCircleEdgeLngLat) {
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'fill', color: draftColor },
+            geometry: circleToPolygon({ lng: draftLngLat.lng, lat: draftLngLat.lat }, draftCircleRadius),
+          });
           features.push({
             type: 'Feature',
             properties: { kind: 'line', color: draftColor },
@@ -4498,7 +4513,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features });
-  }, [activeTool, draftLngLat, draftCircleRadius, draftColor, draftCircleEdgeLngLat, mapReady]);
+  }, [activeTool, draftLngLat, draftCircleRadius, draftColor, draftCircleEdgeLngLat, mapReady, currentBaseStyle]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -4949,6 +4964,16 @@ export default function MapLibreMap() {
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
       applyMyDynamicPaint(map);
+
+      try {
+        const visibility = labelsEnabledRef.current ? 'visible' : 'none';
+        if (map.getLayer('others-labels')) map.setLayoutProperty('others-labels', 'visibility', visibility);
+        if (map.getLayer('pois-labels')) map.setLayoutProperty('pois-labels', 'visibility', visibility);
+        if (map.getLayer('zones-labels')) map.setLayoutProperty('zones-labels', 'visibility', visibility);
+      } catch {
+        // ignore
+      }
+
       try {
         map.jumpTo({ center: [view.lng, view.lat], zoom: view.zoom, bearing: view.bearing, pitch: view.pitch });
       } catch {
@@ -5034,7 +5059,7 @@ export default function MapLibreMap() {
     } else {
       src.setData({ type: 'FeatureCollection', features: [] } as any);
     }
-  }, [activeTool, draftLngLat, draftColor, mapReady]);
+  }, [activeTool, draftLngLat, draftColor, mapReady, currentBaseStyle]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -5729,6 +5754,10 @@ export default function MapLibreMap() {
 
     function onVehicleTrackExpired(msg: any) {
       onVehicleTrackUpdated(msg);
+
+      // Quand une piste arrive à expiration, informer l'utilisateur que la portée
+      // maximum de l'isochrone a été atteinte.
+      setActivityToast('portée maximum atteinte');
     }
 
     socket.on('poi:created', onPoiCreated);
@@ -8067,6 +8096,7 @@ export default function MapLibreMap() {
                         ref={lastKnownWhenInputRef}
                         type="datetime-local"
                         value={personDraft.lastKnownWhen}
+                        min={minLiveTrackWhenLocalMinute}
                         max={nowLocalMinute}
                         disabled={hasActiveTestVehicleTrack}
                         onChange={(e) =>
@@ -8077,6 +8107,10 @@ export default function MapLibreMap() {
                         }
                         className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                       />
+                      <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-600">
+                        <AlertTriangle size={12} className="text-amber-600" />
+                        <span>Durée de piste en live 2h max et possibilité de revenir 12h en arriere max.</span>
+                      </div>
                     </div>
                   </div>
 

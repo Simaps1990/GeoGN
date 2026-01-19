@@ -9,7 +9,7 @@ const SCHEDULER_INTERVAL_MS = 20_000;
 
 function clampElapsed(seconds: number, maxSeconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-  const max = Number.isFinite(maxSeconds) && maxSeconds > 0 ? Math.min(maxSeconds, 3600) : 3600;
+  const max = Number.isFinite(maxSeconds) && maxSeconds > 0 ? Math.min(maxSeconds, 7200) : 7200;
   return Math.max(0, Math.min(max, seconds));
 }
 
@@ -149,9 +149,26 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
           fresh.maxDurationSeconds ?? 3600
         );
 
+        const originWhenMs = (() => {
+          const raw = (fresh as any)?.origin?.when;
+          if (raw instanceof Date) return raw.getTime();
+          if (typeof raw === 'string') {
+            const d = new Date(raw);
+            if (!Number.isNaN(d.getTime())) return d.getTime();
+          }
+          return null;
+        })();
+
+        const baseElapsedSeconds =
+          typeof originWhenMs === 'number' && Number.isFinite(originWhenMs) && originWhenMs <= startedAtMs
+            ? Math.max(0, Math.floor((startedAtMs - originWhenMs) / 1000))
+            : 0;
+
+        const simulatedElapsedSeconds = baseElapsedSeconds + elapsedSeconds;
+
         const maxDurationSeconds = Number.isFinite(fresh.maxDurationSeconds)
-          ? Math.min(fresh.maxDurationSeconds, 3600)
-          : 3600;
+          ? Math.min(fresh.maxDurationSeconds, 7200)
+          : 7200;
 
         if (elapsedSeconds >= maxDurationSeconds) {
           const updated = await VehicleTrackModel.findOneAndUpdate(
@@ -222,7 +239,7 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 : maxDurationSeconds;
               // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
               // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
-              const stepped = Math.ceil(elapsedSeconds / step) * step;
+              const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
 
               // Si un budget a déjà été calculé (ex: calcul immédiat à la création),
               // on force l'avancement au palier suivant pour éviter 20 -> 20.
@@ -338,7 +355,7 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 : maxDurationSeconds;
               // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
               // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
-              const stepped = Math.ceil(elapsedSeconds / step) * step;
+              const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
 
               const prevBudget = (() => {
                 const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
