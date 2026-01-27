@@ -520,6 +520,13 @@ export default function MapLibreMap() {
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
+  const [selectedCamera, setSelectedCamera] = useState<{
+    lng: number;
+    lat: number;
+    apparence: string;
+    opType: 'public' | 'prive';
+    idCamera: string;
+  } | null>(null);
   const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
@@ -612,6 +619,16 @@ export default function MapLibreMap() {
 
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [scaleEnabled, setScaleEnabled] = useState(false);
+
+  const [camerasEnabled, setCamerasEnabled] = useState(false);
+  const camerasEnabledRef = useRef(camerasEnabled);
+  useEffect(() => {
+    camerasEnabledRef.current = camerasEnabled;
+  }, [camerasEnabled]);
+
+  const camerasGeojsonRef = useRef<any>({ type: 'FeatureCollection', features: [] });
+  const camerasAbortRef = useRef<AbortController | null>(null);
+  const camerasDebounceRef = useRef<number | null>(null);
 
   const labelsEnabledRef = useRef(labelsEnabled);
   useEffect(() => {
@@ -1493,7 +1510,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features });
-  }, [mapReady, personCase, estimation, styleVersion]);
+  }, [mapReady, personCase, estimation]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1956,6 +1973,7 @@ export default function MapLibreMap() {
   const [activityToastVisible, setActivityToastVisible] = useState(false);
   const activityToastTimerRef = useRef<number | null>(null);
   const activityToastHideRef = useRef<number | null>(null);
+  const lastNoCameraToastAtRef = useRef<number>(0);
 
   const [historyWindowSeconds, setHistoryWindowSeconds] = useState(1800);
   const historyWindowUserSetRef = useRef(false);
@@ -2908,6 +2926,19 @@ export default function MapLibreMap() {
     }
   }, [labelsEnabled, mapReady, baseStyleIndex]);
 
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    const visibility = camerasEnabled ? 'visible' : 'none';
+    try {
+      if (map.getLayer('cameras')) map.setLayoutProperty('cameras', 'visibility', visibility);
+      if (map.getLayer('cameras-labels')) map.setLayoutProperty('cameras-labels', 'visibility', visibility);
+    } catch {
+      // ignore
+    }
+  }, [camerasEnabled, mapReady, baseStyleIndex]);
+
   // Rendre les labels utilisateurs robustes: si la couche existait déjà (cache/style reload),
   // on force les propriétés nécessaires pour qu'ils soient effectivement rendus.
   useEffect(() => {
@@ -3179,13 +3210,65 @@ export default function MapLibreMap() {
     safeMoveToTop('others-labels');
     safeMoveToTop('zones-labels');
 
-    // Toujours au-dessus de tout le reste (POI, zones, traces, labels, etc.)
+    // Caméras au-dessus des zones/POI/labels
+    safeMoveToTop('cameras');
+    safeMoveToTop('cameras-labels');
+
+    // Toujours au-dessus de tout le reste (POI, zones, traces, labels, caméras, etc.)
     safeMoveToTop('me-dot');
   }
 
   function ensureOverlays(map: MapLibreMapInstance) {
     if (!map.getSource('me')) {
       map.addSource('me', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('cameras')) {
+      map.addSource('cameras', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    // Enregistrer les icônes losange caméra (public/privé) une seule fois
+    try {
+      const gl: any = (globalThis as any);
+      const ImageCtor: any = (gl && gl.Image) || Image;
+
+      if (!map.hasImage('camera-public')) {
+        const svgBlue =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+          '<polygon points="20,3 37,20 20,37 3,20" fill="#3b82f6" stroke="white" stroke-width="2"/>' +
+          '<rect x="13" y="16" width="11" height="8" rx="1.5" fill="white" />' +
+          '<circle cx="17" cy="20" r="1.7" fill="#3b82f6" />' +
+          '<polygon points="24,17 29,15 29,25 24,23" fill="white" />' +
+          '</svg>';
+        const img = new ImageCtor(32, 32);
+        img.onload = () => {
+          try {
+            if (!map.hasImage('camera-public')) map.addImage('camera-public', img, { pixelRatio: 2 } as any);
+          } catch {
+            // ignore
+          }
+        };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgBlue);
+      }
+
+      if (!map.hasImage('camera-private')) {
+        const svgGreen =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+          '<polygon points="20,3 37,20 20,37 3,20" fill="#22c55e" stroke="white" stroke-width="2"/>' +
+          '<rect x="13" y="16" width="11" height="8" rx="1.5" fill="white" />' +
+          '<circle cx="17" cy="20" r="1.7" fill="#22c55e" />' +
+          '<polygon points="24,17 29,15 29,25 24,23" fill="white" />' +
+          '</svg>';
+        const img2 = new ImageCtor(32, 32);
+        img2.onload = () => {
+          try {
+            if (!map.hasImage('camera-private')) map.addImage('camera-private', img2, { pixelRatio: 2 } as any);
+          } catch {
+            // ignore
+          }
+        };
+        img2.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgGreen);
+      }
+    } catch {
+      // ignore
     }
     if (!map.getLayer('me-dot')) {
       map.addLayer({
@@ -3198,6 +3281,35 @@ export default function MapLibreMap() {
           'circle-color': '#3B82F6',
           'circle-stroke-width': 2,
           'circle-stroke-color': '#ffffff',
+        },
+      });
+    }
+
+    if (!map.getLayer('cameras')) {
+      map.addLayer({
+        id: 'cameras',
+        type: 'symbol',
+        source: 'cameras',
+        layout: {
+          'icon-image': [
+            'case',
+            ['==', ['coalesce', ['downcase', ['to-string', ['get', 'op_type']]], ''], 'public'],
+            'camera-public',
+            'camera-private',
+          ],
+          'icon-size': 2.2,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+      });
+    }
+    if (!map.getLayer('cameras-labels')) {
+      map.addLayer({
+        id: 'cameras-labels',
+        type: 'symbol',
+        source: 'cameras',
+        layout: {
+          'text-field': '',
         },
       });
     }
@@ -3624,6 +3736,9 @@ export default function MapLibreMap() {
     if (!map.getSource('draft-poi')) {
       map.addSource('draft-poi', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
+    if (!map.getSource('cameras')) {
+      map.addSource('cameras', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
     if (!map.getLayer('draft-poi')) {
       map.addLayer({
         id: 'draft-poi',
@@ -3742,6 +3857,129 @@ export default function MapLibreMap() {
     }
 
     enforceLayerOrder(map);
+  }
+
+  async function fetchCamerasForCurrentView(map: MapLibreMapInstance) {
+    const envUrl = (import.meta as any)?.env?.VITE_CAMERAS_API_URL as string | undefined;
+    const urlBase = envUrl && envUrl.trim() ? envUrl.trim() : '/cameras.geojson';
+
+    try {
+      camerasAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    const ac = new AbortController();
+    camerasAbortRef.current = ac;
+
+    const b = map.getBounds();
+    const params = new URLSearchParams({
+      minLng: String(b.getWest()),
+      minLat: String(b.getSouth()),
+      maxLng: String(b.getEast()),
+      maxLat: String(b.getNorth()),
+    });
+
+    const url = urlBase.includes('?') ? `${urlBase}&${params.toString()}` : `${urlBase}?${params.toString()}`;
+
+    let data: any = null;
+    try {
+      const r = await fetch(url, { signal: ac.signal });
+      data = await r.json();
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      return;
+    }
+
+    const fc = (() => {
+      if (data && typeof data === 'object') {
+        if ((data as any).type === 'FeatureCollection' && Array.isArray((data as any).features)) return data;
+        if ((data as any).type === 'Feature' && (data as any).geometry) return { type: 'FeatureCollection', features: [data] };
+        if (Array.isArray((data as any).features) && (data as any).features.length && (data as any).features[0]?.geometry) {
+          return { type: 'FeatureCollection', features: (data as any).features };
+        }
+      }
+
+      const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.results) ? (data as any).results : null;
+      if (!arr) return { type: 'FeatureCollection', features: [] };
+
+      const feats = arr
+        .map((it: any, idx: number) => {
+          const lng =
+            typeof it?.lng === 'number'
+              ? it.lng
+              : typeof it?.lon === 'number'
+                ? it.lon
+                : typeof it?.longitude === 'number'
+                  ? it.longitude
+                  : null;
+          const lat =
+            typeof it?.lat === 'number'
+              ? it.lat
+              : typeof it?.latitude === 'number'
+                ? it.latitude
+                : null;
+          if (lng === null || lat === null) return null;
+          return {
+            type: 'Feature',
+            properties: {
+              id: it?.id ?? it?.identifier ?? idx,
+              title: it?.title ?? it?.name ?? it?.nom ?? 'Caméra',
+              ...it,
+            },
+            geometry: { type: 'Point', coordinates: [lng, lat] },
+          };
+        })
+        .filter(Boolean);
+
+      return { type: 'FeatureCollection', features: feats };
+    })();
+
+    // Filtrer côté client pour ne garder que les caméras dans la vue actuelle
+    const fcFiltered = (() => {
+      try {
+        const feats = Array.isArray((fc as any)?.features) ? ((fc as any).features as any[]) : [];
+        const minLng = b.getWest();
+        const minLat = b.getSouth();
+        const maxLng = b.getEast();
+        const maxLat = b.getNorth();
+
+        const inView = feats.filter((f) => {
+          if (!f || !f.geometry || f.geometry.type !== 'Point') return false;
+          const coords = f.geometry.coordinates;
+          if (!Array.isArray(coords) || coords.length < 2) return false;
+          const lng = coords[0];
+          const lat = coords[1];
+          if (typeof lng !== 'number' || typeof lat !== 'number') return false;
+          return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
+        });
+
+        return { type: 'FeatureCollection', features: inView } as any;
+      } catch {
+        return fc as any;
+      }
+    })();
+
+    camerasGeojsonRef.current = fcFiltered;
+    const src = map.getSource('cameras') as GeoJSONSource | undefined;
+    if (src) {
+      src.setData(fcFiltered as any);
+    }
+
+    try {
+      const empty =
+        !fcFiltered ||
+        !Array.isArray((fcFiltered as any).features) ||
+        (fcFiltered as any).features.length === 0;
+      if (camerasEnabledRef.current && empty) {
+        const now = Date.now();
+        if (now - lastNoCameraToastAtRef.current >= 6000) {
+          lastNoCameraToastAtRef.current = now;
+          setActivityToast('Aucune caméra connue dans le secteur');
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   function resyncAllOverlays(map: MapLibreMapInstance) {
@@ -4605,6 +4843,50 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
+
+    const onCameraClick = (e: any) => {
+      try {
+        const feats = map.queryRenderedFeatures(e.point, { layers: ['cameras'] }) as any[];
+        const feat = feats && feats.length ? feats[0] : null;
+        if (!feat) return;
+        const geom = feat.geometry as any;
+        const coords = Array.isArray(geom?.coordinates) ? (geom.coordinates as [number, number]) : undefined;
+        if (!coords || coords.length < 2) return;
+
+        const props = feat.properties as any;
+        const rawApp = (props?.apparence ?? '').toString();
+        const apparence = rawApp ? rawApp : '';
+        const rawOp = (props?.op_type ?? '').toString().toLowerCase();
+        const opType: 'public' | 'prive' = rawOp === 'public' ? 'public' : 'prive';
+        const idCamera = (props?.id_camera ?? '').toString();
+
+        setSelectedCamera({
+          lng: coords[0],
+          lat: coords[1],
+          apparence,
+          opType,
+          idCamera,
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    map.on('click', onCameraClick as any);
+
+    return () => {
+      try {
+        map.off('click', onCameraClick as any);
+      } catch {
+        // ignore
+      }
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
     const src = map.getSource('draft-zone') as GeoJSONSource | undefined;
     if (!src) return;
     if (activeTool === 'none' || activeTool === 'poi') {
@@ -4994,6 +5276,21 @@ export default function MapLibreMap() {
       applyMyDynamicPaint(map);
 
       try {
+        const csrc = map.getSource('cameras') as GeoJSONSource | undefined;
+        if (csrc) csrc.setData(camerasGeojsonRef.current as any);
+      } catch {
+        // ignore
+      }
+
+      try {
+        const visibility = camerasEnabledRef.current ? 'visible' : 'none';
+        if (map.getLayer('cameras')) map.setLayoutProperty('cameras', 'visibility', visibility);
+        if (map.getLayer('cameras-labels')) map.setLayoutProperty('cameras-labels', 'visibility', visibility);
+      } catch {
+        // ignore
+      }
+
+      try {
         const visibility = labelsEnabledRef.current ? 'visible' : 'none';
         if (map.getLayer('others-labels')) map.setLayoutProperty('others-labels', 'visibility', visibility);
         if (map.getLayer('pois-labels')) map.setLayoutProperty('pois-labels', 'visibility', visibility);
@@ -5015,6 +5312,37 @@ export default function MapLibreMap() {
       map.off('styledata', onStyleData as any);
     };
   }, [currentBaseStyle, user?.id, memberColors]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
+    const schedule = () => {
+      if (!camerasEnabledRef.current) return;
+      if (camerasDebounceRef.current) {
+        window.clearTimeout(camerasDebounceRef.current);
+      }
+      camerasDebounceRef.current = window.setTimeout(() => {
+        camerasDebounceRef.current = null;
+        void fetchCamerasForCurrentView(map);
+      }, 350);
+    };
+
+    const onMoveEnd = () => schedule();
+    map.on('moveend', onMoveEnd);
+    map.on('zoomend', onMoveEnd);
+
+    // Trigger immediately when enabling
+    if (camerasEnabled) {
+      schedule();
+    }
+
+    return () => {
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onMoveEnd);
+    };
+  }, [mapReady, camerasEnabled]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -7372,6 +7700,59 @@ export default function MapLibreMap() {
         </div>
       ) : null}
 
+      {selectedCamera ? (
+        <div
+          className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setSelectedCamera(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-xl flex items-start gap-3 px-4 py-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
+              {(() => {
+                const camBg = selectedCamera.opType === 'public' ? '#3b82f6' : '#22c55e';
+                return (
+                  <div
+                    className="h-7 w-7 border-2 border-white shadow flex items-center justify-center rotate-45"
+                    style={{ backgroundColor: camBg }}
+                  >
+                    <div className="-rotate-45 flex items-center justify-center h-full w-full">
+                      <Cctv size={16} color="#ffffff" strokeWidth={2.5} />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <div className="truncate text-sm font-semibold text-gray-900">
+                {(() => {
+                  const raw = (selectedCamera.apparence || '').toString().trim().toLowerCase();
+                  const label = raw === 'nue' ? 'fixe' : selectedCamera.apparence || '';
+                  return `Caméra${label ? ` ${label}` : ''}`;
+                })()}
+              </div>
+              <div className="mt-1 text-xs text-gray-700 break-words">
+                {selectedCamera.opType === 'public' ? 'Exploitant : public' : 'Exploitant : privé'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-gray-500">
+                {selectedCamera.idCamera ? `N° ${selectedCamera.idCamera}` : 'N° inconnu'}
+              </div>
+            </div>
+            <div className="ml-2 flex items-start">
+              <button
+                type="button"
+                onClick={() => setSelectedCamera(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
+                title="Fermer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {confirmDeletePersonCaseOpen ? (
         <div
           className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/40 p-4"
@@ -7674,6 +8055,19 @@ export default function MapLibreMap() {
                 title="Tag"
               >
                 <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCamerasEnabled((v) => !v);
+                }}
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                  camerasEnabled ? 'ring-blue-500/25' : 'ring-black/10'
+                }`}
+                title="Caméra"
+              >
+                <Cctv className={camerasEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
               </button>
 
               <button

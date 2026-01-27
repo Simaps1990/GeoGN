@@ -108,7 +108,7 @@ export default function MapPage() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('geogn:zone:draftCancel'));
                 }}
-                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-red-500/90 to-red-600 px-5 text-sm font-semibold text-white shadow-sm hover:from-red-500 hover:to-red-600"
+                className="inline-flex h-12 items-center justify-center rounded-2xl bg-red-500 px-5 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
               >
                 Annuler
               </button>
@@ -118,7 +118,7 @@ export default function MapPage() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('geogn:zone:draftValidate'));
                 }}
-                className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-b from-emerald-500/90 to-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:from-emerald-500 hover:to-emerald-600 disabled:opacity-100 disabled:from-emerald-500/90 disabled:to-emerald-600"
+                className="inline-flex h-12 items-center justify-center rounded-2xl bg-emerald-500 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600 disabled:opacity-100 disabled:bg-emerald-500"
               >
                 Valider
               </button>
