@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMapInstance, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { CameraPopup, type SelectedCamera } from './CameraPopup';
+import { ConfirmDeletePersonCaseModal } from './ConfirmDeletePersonCaseModal';
+import { MapRightToolbar } from './MapRightToolbar';
+import { NavPickerModal } from './NavPickerModal';
+import { getPoiIconComponent, PoiPopup } from './PoiPopup';
+import { PersonPanelCollapsedBar } from './PersonPanelCollapsedBar';
+import { PersonPanelOverlay } from './PersonPanelOverlay';
+import { TimerModal } from './TimerModal';
+import { ValidationModal } from './ValidationModal';
 import {
   AlertTriangle,
   Bike,
@@ -8,40 +17,24 @@ import {
   Bomb,
   Car,
   Cctv,
-  ChevronDown,
-  ChevronUp,
   Church,
-  CircleDot,
-  CircleDotDashed,
   Coffee,
-  Compass,
   Crosshair,
   Dog,
   Flag,
   Flame,
   HelpCircle,
   House,
-  Layers,
   Loader2,
-  MapPin,
   Mic,
-  Navigation2,
   PawPrint,
-  Pencil,
   Radiation,
-  Ruler,
-  Settings,
   ShieldPlus,
-  Trash2,
   Siren,
   Skull,
-  Spline,
-  Tag,
-  Timer,
   Truck,
   UserRound,
   Warehouse,
-  X,
   Zap,
 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -271,59 +264,6 @@ function haversineMeters(a: { lng: number; lat: number }, b: { lng: number; lat:
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-function buildCorridorEllipseRing(
-  a: { lng: number; lat: number },
-  b: { lng: number; lat: number },
-  options?: { baseWidthKm?: number; dispersionScaleKm?: number }
-): number[][] | null {
-  const latMid = (a.lat + b.lat) / 2;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const kmPerDegLat = 111.32;
-  const kmPerDegLon = kmPerDegLat * Math.cos(toRad(latMid));
-  if (!Number.isFinite(kmPerDegLon) || kmPerDegLon <= 0) return null;
-
-  const ax = a.lng * kmPerDegLon;
-  const ay = a.lat * kmPerDegLat;
-  const bx = b.lng * kmPerDegLon;
-  const by = b.lat * kmPerDegLat;
-
-  const cx = (ax + bx) / 2;
-  const cy = (ay + by) / 2;
-
-  const dx = bx - ax;
-  const dy = by - ay;
-  const dKm = Math.sqrt(dx * dx + dy * dy);
-  if (!Number.isFinite(dKm) || dKm < 0.05) return null; // < 50 m → pas de couloir
-
-  const longitudinalFactor = 1.3;
-  const aKm = (dKm / 2) * longitudinalFactor;
-
-  const baseWidthKm = options?.baseWidthKm ?? 0.3;
-  const dispersionScaleKm = options?.dispersionScaleKm ?? 0.7;
-  const kDisp = 1; // placeholder simple pour v1
-  let bKm = Math.max(dKm * 0.2, baseWidthKm + (kDisp - 1) * dispersionScaleKm);
-  bKm = Math.max(0.2, Math.min(5, bKm));
-
-  const bearing = Math.atan2(dx, dy); // axe majeur orienté A→B
-  const cosB = Math.cos(bearing);
-  const sinB = Math.sin(bearing);
-
-  const steps = 64;
-  const ring: number[][] = [];
-  for (let i = 0; i < steps; i += 1) {
-    const t = (2 * Math.PI * i) / steps;
-    const xLocal = aKm * Math.cos(t);
-    const yLocal = bKm * Math.sin(t);
-    const x = cx + xLocal * cosB - yLocal * sinB;
-    const y = cy + xLocal * sinB + yLocal * cosB;
-    const lng = x / kmPerDegLon;
-    const lat = y / kmPerDegLat;
-    ring.push([lng, lat]);
-  }
-  if (ring.length) ring.push(ring[0]);
-  return ring;
-}
-
 function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
   const ring = closeRing(ringInput);
   const ys: number[] = [];
@@ -520,13 +460,7 @@ export default function MapLibreMap() {
   const [otherPositions, setOtherPositions] = useState<Record<string, { lng: number; lat: number; t: number }>>({});
   const [pois, setPois] = useState<ApiPoi[]>([]);
   const [selectedPoi, setSelectedPoi] = useState<ApiPoi | null>(null);
-  const [selectedCamera, setSelectedCamera] = useState<{
-    lng: number;
-    lat: number;
-    apparence: string;
-    opType: 'public' | 'prive';
-    idCamera: string;
-  } | null>(null);
+  const [selectedCamera, setSelectedCamera] = useState<SelectedCamera | null>(null);
   const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
@@ -832,7 +766,7 @@ export default function MapLibreMap() {
     }
   };
 
-  const clearVehicleTrackVisual = (reason: string) => {
+  const clearVehicleTrackVisual = (_reason: string) => {
     clearPendingVehicleTrack();
     if (vehicleTrackMorphFrameRef.current != null) {
       try {
@@ -866,21 +800,14 @@ export default function MapLibreMap() {
     } catch {
       // ignore
     }
-
-    try {
-      // eslint-disable-next-line no-console
-      console.log('[vehicle-track]', ts(), 'visual cleared', { reason });
-    } catch {
-      // ignore
-    }
   };
 
   const [vehicleTracks, setVehicleTracks] = useState<ApiVehicleTrack[]>([]);
-  const [vehicleTracksTotal, setVehicleTracksTotal] = useState(0);
+  const [, setVehicleTracksTotal] = useState(0);
   // Indique si la liste des pistes véhicule a déjà été chargée au moins une fois
   // pour la mission courante durant cette session.
   const [vehicleTracksLoaded, setVehicleTracksLoaded] = useState(false);
-  const [vehicleTracksQuery, setVehicleTracksQuery] = useState<{
+  const [vehicleTracksQuery, _setVehicleTracksQuery] = useState<{
     status?: ApiVehicleTrackStatus;
     vehicleType?: ApiVehicleTrackVehicleType;
     q: string;
@@ -1361,8 +1288,6 @@ export default function MapLibreMap() {
         )} h → temps de marche effectif estimé ~${effectiveHours.toFixed(1)} h (pauses + fatigue).`
       );
     }
-    const hasSecondClue =
-      false;
     if (
       personCase.mobility === 'car' ||
       personCase.mobility === 'motorcycle' ||
@@ -1571,12 +1496,123 @@ export default function MapLibreMap() {
     ],
     []
   );
-
-  function getPoiIconComponent(iconId: string) {
-    return poiIconOptions.find((x) => x.id === iconId)?.Icon ?? MapPin;
-  }
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
+
+  const creatorLabel = (() => {
+    if (!selectedPoi?.createdBy) return 'Créé par inconnu';
+    const id = selectedPoi.createdBy as string;
+    const name = buildUserDisplayName(id);
+    return `Créé par ${name}`;
+  })();
+
+  const onExpandPersonPanel = useCallback(() => {
+    setPersonPanelCollapsed(false);
+  }, []);
+
+  const onCloseTimerModal = useCallback(() => {
+    setTimerModalOpen(false);
+  }, []);
+
+  const onSaveTimerModal = useCallback(() => {
+    void onSaveTraceRetentionSeconds();
+  }, [onSaveTraceRetentionSeconds]);
+
+  const onClosePoiPopup = useCallback(() => {
+    setSelectedPoi(null);
+  }, []);
+
+  const onNavigateToPoi = useCallback(() => {
+    if (!selectedPoi) return;
+    setNavPickerTarget({ lng: selectedPoi.lng, lat: selectedPoi.lat, title: selectedPoi.title || 'POI' });
+  }, [selectedPoi]);
+
+  const onStartTrackFromPoi = useCallback(() => {
+    if (hasActiveTestVehicleTrack) {
+      setActivityToast('une piste est deja en cours');
+      return;
+    }
+    if (!selectedPoi) return;
+    setPersonDraft((prev) => ({
+      ...prev,
+      lastKnownType: 'poi',
+      lastKnownQuery: selectedPoi.title || 'POI',
+      lastKnownPoiId: selectedPoi.id,
+      lastKnownLng: selectedPoi.lng,
+      lastKnownLat: selectedPoi.lat,
+    }));
+
+    setPersonEdit(true);
+    setPersonPanelCollapsed(false);
+    setPersonPanelOpen(true);
+    setShowActiveVehicleTrack(true);
+
+    setSelectedPoi(null);
+  }, [hasActiveTestVehicleTrack, selectedPoi]);
+
+  const onEditPoi = useCallback(() => {
+    if (!selectedPoi) return;
+    setEditingPoiId(selectedPoi.id);
+    setActiveTool('poi');
+    setDraftLngLat({ lng: selectedPoi.lng, lat: selectedPoi.lat });
+    setDraftTitle(selectedPoi.title || '');
+    setDraftComment((selectedPoi.comment || '').trim() === '-' ? '' : (selectedPoi.comment || ''));
+    setDraftColor(selectedPoi.color || '#f97316');
+    setDraftIcon(selectedPoi.icon || 'target');
+    setActionError(null);
+    setShowValidation(true);
+  }, [selectedPoi]);
+
+  const onDeletePoi = useCallback(async () => {
+    if (!selectedMissionId || !selectedPoi) return;
+    const ok = await confirmDialog({
+      title: 'Supprimer ce POI ?',
+      message: 'Cette action est définitive.',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await deletePoi(selectedMissionId, selectedPoi.id);
+      setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
+      setSelectedPoi(null);
+    } catch (e: any) {
+      const offline = !navigator.onLine || !socketRef.current?.connected;
+      if (offline) {
+        setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
+        enqueueAction(selectedMissionId, {
+          entity: 'poi',
+          op: 'delete',
+          id: selectedPoi.id,
+          t: Date.now(),
+        });
+        setSelectedPoi(null);
+      } else {
+        setActionError(e?.message ?? 'Erreur');
+      }
+    } finally {
+      setActionBusy(false);
+    }
+  }, [confirmDialog, selectedMissionId, selectedPoi]);
+
+  const onCloseCameraPopup = useCallback(() => {
+    setSelectedCamera(null);
+  }, []);
+
+  const onCancelDeletePersonCase = useCallback(() => {
+    setConfirmDeletePersonCaseOpen(false);
+  }, []);
+
+  const onConfirmDeletePersonCaseClick = useCallback(() => {
+    void onConfirmDeletePersonCase();
+  }, [onConfirmDeletePersonCase]);
+
+  const onCloseNavPicker = useCallback(() => {
+    setNavPickerTarget(null);
+  }, []);
 
   const [mission, setMission] = useState<ApiMission | null>(null);
 
@@ -1767,7 +1803,7 @@ export default function MapLibreMap() {
     (async () => {
       try {
         const missionIdAtCall = selectedMissionId;
-        const { tracks, total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
+        const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
         if (cancelled) return;
 
         setVehicleTracksLoaded(true);
@@ -6581,61 +6617,6 @@ export default function MapLibreMap() {
       return { lng: sumLng / n, lat: sumLat / n };
     };
 
-    function circleRingMeters(
-      center: { lng: number; lat: number },
-      radiusMeters: number,
-      points: number
-    ): [number, number][] {
-      const latRad = (center.lat * Math.PI) / 180;
-      const metersPerDegLat = 111_320;
-      const metersPerDegLng = 111_320 * Math.cos(latRad);
-      const coords: [number, number][] = [];
-      for (let i = 0; i < points; i += 1) {
-        const a = (i / points) * Math.PI * 2;
-        const dx = Math.cos(a) * radiusMeters;
-        const dy = Math.sin(a) * radiusMeters;
-        const lng = center.lng + dx / metersPerDegLng;
-        const lat = center.lat + dy / metersPerDegLat;
-        coords.push([lng, lat]);
-      }
-      if (coords.length) coords.push(coords[0]);
-      return coords;
-    }
-
-    const clampStartToNeverShrink = (args: {
-      center: { lng: number; lat: number };
-      startRing: [number, number][];
-      endRing: [number, number][];
-    }): [number, number][] => {
-      const { center, startRing, endRing } = args;
-      const cx = center.lng;
-      const cy = center.lat;
-      const out: [number, number][] = [];
-      const len = Math.min(startRing.length, endRing.length);
-      for (let i = 0; i < len; i += 1) {
-        const a = startRing[i];
-        const b = endRing[i];
-        const ax = a[0] - cx;
-        const ay = a[1] - cy;
-        const bx = b[0] - cx;
-        const by = b[1] - cy;
-        const da = Math.sqrt(ax * ax + ay * ay);
-        const db = Math.sqrt(bx * bx + by * by);
-        if (!Number.isFinite(da) || !Number.isFinite(db) || da <= 0) {
-          out.push([cx + bx, cy + by]);
-          continue;
-        }
-        if (da <= db) {
-          out.push([cx + ax, cy + ay]);
-          continue;
-        }
-        // da > db : on clamp à db pour éviter une animation de rétrécissement
-        const k = db / da;
-        out.push([cx + ax * k, cy + ay * k]);
-      }
-      return ensureClosed(out);
-    };
-
     const smoothRing = (ringIn: [number, number][], passes: number): [number, number][] => {
       let ring = ensureClosed(ringIn);
       if (ring.length < 4) return ring;
@@ -6654,39 +6635,6 @@ export default function MapLibreMap() {
         ring = next;
       }
       return ring;
-    };
-
-    const buildEnvelopeNeverShrink = (args: {
-      center: { lng: number; lat: number };
-      prevRing: [number, number][];
-      nextRing: [number, number][];
-    }): [number, number][] => {
-      const { center, prevRing, nextRing } = args;
-      const cx = center.lng;
-      const cy = center.lat;
-      const out: [number, number][] = [];
-      const len = Math.min(prevRing.length, nextRing.length);
-      for (let i = 0; i < len; i += 1) {
-        const a = prevRing[i];
-        const b = nextRing[i];
-        const ax = a[0] - cx;
-        const ay = a[1] - cy;
-        const bx = b[0] - cx;
-        const by = b[1] - cy;
-        const da = Math.sqrt(ax * ax + ay * ay);
-        const db = Math.sqrt(bx * bx + by * by);
-        if (!Number.isFinite(da) || !Number.isFinite(db)) {
-          out.push([cx + bx, cy + by]);
-          continue;
-        }
-        if (db >= da) {
-          out.push([cx + bx, cy + by]);
-          continue;
-        }
-        // db < da : on garde l'ancien point pour ne jamais rétrécir
-        out.push([cx + ax, cy + ay]);
-      }
-      return ensureClosed(out);
     };
 
     const resampleRing = (ringIn: [number, number][], points: number): [number, number][] => {
@@ -6763,9 +6711,6 @@ export default function MapLibreMap() {
     // IMPORTANT: MapLibre ne rend pas toujours les polygons non fermés.
     // On normalise donc la géométrie avant setData (notamment pour le tout premier budget 20).
     data = normalizeVehicleTrackFc(data);
-
-    const toRingRaw = getRing(data);
-    const toCenter = getCenter(data);
     const toFeature = (data as any)?.features?.[0];
     const props = toFeature?.properties ?? {};
 
@@ -7546,1551 +7491,180 @@ export default function MapLibreMap() {
         <div id="map-scale-container" className="pointer-events-auto flex w-full justify-center" />
       </div>
 
-      {selectedPoi ? (
-        <div
-          className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setSelectedPoi(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl bg-white shadow-xl flex items-start gap-3 px-4 py-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
-              {(() => {
-                const Icon = getPoiIconComponent(selectedPoi.icon);
-                const bg = selectedPoi.color || '#f97316';
-                const bgLower = bg.toLowerCase();
-                const iconColor = bgLower === '#ffffff' || bgLower === '#fde047' ? '#000000' : '#ffffff';
-                return (
-                  <div className="h-9 w-9 rounded-full border-2 border-white shadow" style={{ backgroundColor: bg }}>
-                    <div className="flex h-full w-full items-center justify-center">
-                      <Icon size={16} color={iconColor} strokeWidth={2.5} />
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="truncate text-sm font-semibold text-gray-900">{selectedPoi.title}</div>
-              <div className="mt-1 text-xs text-gray-700 break-words">
-                {selectedPoi.comment || 'Aucune description'}
-              </div>
-              <div className="mt-0.5 text-[11px] text-gray-500">
-                {(() => {
-                  const id = selectedPoi.createdBy as string | undefined;
-                  if (!id) return 'Créé par inconnu';
-                  const name = buildUserDisplayName(id);
-                  return `Créé par ${name}`;
-                })()}
-              </div>
-            </div>
-            <div className="ml-2 flex flex-col items-end gap-2 self-start">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNavPickerTarget({ lng: selectedPoi.lng, lat: selectedPoi.lat, title: selectedPoi.title || 'POI' });
-                  }}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                  title="Naviguer vers le point"
-                >
-                  <Navigation2 size={16} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (hasActiveTestVehicleTrack) {
-                      setActivityToast('une piste est deja en cours');
-                      return;
-                    }
-                    if (!selectedPoi) return;
-                    setPersonDraft((prev) => ({
-                      ...prev,
-                      lastKnownType: 'poi',
-                      lastKnownQuery: selectedPoi.title || 'POI',
-                      lastKnownPoiId: selectedPoi.id,
-                      lastKnownLng: selectedPoi.lng,
-                      lastKnownLat: selectedPoi.lat,
-                    }));
+      <PoiPopup
+        poi={selectedPoi}
+        onClose={onClosePoiPopup}
+        onNavigate={onNavigateToPoi}
+        onStartTrack={onStartTrackFromPoi}
+        onEdit={onEditPoi}
+        onDelete={onDeletePoi}
+        creatorLabel={creatorLabel}
+        canEditMap={canEditMap}
+        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
+        actionBusy={actionBusy}
+      />
 
-                    // Ouvre le popup "Démarrer une piste" (fiche en édition).
-                    setPersonEdit(true);
-                    setPersonPanelCollapsed(false);
-                    setPersonPanelOpen(true);
-                    setShowActiveVehicleTrack(true);
+      <CameraPopup camera={selectedCamera} onClose={onCloseCameraPopup} />
 
-                    // Ferme le popup POI.
-                    setSelectedPoi(null);
-                  }}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 ${
-                    hasActiveTestVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
-                  }`}
-                  title="Démarrer une piste depuis ce POI"
-                >
-                  <PawPrint size={16} />
-                </button>
-              </div>
-              {canEditMap ? (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!selectedPoi) return;
-                      setEditingPoiId(selectedPoi.id);
-                      setActiveTool('poi');
-                      setDraftLngLat({ lng: selectedPoi.lng, lat: selectedPoi.lat });
-                      setDraftTitle(selectedPoi.title || '');
-                      setDraftComment((selectedPoi.comment || '').trim() === '-' ? '' : (selectedPoi.comment || ''));
-                      setDraftColor(selectedPoi.color || '#f97316');
-                      setDraftIcon(selectedPoi.icon || 'target');
-                      setActionError(null);
-                      setShowValidation(true);
-                    }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                    title="Éditer le POI"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={actionBusy}
-                    onClick={async () => {
-                      if (!selectedMissionId || !selectedPoi) return;
-                      const ok = await confirmDialog({
-                        title: 'Supprimer ce POI ?',
-                        message: 'Cette action est définitive.',
-                        confirmText: 'Supprimer',
-                        cancelText: 'Annuler',
-                        variant: 'danger',
-                      });
-                      if (!ok) return;
-                      setActionBusy(true);
-                      setActionError(null);
-                      try {
-                        await deletePoi(selectedMissionId, selectedPoi.id);
-                        setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
-                        setSelectedPoi(null);
-                      } catch (e: any) {
-                        const offline = !navigator.onLine || !socketRef.current?.connected;
-                        if (offline) {
-                          setPois((prev) => prev.filter((p) => p.id !== selectedPoi.id));
-                          enqueueAction(selectedMissionId, {
-                            entity: 'poi',
-                            op: 'delete',
-                            id: selectedPoi.id,
-                            t: Date.now(),
-                          });
-                          setSelectedPoi(null);
-                        } else {
-                          setActionError(e?.message ?? 'Erreur');
-                        }
-                      } finally {
-                        setActionBusy(false);
-                      }
-                    }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                    title="Supprimer le POI"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ConfirmDeletePersonCaseModal
+        open={confirmDeletePersonCaseOpen}
+        loading={personLoading}
+        onCancel={onCancelDeletePersonCase}
+        onConfirm={onConfirmDeletePersonCaseClick}
+      />
 
-      {selectedCamera ? (
-        <div
-          className="absolute inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setSelectedCamera(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl bg-white shadow-xl flex items-start gap-3 px-4 py-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mt-0.5 flex-shrink-0 flex items-center justify-center">
-              {(() => {
-                const camBg = selectedCamera.opType === 'public' ? '#3b82f6' : '#22c55e';
-                return (
-                  <div
-                    className="h-7 w-7 border-2 border-white shadow flex items-center justify-center rotate-45"
-                    style={{ backgroundColor: camBg }}
-                  >
-                    <div className="-rotate-45 flex items-center justify-center h-full w-full">
-                      <Cctv size={16} color="#ffffff" strokeWidth={2.5} />
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="truncate text-sm font-semibold text-gray-900">
-                {(() => {
-                  const raw = (selectedCamera.apparence || '').toString().trim().toLowerCase();
-                  const label = raw === 'nue' ? 'fixe' : selectedCamera.apparence || '';
-                  return `Caméra${label ? ` ${label}` : ''}`;
-                })()}
-              </div>
-              <div className="mt-1 text-xs text-gray-700 break-words">
-                {selectedCamera.opType === 'public' ? 'Exploitant : public' : 'Exploitant : privé'}
-              </div>
-              <div className="mt-0.5 text-[11px] text-gray-500">
-                {selectedCamera.idCamera ? `N° ${selectedCamera.idCamera}` : 'N° inconnu'}
-              </div>
-            </div>
-            <div className="ml-2 flex items-start">
-              <button
-                type="button"
-                onClick={() => setSelectedCamera(null)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                title="Fermer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <NavPickerModal
+        target={navPickerTarget}
+        isAndroid={isAndroid}
+        onClose={onCloseNavPicker}
+      />
 
-      {confirmDeletePersonCaseOpen ? (
-        <div
-          className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setConfirmDeletePersonCaseOpen(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-base font-bold text-gray-900">Supprimer la piste ?</div>
-            <div className="mt-2 text-sm text-gray-700">Cette action est définitive.</div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                className="inline-flex h-10 items-center justify-center rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50"
-                onClick={() => setConfirmDeletePersonCaseOpen(false)}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
-                disabled={personLoading}
-                onClick={() => void onConfirmDeletePersonCase()}
-              >
-                Supprimer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {navPickerTarget ? (
-        <div
-          className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setNavPickerTarget(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl bg-white shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-4 pt-4 text-sm font-semibold text-gray-900">
-              Selectionnez votre moyen de navigation
-            </div>
-            <div className="flex items-center justify-center gap-4 p-4">
-              <button
-                type="button"
-                onClick={() => {
-                  const waze = `https://waze.com/ul?ll=${navPickerTarget.lat}%2C${navPickerTarget.lng}&navigate=yes`;
-                  window.open(waze, '_blank');
-                  setNavPickerTarget(null);
-                }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
-                title="Waze"
-              >
-                <img src="/icon/waze.png" alt="Waze" className="h-12 w-12 object-contain" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const q = encodeURIComponent(`${navPickerTarget.lat},${navPickerTarget.lng}`);
-                  const gmaps = `https://www.google.com/maps/search/?api=1&query=${q}`;
-                  window.open(gmaps, '_blank');
-                  setNavPickerTarget(null);
-                }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
-                title="Google Maps"
-              >
-                <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
-              </button>
-              {!isAndroid ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const label = encodeURIComponent(navPickerTarget.title || 'Cible');
-                    const apple = `http://maps.apple.com/?ll=${navPickerTarget.lat},${navPickerTarget.lng}&q=${label}`;
-                    window.open(apple, '_blank');
-                    setNavPickerTarget(null);
-                  }}
-                  className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
-                  title="Plans (Apple)"
-                >
-                  <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <div
-        className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-2 touch-none"
-        onPointerDown={(e) => e.stopPropagation()}
-        onPointerMove={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        onTouchMove={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={centerOnMe}
-          className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
-            followMyBearing ? 'ring-1 ring-inset ring-blue-500/25' : ''
-          }`}
-          title={followMyBearing ? 'Suivre mon orientation' : 'Centrer sur moi'}
-        >
-          {followMyBearing ? (
-            <Navigation2 className="mx-auto text-blue-600" size={20} />
-          ) : (
-            <Crosshair className="mx-auto text-gray-600" size={20} />
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={toggleMapStyle}
-          className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-          title="Changer le fond de carte"
-        >
-          <Layers className="mx-auto text-gray-600" size={20} />
-        </button>
-
-        {canEditMap ? (
-          <button
-            type="button"
-            onClick={() => {
-              if (activeTool === 'poi') {
-                cancelDraft();
-                return;
-              }
-              cancelDraft();
-              setZoneMenuOpen(false);
-              setDraftColor('');
-              setDraftIcon('');
-              setDraftComment('');
-              setActiveTool('poi');
-            }}
-            className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
-              activeTool === 'poi' ? 'ring-1 ring-inset ring-blue-500/25' : ''
-            }`}
-            title="Ajouter un POI"
-          >
-            <MapPin
-              className={activeTool === 'poi' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'}
-              size={20}
-            />
-          </button>
-        ) : null}
-
-        {role !== 'viewer' ? (
-          <div
-            className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-              zoneMenuOpen ? 'h-[160px] ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
-            }`}
-          >
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActionError(null);
-
-                  if (canEditMap && (activeTool === 'zone_circle' || activeTool === 'zone_polygon')) {
-                    cancelDraft();
-                    setZoneMenuOpen(false);
-                    return;
-                  }
-
-                  setZoneMenuOpen((v) => !v);
-                }}
-                className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                  zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                    ? 'ring-1 ring-inset ring-blue-500/25'
-                    : ''
-                }`}
-                title="Zones"
-              >
-                <CircleDotDashed
-                  className={
-                    zoneMenuOpen || activeTool === 'zone_circle' || activeTool === 'zone_polygon'
-                      ? 'mx-auto text-blue-600'
-                      : 'mx-auto text-gray-600'
-                  }
-                  size={20}
-                />
-              </button>
-
-              <div
-                className={`flex flex-col gap-2 transition-all duration-200 ${
-                  zoneMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
-                }`}
-              >
-                {canEditMap ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (activeTool === 'zone_circle') {
-                          cancelDraft();
-                          setZoneMenuOpen(false);
-                          return;
-                        }
-                        cancelDraft();
-                        setDraftColor('#2563eb');
-                        setActiveTool('zone_circle');
-                      }}
-                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                        activeTool === 'zone_circle' ? 'ring-blue-500/25' : 'ring-black/10'
-                      }`}
-                      title="Zone cercle"
-                    >
-                      <CircleDot className={activeTool === 'zone_circle' ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (activeTool === 'zone_polygon') {
-                          cancelDraft();
-                          setZoneMenuOpen(false);
-                          return;
-                        }
-                        cancelDraft();
-                        setDraftColor('#2563eb');
-                        setActiveTool('zone_polygon');
-                      }}
-                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                        activeTool === 'zone_polygon' ? 'ring-blue-500/25' : 'ring-black/10'
-                      }`}
-                      title="Zone à la main"
-                    >
-                      <Spline className={activeTool === 'zone_polygon' ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        <div
-          className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-            settingsMenuOpen
-              ? `${isAdmin ? 'h-[274px]' : 'h-[216px]'} ring-1 ring-inset ring-black/10`
-              : 'h-12 ring-0'
-          }`}
-        >
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
-
-                setSettingsMenuOpen((v) => !v);
-                // Ouverture du menu = on considère la notification comme vue
-                setSettingsNotification(false);
-                if (selectedMissionId && personCase) {
-                  setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                }
-              }}
-              className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
-                  ? 'ring-1 ring-inset ring-blue-500/25'
-                  : ''
-              }`}
-              title="Settings"
-            >
-              <Settings
-                className={
-                  settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
-                    ? 'mx-auto text-blue-600'
-                    : 'mx-auto text-gray-600'
-                }
-                size={20}
-              />
-              {settingsNotification ? (
-                <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
-              ) : null}
-            </button>
-
-            <div
-              className={`flex flex-col gap-2 transition-all duration-200 ${
-                settingsMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setScaleEnabled((v) => !v)}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                  scaleEnabled ? 'ring-blue-500/25' : 'ring-black/10'
-                }`}
-                title="Règle"
-              >
-                <Ruler className={scaleEnabled ? 'text-blue-600' : 'text-gray-600'} size={20} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLabelsEnabled((v) => !v)}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                  labelsEnabled ? 'ring-blue-500/25' : 'ring-black/10'
-                }`}
-                title="Tag"
-              >
-                <Tag className={labelsEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setCamerasEnabled((v) => !v);
-                }}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                  camerasEnabled ? 'ring-blue-500/25' : 'ring-black/10'
-                }`}
-                title="Caméra"
-              >
-                <Cctv className={camerasEnabled ? 'text-blue-600' : 'text-gray-600'} size={18} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const map = mapInstanceRef.current;
-
-                  setProjectionNotification(false);
-                  if (selectedMissionId && personCase && !(user?.id && personCase.createdBy === user.id)) {
-                    setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                  }
-
-                  if (!personCase) {
-                    if (!isAdmin) {
-                      setNoProjectionToast(true);
-                      return;
-                    }
-                    setPersonEdit(true);
-                    setPersonPanelCollapsed(false);
-                    setPersonPanelOpen(true);
-                    return;
-                  }
-
-                  if (!isAdmin) {
-                    setSettingsNotification(false);
-                  }
-
-                  if (personPanelOpen && personPanelCollapsed) {
-                    setShowActiveVehicleTrack(false);
-                    setPersonPanelOpen(false);
-                    setPersonPanelCollapsed(false);
-                    if (map && mapReady) applyHeatmapVisibility(map, false);
-                    return;
-                  }
-
-                  if (personPanelOpen && !personPanelCollapsed) {
-                    setShowActiveVehicleTrack(true);
-                    setPersonEdit(false);
-                    setPersonPanelCollapsed(true);
-                    if (map && mapReady) {
-                      applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
-                    }
-                    return;
-                  }
-
-                  setPersonEdit(false);
-                  setPersonPanelCollapsed(true);
-                  setPersonPanelOpen(true);
-                  setShowActiveVehicleTrack(true);
-                  if (map && mapReady) {
-                    applyHeatmapVisibility(map, showEstimationHeatmapRef.current);
-                  }
-                }}
-                className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                  personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-                } ${!isAdmin && !personCase ? 'opacity-60' : ''}`}
-                title="Activité"
-              >
-                <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
-                {projectionNotification && !(user?.id && personCase?.createdBy === user.id) ? (
-                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
-                ) : null}
-              </button>
-
-              {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const rs = mission?.traceRetentionSeconds ?? 3600;
-                    setTimerSecondsInput(String(rs));
-                    setTimerError(null);
-                    setTimerModalOpen(true);
-                  }}
-                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
-                  title="Minuteur"
-                >
-                  <Timer className="text-gray-600" size={20} />
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        {false ? (
-          <button
-            type="button"
-            onClick={() => {
-              if (!selectedMissionId) return;
-              const next = historyWindowSeconds + 3600;
-              historyWindowUserSetRef.current = true;
-              setHistoryWindowSeconds(next);
-              const socket = socketRef.current;
-              if (socket) {
-                socket.emit('mission:join', { missionId: selectedMissionId, retentionSeconds: next });
-              }
-            }}
-            className={`h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white ${
-              historyWindowSeconds > 1800 ? 'ring-1 ring-inset ring-blue-500/25' : ''
-            }`}
-          >
-            <span
-              className={
-                historyWindowSeconds > 1800
-                  ? 'mx-auto block text-blue-600 text-sm font-semibold'
-                  : 'mx-auto block text-gray-600 text-sm font-semibold'
-              }
-            >
-              +1h
-            </span>
-          </button>
-        ) : null}
-
-        {isMapRotated ? (
-          <button
-            type="button"
-            onClick={resetNorth}
-            className="h-12 w-12 rounded-2xl border bg-white/90 shadow backdrop-blur hover:bg-white"
-            title="Boussole"
-          >
-            <Compass className="mx-auto text-gray-600" size={20} />
-          </button>
-        ) : null}
-      </div>
+      <MapRightToolbar
+        followMyBearing={followMyBearing}
+        centerOnMe={centerOnMe}
+        toggleMapStyle={toggleMapStyle}
+        canEditMap={canEditMap}
+        role={role}
+        activeTool={activeTool}
+        cancelDraft={cancelDraft}
+        setZoneMenuOpen={setZoneMenuOpen}
+        zoneMenuOpen={zoneMenuOpen}
+        setDraftColor={setDraftColor}
+        setDraftIcon={setDraftIcon}
+        setDraftComment={setDraftComment}
+        setActiveTool={setActiveTool}
+        settingsMenuOpen={settingsMenuOpen}
+        setSettingsMenuOpen={setSettingsMenuOpen}
+        setSettingsNotification={setSettingsNotification}
+        settingsNotification={settingsNotification}
+        scaleEnabled={scaleEnabled}
+        setScaleEnabled={setScaleEnabled}
+        labelsEnabled={labelsEnabled}
+        setLabelsEnabled={setLabelsEnabled}
+        camerasEnabled={camerasEnabled}
+        setCamerasEnabled={setCamerasEnabled}
+        isAdmin={isAdmin}
+        personPanelOpen={personPanelOpen}
+        personPanelCollapsed={personPanelCollapsed}
+        personEdit={personEdit}
+        timerModalOpen={timerModalOpen}
+        projectionNotification={projectionNotification}
+        personCase={personCase}
+        userId={user?.id ?? null}
+        selectedMissionId={selectedMissionId ?? null}
+        setDismissedPersonCaseId={setDismissedPersonCaseId}
+        setProjectionNotification={setProjectionNotification}
+        setNoProjectionToast={setNoProjectionToast}
+        setPersonEdit={setPersonEdit}
+        setPersonPanelCollapsed={setPersonPanelCollapsed}
+        setPersonPanelOpen={setPersonPanelOpen}
+        setShowActiveVehicleTrack={setShowActiveVehicleTrack}
+        mapInstance={mapInstanceRef.current}
+        mapReady={mapReady}
+        applyHeatmapVisibility={applyHeatmapVisibility}
+        showEstimationHeatmap={showEstimationHeatmapRef.current}
+        missionTraceRetentionSeconds={mission?.traceRetentionSeconds ?? null}
+        setTimerSecondsInput={setTimerSecondsInput}
+        setTimerError={setTimerError}
+        setTimerModalOpen={setTimerModalOpen}
+        setActionError={setActionError}
+        isMapRotated={isMapRotated}
+        resetNorth={resetNorth}
+      />
 
       {personPanelOpen && personPanelCollapsed && !personEdit ? (
-        <div
-          className="fixed inset-x-3 bottom-[calc(max(env(safe-area-inset-bottom),16px)+80px)] z-[1250]"
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerMove={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
-        >
-          <div
-            className="rounded-3xl border bg-white/80 shadow-xl backdrop-blur p-3"
-            onClick={() => setPersonPanelCollapsed(false)}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs text-gray-700">
-                  {personCase ? (
-                    <>
-                      <span className="font-semibold text-gray-800">Départ depuis</span>{' '}
-                      <span>
-                        {personCase.lastKnown?.query || '—'}
-                      </span>
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </div>
-                <div className="mt-1 text-xs text-gray-700">
-                  {personCase && personCase.lastKnown?.when ? (
-                    <>
-                      <span>{new Date(personCase.lastKnown.when).toLocaleString()}</span>{' '}
-                      <span className="text-gray-500">
-                        ({formatElapsedSince(personCase.lastKnown.when)})
-                      </span>
-                    </>
-                  ) : personLoading ? (
-                    'Chargement…'
-                  ) : (
-                    '—'
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPersonPanelCollapsed(false)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                  title="Déployer"
-                >
-                  <ChevronUp size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PersonPanelCollapsedBar
+          open={true}
+          personCase={personCase}
+          personLoading={personLoading}
+          formatElapsedSince={formatElapsedSince}
+          onExpand={onExpandPersonPanel}
+        />
       ) : personPanelOpen ? (
-        <div
-          className="absolute inset-0 z-[1250] flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setPersonPanelCollapsed(true)}
-        >
-          <div
-            className={
-              personEdit || !personCase
-                ? 'w-full max-w-3xl max-h-[calc(100vh-48px)] flex flex-col rounded-3xl bg-white p-4 shadow-xl'
-                : 'w-full max-w-3xl max-h-[calc(100vh-48px)] flex flex-col rounded-3xl bg-white p-4 shadow-xl'
-            }
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="text-base font-bold text-gray-900">Démarrer une piste</div>
-              <div className="flex flex-col items-end gap-2">
-                <div className="flex items-center gap-2">
-                  {!personEdit && personCase ? (
-                    <button
-                      type="button"
-                      onClick={() => setPersonPanelCollapsed(true)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                      title="Réduire"
-                    >
-                      <ChevronDown size={16} />
-                    </button>
-                  ) : null}
-                  {canEditPerson && !personEdit && personCase ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPersonPanelCollapsed(false);
-                        setPersonEdit(true);
-                      }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50"
-                      title="Modifier la fiche"
-                    >
-                      <Pencil size={16} />
-                    </button>
-                  ) : null}
-                  {canEditPerson && !personEdit && personCase ? (
-                    <button
-                      type="button"
-                      disabled={personLoading || !selectedMissionId}
-                      onClick={async () => {
-                        if (!selectedMissionId || !personCase) return;
-                        setConfirmDeletePersonCaseOpen(true);
-                      }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
-                      title="Supprimer la fiche"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  ) : null}
-                </div>
-
-                {null}
-              </div>
-            </div>
-
-            <div className="mt-3 grid flex-1 gap-3 overflow-y-auto pr-1">
-              {personLoading ? <div className="text-sm text-gray-600">Chargement…</div> : null}
-              {personError ? <div className="text-sm text-red-600">{personError}</div> : null}
-
-              {!personEdit && personCase ? (
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Dernier indice</div>
-                    <div className="mt-1 text-sm text-gray-900">
-                      {personCase.lastKnown.type === 'poi' ? 'POI' : 'Adresse'}: {personCase.lastKnown.query}
-                    </div>
-                    {personCase.lastKnown.when ? (
-                      <div className="mt-1 text-xs text-gray-600">Heure: {new Date(personCase.lastKnown.when).toLocaleString()}</div>
-                    ) : null}
-                    <div className="mt-1 text-xs text-gray-600">Déplacement: {mobilityLabel(personCase.mobility)}</div>
-                  </div>
-                  {normalizeMobility(personCase.mobility as any) === 'none' ? (
-                    <div className="rounded-2xl border p-3">
-                      <div className="text-xs font-semibold text-gray-700">Profil</div>
-                      <div className="mt-1 text-sm text-gray-900">
-                        Âge: {personCase.age ?? '—'}
-                        {' · '}Sexe: {sexLabel(personCase.sex)}
-                        {' · '}État: {personCase.healthStatus}
-                      </div>
-                      {Array.isArray(personCase.diseases) && personCase.diseases.length ? (
-                        <div className="mt-1 text-xs text-gray-600">Maladies: {personCase.diseases.join(', ')}</div>
-                      ) : null}
-                      {Array.isArray(personCase.injuries) && personCase.injuries.length ? (() => {
-                        const clean = cleanInjuries(personCase.injuries);
-                        if (!clean.length) return null;
-                        const labels = clean.map((inj) => {
-                          if (inj.id === 'plaie') return 'Plaie membre inférieur';
-                          return inj.id;
-                        });
-                        return (
-                          <div className="mt-1 text-xs text-gray-600">
-                            Blessures: {labels.join(', ')}
-                          </div>
-                        );
-                      })() : null}
-                    </div>
-                  ) : null}
-
-                  <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Météo (sur le dernier point)</div>
-                    {weatherLoading ? <div className="mt-1 text-sm text-gray-600">Chargement météo…</div> : null}
-                    {weatherError ? <div className="mt-1 text-sm text-red-600">Météo indisponible</div> : null}
-                    {!weatherLoading && !weatherError && weather ? (
-                      <div className="mt-1 text-sm text-gray-900">
-                        {weatherStatusLabel(weather.weatherCode)}
-                        {' · '}{typeof weather.temperatureC === 'number' ? `${weather.temperatureC.toFixed(1)}°C` : '—'}
-                        {' · '}Vent {typeof weather.windSpeedKmh === 'number' ? `${weather.windSpeedKmh.toFixed(0)} km/h` : '—'}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {estimation && !hasActiveTestVehicleTrack ? (
-                    <div className="rounded-2xl border p-3 md:col-span-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold text-gray-700">Estimation</div>
-                      </div>
-                      <div className="mt-1 text-sm text-gray-900">
-                        Rayon probable: ~{estimation.probableKm.toFixed(1)} km
-                        <br />
-                        Max: ~{estimation.maxKm.toFixed(1)} km
-                      </div>
-                      <div className="mt-1 text-xs text-gray-600">
-                        Vitesse estimée: ~{estimation.effectiveKmh.toFixed(1)} km/h
-                        {estimation.hoursSince === null ? '' : (
-                          <>
-                            <br />
-                            Temps écoulé: {formatHoursToHM(estimation.hoursSince)}
-                          </>
-                        )}
-                      </div>
-
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
-                        {estimation.needs.length ? (
-                          <div>
-                            <div className="text-[11px] font-semibold text-gray-600">Besoins prioritaires</div>
-                            <div className="mt-1 grid gap-1">
-                              {estimation.needs.map((n) => (
-                                <div key={n} className="text-xs text-gray-700">
-                                  - {n}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {estimation.likelyPlaces.length ? (
-                          <div>
-                            <div className="text-[11px] font-semibold text-gray-600">Lieux probables</div>
-                            <div className="mt-1 grid gap-1">
-                              {estimation.likelyPlaces.map((p) => (
-                                <div key={p} className="text-xs text-gray-700">
-                                  - {p}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                </div>
-              ) : canEditPerson ? (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="relative">
-                      <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
-                      <input
-                        type="text"
-                        value={personDraft.lastKnownQuery}
-                        onChange={(e) =>
-                          setPersonDraft((p) => ({
-                            ...p,
-                            lastKnownQuery: e.target.value,
-                            lastKnownType: 'address',
-                            lastKnownPoiId: undefined,
-                            lastKnownLng: undefined,
-                            lastKnownLat: undefined,
-                          }))
-                        }
-                        onFocus={() => setLastKnownSuggestionsOpen(true)}
-                        onBlur={() => window.setTimeout(() => setLastKnownSuggestionsOpen(false), 150)}
-                        placeholder="Soit un POI soit une adresse"
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                      />
-
-                      {lastKnownSuggestionsOpen &&
-                      (lastKnownPoiSuggestions.length > 0 || lastKnownAddressSuggestions.length > 0) ? (
-                        <div className="absolute left-0 right-0 top-[72px] z-10 rounded-2xl border bg-white shadow">
-                          {lastKnownPoiSuggestions.length > 0 ? (
-                            <div className="border-b p-2">
-                              <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">POI</div>
-                              <div className="grid gap-1">
-                                {lastKnownPoiSuggestions.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
-                                    onClick={() => {
-                                      setPersonDraft((prev) => ({
-                                        ...prev,
-                                        lastKnownType: 'poi',
-                                        lastKnownQuery: p.title,
-                                        lastKnownPoiId: p.id,
-                                        lastKnownLng: p.lng,
-                                        lastKnownLat: p.lat,
-                                      }));
-                                      setLastKnownSuggestionsOpen(false);
-                                    }}
-                                  >
-                                    {p.title}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {lastKnownAddressSuggestions.length > 0 ? (
-                            <div className="p-2">
-                              <div className="px-2 pb-1 text-[11px] font-semibold text-gray-600">Adresse</div>
-                              <div className="grid gap-1">
-                                {lastKnownAddressSuggestions.map((a) => (
-                                  <button
-                                    key={`${a.label}-${a.lng}-${a.lat}`}
-                                    type="button"
-                                    className="rounded-xl px-2 py-2 text-left text-sm hover:bg-gray-50"
-                                    onClick={() => {
-                                      setPersonDraft((prev) => ({
-                                        ...prev,
-                                        lastKnownType: 'address',
-                                        lastKnownQuery: a.label,
-                                        lastKnownPoiId: undefined,
-                                        lastKnownLng: a.lng,
-                                        lastKnownLat: a.lat,
-                                      }));
-                                      setLastKnownSuggestionsOpen(false);
-                                    }}
-                                  >
-                                    {a.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (hasActiveTestVehicleTrack) return;
-                        const el = lastKnownWhenInputRef.current;
-                        if (!el) return;
-                        // showPicker est supporté par la plupart des navigateurs modernes
-                        if (typeof (el as any).showPicker === 'function') {
-                          (el as any).showPicker();
-                        } else {
-                          el.focus();
-                        }
-                      }}
-                      className="cursor-pointer"
-                    >
-                      <div className="text-xs font-semibold text-gray-700">Date / heure</div>
-                      <input
-                        ref={lastKnownWhenInputRef}
-                        type="datetime-local"
-                        value={personDraft.lastKnownWhen}
-                        min={minLiveTrackWhenLocalMinute}
-                        max={nowLocalMinute}
-                        disabled={hasActiveTestVehicleTrack}
-                        onChange={(e) =>
-                          setPersonDraft((p) => ({
-                            ...p,
-                            lastKnownWhen: e.target.value,
-                          }))
-                        }
-                        className="mt-1 h-10 w-full rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                      />
-                      <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-600">
-                        <AlertTriangle size={12} className="text-amber-600" />
-                        <span>Durée de piste en live 2h max et possibilité de revenir 12h en arriere max.</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-xs font-semibold text-gray-700">Mode de déplacement</div>
-                    <select
-                      value={personDraft.mobility}
-                      onChange={(e) => setPersonDraft((p) => ({ ...p, mobility: e.target.value as any }))}
-                      className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                    >
-                      <option value="none">À pied</option>
-                      <option value="bike_test">Vélo</option>
-                      <option value="scooter_test">Scooter</option>
-                      <option value="motorcycle_test">Moto</option>
-                      <option value="car_test">Voiture</option>
-                      <option value="truck_test">Camion</option>
-                    </select>
-                  </div>
-                  {normalizeMobility(personDraft.mobility as any) === 'none' ? (
-                    <>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <div className="text-xs font-semibold text-gray-700">Âge</div>
-                          <input
-                            type="number"
-                            min={0}
-                            max={120}
-                            value={personDraft.age}
-                            onChange={(e) => setPersonDraft((p) => ({ ...p, age: e.target.value }))}
-                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                          />
-                        </div>
-                        <div>
-                          <div className="text-xs font-semibold text-gray-700">Sexe</div>
-                          <select
-                            value={personDraft.sex}
-                            onChange={(e) => setPersonDraft((p) => ({ ...p, sex: e.target.value as any }))}
-                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                          >
-                            <option value="unknown">Inconnu</option>
-                            <option value="female">Femme</option>
-                            <option value="male">Homme</option>
-                          </select>
-                        </div>
-                        <div>
-                          <div className="text-xs font-semibold text-gray-700">État</div>
-                          <select
-                            value={personDraft.healthStatus}
-                            onChange={(e) => setPersonDraft((p) => ({ ...p, healthStatus: e.target.value as any }))}
-                            className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
-                          >
-                            <option value="stable">Stable</option>
-                            <option value="fragile">Fragile</option>
-                            <option value="critique">Critique</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start">
-                        <div className="rounded-2xl border p-3 md:flex-1">
-                          <button
-                            type="button"
-                            className="flex w-full items-center justify-between text-left"
-                            onClick={() => setDiseasesOpen((v) => !v)}
-                          >
-                            <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
-                            <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
-                          </button>
-                          {diseasesOpen ? (
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                              {diseaseOptions.map((id) => {
-                                const checked = personDraft.diseases.includes(id);
-                                const raw = id.replace(/_/g, ' ');
-                                const label = raw.replace(/\b\w/g, (c) => c.toUpperCase());
-                                return (
-                                  <div key={id} className="rounded-2xl border p-2">
-                                    <label className="flex items-center gap-2 text-sm text-gray-800">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={(e) => {
-                                          const next = e.target.checked
-                                            ? Array.from(new Set([...personDraft.diseases, id]))
-                                            : personDraft.diseases.filter((x) => x !== id);
-                                          setPersonDraft((p) => ({ ...p, diseases: next }));
-                                        }}
-                                      />
-                                      <span className="font-normal">{label}</span>
-                                    </label>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="rounded-2xl border p-3 md:flex-1">
-                          <button
-                            type="button"
-                            className="flex w-full items-center justify-between text-left"
-                            onClick={() => setInjuriesOpen((v) => !v)}
-                          >
-                            <div className="text-xs font-semibold text-gray-700">Blessures</div>
-                            <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
-                          </button>
-                          {injuriesOpen ? (
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                              {injuryOptions.map((injuryId) => {
-                                const injury = personDraft.injuries.find((x) => x.id === injuryId);
-                                const checked = !!injury;
-                                return (
-                                  <div key={injuryId} className="rounded-2xl border p-2">
-                                    <label className="flex items-center gap-2 text-sm text-gray-800">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setPersonDraft((p) => ({
-                                              ...p,
-                                              injuries: [...p.injuries, { id: injuryId, locations: [] }],
-                                            }));
-                                          } else {
-                                            setPersonDraft((p) => ({
-                                              ...p,
-                                              injuries: p.injuries.filter((x) => x.id !== injuryId),
-                                            }));
-                                          }
-                                        }}
-                                      />
-                                      <span className="font-normal">
-                                        {injuryId
-                                          .replace(/_/g, ' ')
-                                          .replace(/\b\w/g, (c) => c.toUpperCase())}
-                                      </span>
-                                    </label>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={personLoading}
-                      onClick={() => {
-                        if (personCase) {
-                          setPersonEdit(false);
-                          const last = personCase.lastKnown;
-                          const cleanDis = cleanDiseases(personCase.diseases ?? []);
-                          const cleanInj = cleanInjuries(personCase.injuries ?? []);
-                          setPersonDraft({
-                            lastKnownQuery: last.query,
-                            lastKnownType: last.type,
-                            lastKnownPoiId: last.poiId,
-                            lastKnownLng:
-                              typeof last.lng === 'number' ? last.lng : undefined,
-                            lastKnownLat:
-                              typeof last.lat === 'number' ? last.lat : undefined,
-                            lastKnownWhen: last.when ? last.when.slice(0, 16) : '',
-                            mobility: personCase.mobility,
-                            age:
-                              typeof personCase.age === 'number'
-                                ? String(personCase.age)
-                                : '',
-                            sex: personCase.sex ?? 'unknown',
-                            healthStatus: personCase.healthStatus ?? 'stable',
-                            diseases: cleanDis,
-                            diseasesFreeText: personCase.diseasesFreeText ?? '',
-                            injuries: cleanInj.map((x) => ({
-                              id: x.id,
-                              locations: x.locations,
-                            })),
-                            injuriesFreeText: personCase.injuriesFreeText ?? '',
-                          });
-                        } else {
-                          setPersonPanelOpen(false);
-                        }
-                      }}
-                      className="h-11 rounded-2xl border bg-white text-sm font-semibold text-gray-700 disabled:opacity-50"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        personLoading ||
-                        !selectedMissionId ||
-                        !personDraft.lastKnownWhen ||
-                        !(personDraft.lastKnownQuery ?? '').trim() ||
-                        !personDraft.mobility
-                      }
-                      onClick={async () => {
-                        if (!selectedMissionId) return;
-
-                        const address = (personDraft.lastKnownQuery ?? '').trim();
-                        if (!address) {
-                          setPersonError('Adresse requise');
-                          return;
-                        }
-                        if (!personDraft.lastKnownWhen) {
-                          setPersonError('Date / heure requise');
-                          return;
-                        }
-
-                        try {
-                          const dt = new Date(personDraft.lastKnownWhen);
-                          if (!Number.isNaN(dt.getTime()) && dt.getTime() > Date.now()) {
-                            setPersonError("Date / heure ne peut pas être dans le futur");
-                            return;
-                          }
-                        } catch {
-                          // ignore
-                        }
-                        if (!personDraft.mobility) {
-                          setPersonError('Mode de déplacement requis');
-                          return;
-                        }
-
-                        setPersonLoading(true);
-                        setPersonError(null);
-                        try {
-                          const ageTrimmed = personDraft.age.trim();
-                          const ageParsed = ageTrimmed ? Number(ageTrimmed) : undefined;
-                          const mobilityUi = personDraft.mobility as any as MobilityUi;
-                          const mobility = normalizeMobility(mobilityUi);
-                          const payload = {
-                            lastKnown: {
-                              type: personDraft.lastKnownType,
-                              query: address,
-                              poiId: personDraft.lastKnownPoiId,
-                              lng: personDraft.lastKnownLng,
-                              lat: personDraft.lastKnownLat,
-                              when: personDraft.lastKnownWhen
-                                ? new Date(personDraft.lastKnownWhen).toISOString()
-                                : undefined,
-                            },
-                            mobility,
-                            age: Number.isFinite(ageParsed as any)
-                              ? Math.floor(ageParsed as number)
-                              : undefined,
-                            sex: personDraft.sex,
-                            healthStatus: personDraft.healthStatus,
-                            diseases: cleanDiseases(personDraft.diseases) as string[],
-                            injuries: cleanInjuries(personDraft.injuries) as any,
-                            diseasesFreeText: personDraft.diseasesFreeText,
-                            injuriesFreeText: personDraft.injuriesFreeText,
-                          };
-
-                          const saved = await upsertPersonCase(selectedMissionId, payload);
-                          setPersonCase(saved.case);
-                          setPersonEdit(false);
-
-                          if (isMobilityTest(mobilityUi) && canEditPerson) {
-                            const whenIso = personDraft.lastKnownWhen
-                              ? new Date(personDraft.lastKnownWhen).toISOString()
-                              : undefined;
-                            const vehicleType =
-                              mobilityUi === 'motorcycle_test'
-                                ? 'motorcycle'
-                                : mobilityUi === 'scooter_test'
-                                  ? 'scooter'
-                                  : mobilityUi === 'bike_test'
-                                    ? 'motorcycle'
-                                  : mobilityUi === 'truck_test'
-                                    ? 'truck'
-                                    : 'car';
-                            try {
-                              const created = await createVehicleTrack(selectedMissionId, {
-                                label:
-                                  mobilityUi === 'motorcycle_test'
-                                    ? 'Moto'
-                                  : mobilityUi === 'scooter_test'
-                                      ? 'Scooter'
-                                      : mobilityUi === 'bike_test'
-                                        ? 'Vélo'
-                                      : mobilityUi === 'truck_test'
-                                        ? 'Camion'
-                                        : 'Voiture',
-                                vehicleType: vehicleType as any,
-                                origin: {
-                                  type: personDraft.lastKnownType,
-                                  query: address,
-                                  poiId: personDraft.lastKnownPoiId,
-                                  lng: personDraft.lastKnownLng,
-                                  lat: personDraft.lastKnownLat,
-                                  when: whenIso,
-                                },
-                                algorithm: 'road_graph',
-                              });
-
-                              const createdTrack = created.track;
-                              if (createdTrack && createdTrack.id) {
-                                setActiveVehicleTrackId(createdTrack.id);
-                                try {
-                                  const state = await getVehicleTrackState(selectedMissionId, createdTrack.id);
-                                  if (state.cache?.payloadGeojson) {
-                                    const provider = (state.cache.meta as any)?.provider as string | undefined;
-                                    const isTest = isTestTrack(createdTrack as any);
-                                    const allowTomtom =
-                                      provider === 'tomtom_reachable_range' ||
-                                      provider === 'tomtom_reachable_range_fallback_circle';
-                                    if (!isTest || allowTomtom) {
-                                      setVehicleTrackGeojsonById((prev) => ({
-                                        ...prev,
-                                        [createdTrack.id]: state.cache!.payloadGeojson as any,
-                                      }));
-                                    }
-                                  }
-                                } catch {
-                                  // ignore state loading error
-                                }
-                              }
-                            } catch {
-                              // création de piste non bloquante pour la fiche personne
-                            }
-                          }
-                        } catch (e: any) {
-                          setPersonError(e?.message ?? 'Erreur');
-                        } finally {
-                          setPersonLoading(false);
-                        }
-                      }}
-                      className="h-11 rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
-                    >
-                      Enregistrer
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-2xl border p-3">
-                  <div className="text-sm font-semibold text-gray-900">Aucune fiche personne</div>
-                  <div className="mt-1 text-sm text-gray-600">Vous avez un accès en lecture seule.</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <PersonPanelOverlay
+          open={true}
+          personPanelCollapsed={personPanelCollapsed}
+          personEdit={personEdit}
+          setPersonEdit={setPersonEdit}
+          personCase={personCase}
+          personLoading={personLoading}
+          personError={personError}
+          setPersonError={setPersonError}
+          selectedMissionId={selectedMissionId ?? null}
+          canEditPerson={canEditPerson}
+          setConfirmDeletePersonCaseOpen={setConfirmDeletePersonCaseOpen}
+          setPersonPanelCollapsed={setPersonPanelCollapsed}
+          setPersonPanelOpen={setPersonPanelOpen}
+          hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
+          estimation={estimation}
+          mobilityLabel={mobilityLabel}
+          normalizeMobility={normalizeMobility}
+          sexLabel={sexLabel}
+          cleanDiseases={cleanDiseases}
+          cleanInjuries={cleanInjuries}
+          weatherLoading={weatherLoading}
+          weatherError={weatherError}
+          weather={weather}
+          weatherStatusLabel={weatherStatusLabel}
+          formatHoursToHM={formatHoursToHM}
+          personDraft={personDraft}
+          setPersonDraft={setPersonDraft}
+          lastKnownWhenInputRef={lastKnownWhenInputRef}
+          minLiveTrackWhenLocalMinute={minLiveTrackWhenLocalMinute}
+          nowLocalMinute={nowLocalMinute}
+          lastKnownSuggestionsOpen={lastKnownSuggestionsOpen}
+          setLastKnownSuggestionsOpen={setLastKnownSuggestionsOpen}
+          lastKnownPoiSuggestions={lastKnownPoiSuggestions}
+          lastKnownAddressSuggestions={lastKnownAddressSuggestions}
+          diseasesOpen={diseasesOpen}
+          setDiseasesOpen={setDiseasesOpen}
+          diseaseOptions={diseaseOptions}
+          injuriesOpen={injuriesOpen}
+          setInjuriesOpen={setInjuriesOpen}
+          injuryOptions={injuryOptions}
+          upsertPersonCase={upsertPersonCase}
+          setPersonCase={setPersonCase}
+          isMobilityTest={isMobilityTest}
+          isTestTrack={isTestTrack}
+          createVehicleTrack={createVehicleTrack}
+          getVehicleTrackState={getVehicleTrackState}
+          setActiveVehicleTrackId={setActiveVehicleTrackId}
+          setVehicleTrackGeojsonById={setVehicleTrackGeojsonById}
+          setPersonLoading={setPersonLoading}
+        />
       ) : null}
 
       {timerModalOpen ? (
-        <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/30 px-4 pt-6 pb-28">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="text-base font-bold text-gray-900">Durée de la piste</div>
-              <button
-                type="button"
-                onClick={() => setTimerModalOpen(false)}
-                className="h-10 w-10 rounded-2xl border bg-white"
-              >
-                <X className="mx-auto" size={18} />
-              </button>
-            </div>
-
-            <div className="mt-3 grid gap-3">
-              <div className="text-xs font-semibold text-gray-700">Durée (secondes)</div>
-              <div className="text-[11px] text-gray-600">
-                Ceci règle combien de temps la trace reste visible avant de commencer à s'effacer.
-              </div>
-
-              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-                {[{ label: "10'", value: 600 }, { label: "20'", value: 1200 }, { label: "30'", value: 1800 }, { label: '1h', value: 3600 }, { label: '2h', value: 7200 }].map(
-                  (p) => (
-                    <button
-                      key={p.label}
-                      type="button"
-                      onClick={() => setTimerSecondsInput(String(p.value))}
-                      className="h-8 rounded-2xl border bg-white px-3 text-xs font-semibold text-gray-800 hover:bg-gray-50"
-                    >
-                      {p.label}
-                    </button>
-                  )
-                )}
-              </div>
-
-              <div className="mt-1 flex items-center justify-center gap-3">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={timerSecondsInput}
-                  onChange={(e) => setTimerSecondsInput(e.target.value)}
-                  className="h-10 w-24 rounded-2xl border px-3 text-sm text-center"
-                />
-                {(() => {
-                  const trimmed = timerSecondsInput.trim();
-                  const parsed = trimmed ? Number(trimmed) : NaN;
-                  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) return null;
-                  const total = Math.floor(parsed);
-                  const h = Math.floor(total / 3600);
-                  const m = Math.floor((total % 3600) / 60);
-                  const s = total % 60;
-                  const parts: string[] = [];
-                  if (h > 0) parts.push(`${h} h`);
-                  if (h > 0 || m > 0) parts.push(`${m} min`);
-                  parts.push(`${s} s`);
-                  return <div className="text-sm font-medium text-gray-700">{parts.join(' ')}</div>;
-                })()}
-              </div>
-
-              {timerError ? <div className="text-sm text-red-600">{timerError}</div> : null}
-
-              <div className="mt-1 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTimerModalOpen(false)}
-                  className="h-11 rounded-2xl border bg-white text-sm font-semibold text-gray-700"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  disabled={timerSaving}
-                  onClick={() => void onSaveTraceRetentionSeconds()}
-                  className="h-11 rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow disabled:opacity-50"
-                >
-                  Valider
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <TimerModal
+          open={true}
+          timerSecondsInput={timerSecondsInput}
+          setTimerSecondsInput={setTimerSecondsInput}
+          timerError={timerError}
+          timerSaving={timerSaving}
+          onClose={onCloseTimerModal}
+          onSave={onSaveTimerModal}
+        />
       ) : null}
 
       {showValidation ? (
-        <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl max-h-[calc(100vh-32px)] flex flex-col">
-            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-              <div className="text-base font-bold text-gray-900">Validation</div>
-              <button type="button" onClick={cancelDraft} className="h-10 w-10 rounded-2xl border bg-white">
-                <X className="mx-auto" size={18} />
-              </button>
-            </div>
-
-            <div className="px-4 pt-1 pb-4 overflow-y-auto">
-              <div className="grid gap-2">
-              <input
-                value={draftTitle}
-                onChange={(e) => setDraftTitle(e.target.value)}
-                placeholder={activeTool === 'poi' ? 'Titre du POI' : 'Titre de la zone'}
-                className="h-11 w-full rounded-2xl border px-3 text-sm"
-              />
-
-              {activeTool === 'poi' ? (
-                <>
-                  <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Couleur</div>
-                    <div className="mt-2 grid grid-cols-8 gap-2">
-                      {poiColorOptions.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setDraftColor(c)}
-                          className={`h-7 w-7 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
-                          style={{
-                            backgroundColor: c,
-                            backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
-                            borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
-                          }}
-                          aria-label={c}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border p-3">
-                    <div className="text-xs font-semibold text-gray-700">Icône</div>
-                    <div className="mt-2 grid grid-cols-6 gap-2">
-                      {poiIconOptions.map(({ id, Icon }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setDraftIcon(id)}
-                          className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border ${
-                            draftIcon === id ? 'ring-2 ring-blue-500' : ''
-                          }`}
-                          style={{
-                            backgroundColor: draftColor || '#ffffff',
-                            backgroundImage:
-                              'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
-                            borderColor:
-                              (draftColor || '#ffffff').toLowerCase() === '#ffffff'
-                                ? '#9ca3af'
-                                : 'rgba(0,0,0,0.12)',
-                          }}
-                          aria-label={id}
-                        >
-                          {(() => {
-                            const colorLower = (draftColor || '#ffffff').toLowerCase();
-                            const iconColor =
-                              colorLower === '#ffffff' || colorLower === '#fde047' ? '#000000' : '#ffffff';
-                            return <Icon size={18} color={iconColor} />;
-                          })()}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <input
-                    value={draftComment}
-                    onChange={(e) => setDraftComment(e.target.value)}
-                    placeholder="Commentaire"
-                    className="h-11 w-full rounded-2xl border px-3 text-sm"
-                  />
-                </>
-              ) : null}
-
-              {activeTool === 'zone_circle' || activeTool === 'zone_polygon' ? (
-                <input
-                  value={draftComment}
-                  onChange={(e) => setDraftComment(e.target.value)}
-                  placeholder="Commentaire"
-                  className="h-11 w-full rounded-2xl border px-3 text-sm"
-                />
-              ) : null}
-
-              {activeTool !== 'poi' ? (
-                <div className="mt-3 rounded-2xl border p-3">
-                  <div className="text-xs font-semibold text-gray-700">Couleur</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {poiColorOptions.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setDraftColor(c)}
-                        className={`h-8 w-8 rounded-xl border ${draftColor === c ? 'ring-2 ring-blue-500' : ''}`}
-                        style={{
-                          backgroundColor: c,
-                          backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
-                          borderColor: c.toLowerCase() === '#ffffff' ? '#9ca3af' : 'rgba(0,0,0,0.12)',
-                        }}
-                        aria-label={c}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {actionError ? <div className="text-sm text-red-600">{actionError}</div> : null}
-              </div>
-            </div>
-
-            <div className="p-4 pt-0">
-              <button
-                type="button"
-                disabled={actionBusy}
-                onClick={() => void submitDraft()}
-                className="h-11 w-full rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow"
-              >
-                Valider
-              </button>
-            </div>
-          </div>
-        </div>
+        <ValidationModal
+          open={true}
+          cancelDraft={cancelDraft}
+          activeTool={activeTool}
+          draftTitle={draftTitle}
+          setDraftTitle={setDraftTitle}
+          poiColorOptions={poiColorOptions}
+          poiIconOptions={poiIconOptions as any}
+          draftColor={draftColor}
+          setDraftColor={setDraftColor}
+          draftIcon={draftIcon}
+          setDraftIcon={setDraftIcon}
+          draftComment={draftComment}
+          setDraftComment={setDraftComment}
+          actionError={actionError}
+          actionBusy={actionBusy}
+          submitDraft={submitDraft}
+        />
       ) : null}
 
       {noProjectionToast ? (
