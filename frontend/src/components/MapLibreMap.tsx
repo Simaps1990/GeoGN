@@ -8011,7 +8011,7 @@ export default function MapLibreMap() {
                 }
               }}
               className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-                settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
                   ? 'ring-1 ring-inset ring-blue-500/25'
                   : ''
               }`}
@@ -8019,7 +8019,7 @@ export default function MapLibreMap() {
             >
               <Settings
                 className={
-                  settingsMenuOpen || scaleEnabled || labelsEnabled || personPanelOpen || timerModalOpen
+                  settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
                     ? 'mx-auto text-blue-600'
                     : 'mx-auto text-gray-600'
                 }
