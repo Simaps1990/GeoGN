@@ -879,8 +879,6 @@ export default function MapLibreMap() {
     return !!track.label && /TEST/i.test(track.label);
   };
 
-  const filterAllowedVehicleTracks = (tracks: ApiVehicleTrack[]): ApiVehicleTrack[] => tracks.filter((t) => isTestTrack(t));
-
   const activeVehicleTrack = useMemo(() => {
     if (!activeVehicleTrackId) return null;
     const found = vehicleTracks.find((t) => t.id === activeVehicleTrackId) ?? null;
@@ -898,7 +896,7 @@ export default function MapLibreMap() {
     return found;
   }, [activeVehicleTrackId, vehicleTracks]);
 
-  const hasActiveTestVehicleTrack = !!(activeVehicleTrack && isTestTrack(activeVehicleTrack));
+  const hasActiveVehicleTrack = !!activeVehicleTrackId;
 
   // Persiste les changements d'ID actif / visibilité dans localStorage.
   useEffect(() => {
@@ -1528,7 +1526,7 @@ export default function MapLibreMap() {
   }, [selectedPoi]);
 
   const onStartTrackFromPoi = useCallback(() => {
-    if (hasActiveTestVehicleTrack) {
+    if (hasActiveVehicleTrack) {
       setActivityToast('une piste est deja en cours');
       return;
     }
@@ -1548,7 +1546,7 @@ export default function MapLibreMap() {
     setShowActiveVehicleTrack(true);
 
     setSelectedPoi(null);
-  }, [hasActiveTestVehicleTrack, selectedPoi]);
+  }, [hasActiveVehicleTrack, selectedPoi]);
 
   const onEditPoi = useCallback(() => {
     if (!selectedPoi) return;
@@ -1806,23 +1804,26 @@ export default function MapLibreMap() {
         const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
         if (cancelled) return;
 
-        setVehicleTracksLoaded(true);
-        const filtered = filterAllowedVehicleTracks(tracks);
-        setVehicleTracks(filtered);
-        setVehicleTracksTotal(filtered.length);
+        // IMPORTANT: si l'API renvoie 0 pistes mais qu'on a déjà une piste en mémoire
+        // (via socket + refs), ne pas écraser l'état local (sinon Paw reste grisé).
+        if (!tracks.length) {
+          setVehicleTracksLoaded(true);
+          const hasLocalTrack = Boolean(activeVehicleTrackIdRef.current);
+          const hasLocalGeo = Object.keys(vehicleTrackGeojsonByIdRef.current ?? {}).length > 0;
+          if (hasLocalTrack || hasLocalGeo) {
+            return;
+          }
 
-        // Si la mission n'a plus aucune piste, on nettoie complètement l'état
-        // associé aux suivis pour éviter qu'une géométrie ancienne reste
-        // accrochée dans la carte ou dans la mémoire React.
-        if (!filtered.length) {
-          if (activeVehicleTrackId) {
-            setActiveVehicleTrackId(null);
-          }
-          if (Object.keys(vehicleTrackGeojsonById).length > 0) {
-            setVehicleTrackGeojsonById({});
-          }
+          setVehicleTracks([]);
+          setVehicleTracksTotal(0);
+          setActiveVehicleTrackId(null);
+          setVehicleTrackGeojsonById({});
           return;
         }
+
+        setVehicleTracksLoaded(true);
+        setVehicleTracks(tracks);
+        setVehicleTracksTotal(tracks.length);
 
         const currentId = activeVehicleTrackId;
         // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
@@ -1835,7 +1836,7 @@ export default function MapLibreMap() {
           // Fallback : on prend la première piste autorisée (TEST) si aucune piste
           // n'est marquée explicitement "active".
           const active = tracks.find((t) => t.status === 'active');
-          nextActiveId = active?.id ?? (filtered[0]?.id ?? null);
+          nextActiveId = active?.id ?? (tracks[0]?.id ?? null);
         }
 
         if (!nextActiveId) {
@@ -5955,9 +5956,6 @@ export default function MapLibreMap() {
       const track = msg?.track as ApiVehicleTrack | undefined;
       if (!track || !track.id) return;
 
-      // Ne garder que les pistes TEST.
-      if (!isTestTrack(track)) return;
-
       try {
         const provider = (track.cache?.meta as any)?.provider as string | undefined;
         const metaBudget = (track.cache?.meta as any)?.budgetSec as number | undefined;
@@ -6035,22 +6033,9 @@ export default function MapLibreMap() {
 
       const full = msg?.track as ApiVehicleTrack | undefined;
       if (full && full.id) {
-        // Ne garder que les pistes TEST.
-        if (!isTestTrack(full)) {
-          setVehicleTracks((prev) => prev.filter((t) => t.id !== full.id));
-          setVehicleTrackGeojsonById((prev) => {
-            if (!prev[full.id]) return prev;
-            const next = { ...prev };
-            delete next[full.id];
-            return next;
-          });
-          setActiveVehicleTrackId((currentId) => (currentId === full.id ? null : currentId));
-          return;
-        }
         setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, full));
         const cacheGeo = full.cache?.payloadGeojson;
         const provider = (full.cache?.meta as any)?.provider as string | undefined;
-        const isTest = isTestTrack(full);
         const allowTomtom =
           provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
 
@@ -6068,7 +6053,7 @@ export default function MapLibreMap() {
           return;
         }
 
-        if (cacheGeo && (!isTest || allowTomtom)) {
+        if (cacheGeo && allowTomtom) {
           try {
             const budget = (full.cache?.meta as any)?.budgetSec;
             // Trace les mises à jour d'isochrone côté front (branche full.track)
@@ -6118,11 +6103,9 @@ export default function MapLibreMap() {
 
       const cacheGeo = msg?.cache?.payloadGeojson;
       const provider = (msg?.cache?.meta as any)?.provider as string | undefined;
-      const track = vehicleTracks.find((t) => t.id === trackId);
-      const isTest = isTestTrack(track);
       const allowTomtom =
         provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
-      if (cacheGeo && (!isTest || allowTomtom)) {
+      if (cacheGeo && allowTomtom) {
         try {
           const budget = (msg?.cache?.meta as any)?.budgetSec;
           const f0 = (cacheGeo as any)?.features?.[0];
@@ -6641,26 +6624,6 @@ export default function MapLibreMap() {
       const b = ring[ring.length - 1];
       if (a[0] === b[0] && a[1] === b[1]) return ring;
       return [...ring, [a[0], a[1]]];
-    };
-
-    const getCenter = (fc: any): { lng: number; lat: number } | null => {
-      const f0 = fc?.features?.[0];
-      const c = f0?.properties?.center;
-      if (c && typeof c.lng === 'number' && typeof c.lat === 'number') return { lng: c.lng, lat: c.lat };
-      const ring = getRing(fc);
-      if (!ring || ring.length < 3) return null;
-      // simple centroid approx (average of vertices)
-      let sumLng = 0;
-      let sumLat = 0;
-      let n = 0;
-      for (let i = 0; i < ring.length - 1; i += 1) {
-        const p = ring[i];
-        sumLng += p[0];
-        sumLat += p[1];
-        n += 1;
-      }
-      if (n <= 0) return null;
-      return { lng: sumLng / n, lat: sumLat / n };
     };
 
     const smoothRing = (ringIn: [number, number][], passes: number): [number, number][] => {
@@ -7547,7 +7510,7 @@ export default function MapLibreMap() {
         creatorLabel={creatorLabel}
         canEditMap={canEditMap}
         canStartTrack={isAdmin}
-        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
+        hasActiveVehicleTrack={hasActiveVehicleTrack}
         actionBusy={actionBusy}
       />
 
@@ -7611,7 +7574,7 @@ export default function MapLibreMap() {
         mapReady={mapReady}
         applyHeatmapVisibility={applyHeatmapVisibility}
         showEstimationHeatmap={showEstimationHeatmapRef.current}
-        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
+        hasActiveVehicleTrack={hasActiveVehicleTrack}
         missionTraceRetentionSeconds={mission?.traceRetentionSeconds ?? null}
         setTimerSecondsInput={setTimerSecondsInput}
         setTimerError={setTimerError}
@@ -7644,7 +7607,7 @@ export default function MapLibreMap() {
           setConfirmDeletePersonCaseOpen={setConfirmDeletePersonCaseOpen}
           setPersonPanelCollapsed={setPersonPanelCollapsed}
           setPersonPanelOpen={setPersonPanelOpen}
-          hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
+          hasActiveVehicleTrack={hasActiveVehicleTrack}
           estimation={estimation}
           mobilityLabel={mobilityLabel}
           normalizeMobility={normalizeMobility}

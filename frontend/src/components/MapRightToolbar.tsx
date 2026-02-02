@@ -71,7 +71,7 @@ type MapRightToolbarProps = {
   applyHeatmapVisibility: (map: MapLibreMapInstance, show: boolean) => void;
   showEstimationHeatmap: boolean;
 
-  hasActiveTestVehicleTrack: boolean;
+  hasActiveVehicleTrack: boolean;
 
   missionTraceRetentionSeconds: number | null;
   setTimerSecondsInput: (v: string) => void;
@@ -129,7 +129,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   mapReady,
   applyHeatmapVisibility,
   showEstimationHeatmap,
-  hasActiveTestVehicleTrack,
+  hasActiveVehicleTrack,
   missionTraceRetentionSeconds,
   setTimerSecondsInput,
   setTimerError,
@@ -372,7 +372,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   setDismissedPersonCaseId(selectedMissionId, personCase.id);
                 }
 
-                if (!isAdmin && !hasActiveTestVehicleTrack) {
+                if (!isAdmin && !hasActiveVehicleTrack) {
                   setNoProjectionToast(true);
                   return;
                 }
@@ -410,7 +410,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   return;
                 }
 
-                if (!isAdmin && hasActiveTestVehicleTrack) {
+                if (!isAdmin && hasActiveVehicleTrack) {
                   const next = !showActiveVehicleTrack;
                   setShowActiveVehicleTrack(next);
                   if (next) {
@@ -434,12 +434,12 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               }}
               className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
                 personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-              } ${!isAdmin && !hasActiveTestVehicleTrack ? 'opacity-60' : ''}`}
+              } ${!isAdmin && !hasActiveVehicleTrack ? 'opacity-60' : ''}`}
               title="Activité"
             >
               <PawPrint
                 className={
-                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveTestVehicleTrack && showActiveVehicleTrack)
+                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveVehicleTrack && showActiveVehicleTrack)
                     ? 'text-blue-600'
                     : 'text-gray-600'
                 }

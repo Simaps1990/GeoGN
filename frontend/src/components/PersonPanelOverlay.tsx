@@ -18,7 +18,7 @@ type PersonPanelOverlayProps = {
   setPersonPanelCollapsed: (v: boolean) => void;
   setPersonPanelOpen: (v: boolean) => void;
 
-  hasActiveTestVehicleTrack: boolean;
+  hasActiveVehicleTrack: boolean;
   estimation: any;
   mobilityLabel: (m: any) => string;
   normalizeMobility: (m: any) => any;
@@ -72,7 +72,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
   setConfirmDeletePersonCaseOpen,
   setPersonPanelCollapsed,
   setPersonPanelOpen,
-  hasActiveTestVehicleTrack,
+  hasActiveVehicleTrack,
   estimation,
   mobilityLabel,
   normalizeMobility,
@@ -226,7 +226,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 ) : null}
               </div>
 
-              {estimation && !hasActiveTestVehicleTrack ? (
+              {estimation && !hasActiveVehicleTrack ? (
                 <div className="rounded-2xl border p-3 md:col-span-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs font-semibold text-gray-700">Estimation</div>
@@ -278,7 +278,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
             </div>
           ) : canEditPerson ? (
             <>
-              <div className="grid grid-cols-2 gap-3 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
                 <div className="relative min-w-0 w-full">
                   <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
                   <input
@@ -363,7 +363,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 </div>
                 <div
                   onClick={() => {
-                    if (hasActiveTestVehicleTrack) return;
+                    if (hasActiveVehicleTrack) return;
                     const el = lastKnownWhenInputRef.current;
                     if (!el) return;
                     // showPicker est supporté par la plupart des navigateurs modernes
@@ -382,7 +382,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     value={personDraft.lastKnownWhen}
                     min={minLiveTrackWhenLocalMinute}
                     max={nowLocalMinute}
-                    disabled={hasActiveTestVehicleTrack}
+                    disabled={hasActiveVehicleTrack}
                     onChange={(e) =>
                       setPersonDraft((p: any) => ({
                         ...p,
