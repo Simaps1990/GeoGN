@@ -411,7 +411,16 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                 }
 
                 if (!isAdmin && hasActiveTestVehicleTrack) {
-                  setShowActiveVehicleTrack(!showActiveVehicleTrack);
+                  const next = !showActiveVehicleTrack;
+                  setShowActiveVehicleTrack(next);
+                  if (next) {
+                    setPersonEdit(false);
+                    setPersonPanelCollapsed(true);
+                    setPersonPanelOpen(true);
+                  } else {
+                    setPersonPanelOpen(false);
+                    setPersonPanelCollapsed(false);
+                  }
                   return;
                 }
 

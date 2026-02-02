@@ -5983,6 +5983,18 @@ export default function MapLibreMap() {
         setActiveVehicleTrackId(track.id);
       }
 
+      // Pour tous les utilisateurs (peu importe le rôle), une piste qui arrive
+      // doit rester masquée tant qu'ils n'ont pas cliqué sur Paw.
+      // Exception: le créateur doit la voir instantanément.
+      const createdBy = typeof track.createdBy === 'string' ? track.createdBy : null;
+      if (!user?.id || !createdBy || user.id !== createdBy) {
+        setShowActiveVehicleTrack(false);
+        setPersonPanelOpen(false);
+        setPersonPanelCollapsed(false);
+        setPersonEdit(false);
+        clearVehicleTrackVisual('track-created-hidden-by-default');
+      }
+
       const cacheGeo = track.cache?.payloadGeojson;
       const provider = (track.cache?.meta as any)?.provider as string | undefined;
       const allowTomtom =
