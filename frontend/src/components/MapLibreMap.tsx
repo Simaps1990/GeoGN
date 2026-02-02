@@ -6004,10 +6004,17 @@ export default function MapLibreMap() {
       }
 
       try {
-        const createdBy = typeof track.createdBy === 'string' ? track.createdBy : null;
+        const createdBy =
+          (typeof track.createdBy === 'string' ? track.createdBy : null) ??
+          (typeof msg?.actorUserId === 'string' ? msg.actorUserId : null);
         // Afficher la notification uniquement aux autres utilisateurs.
         if (!user?.id || !createdBy || user.id !== createdBy) {
-          const rawName = typeof msg?.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
+          const rawName =
+            typeof msg?.createdByDisplayName === 'string'
+              ? msg.createdByDisplayName
+              : typeof msg?.actorDisplayName === 'string'
+                ? msg.actorDisplayName
+                : null;
           const name = (rawName && rawName.trim()) || (createdBy ? buildUserDisplayName(createdBy) : null);
           if (name) {
             setActivityToast(`${name} vient de créer une piste`);
@@ -6157,6 +6164,13 @@ export default function MapLibreMap() {
 
       // Et désactive toute piste active pour masquer complètement la forme.
       setActiveVehicleTrackId((currentId) => (currentId === trackId ? null : currentId));
+
+      // Ferme le mini popup Paw (barre réduite) si affiché.
+      setShowActiveVehicleTrack(false);
+      if (personPanelOpen && personPanelCollapsed && !personEdit) {
+        setPersonPanelOpen(false);
+        setPersonPanelCollapsed(false);
+      }
 
       // IMPORTANT: on nettoie aussi l'état "prev"/"pending" et on vide la source MapLibre,
       // sinon le mode "render kept previous" peut conserver la géométrie supprimée.
