@@ -286,7 +286,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
 
       <div
         className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-          settingsMenuOpen ? `${isAdmin ? 'h-[274px]' : 'h-[216px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
+          settingsMenuOpen ? `${isAdmin ? 'h-[328px]' : 'h-[272px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
         }`}
       >
         <div className="flex flex-col gap-2">
