@@ -389,7 +389,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         lastKnownWhen: e.target.value,
                       }))
                     }
-                    className="mt-1 h-10 w-full max-w-full min-w-0 box-border rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    style={{ WebkitAppearance: 'none' } as any}
+                    className="mt-1 block h-10 w-full max-w-full min-w-0 box-border appearance-none rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-600">
                     <AlertTriangle size={12} className="text-amber-600" />

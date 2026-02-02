@@ -896,7 +896,7 @@ export default function MapLibreMap() {
     return found;
   }, [activeVehicleTrackId, vehicleTracks]);
 
-  const hasActiveVehicleTrack = !!activeVehicleTrackId;
+  const hasActiveVehicleTrack = Boolean(activeVehicleTrackIdRef.current ?? activeVehicleTrackId);
 
   // Persiste les changements d'ID actif / visibilité dans localStorage.
   useEffect(() => {
@@ -1811,6 +1811,12 @@ export default function MapLibreMap() {
           const hasLocalTrack = Boolean(activeVehicleTrackId) || Boolean(activeVehicleTrackIdRef.current);
           const hasLocalGeo = Object.keys(vehicleTrackGeojsonByIdRef.current ?? {}).length > 0;
           if (hasLocalTrack || hasLocalGeo) {
+            // Si le state n'est pas encore synchronisé mais que la ref a l'ID,
+            // le réinjecter pour que l'UI (Paw) ne reste pas grisée.
+            const refId = activeVehicleTrackIdRef.current;
+            if (!activeVehicleTrackId && typeof refId === 'string' && refId) {
+              setActiveVehicleTrackId(refId);
+            }
             return;
           }
 
