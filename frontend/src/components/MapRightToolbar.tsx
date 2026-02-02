@@ -170,10 +170,11 @@ export const MapRightToolbar = memo(function MapRightToolbar({
         <Layers className="mx-auto text-gray-600" size={20} />
       </button>
 
-      {canEditMap ? (
+      {role !== 'viewer' ? (
         <button
           type="button"
           onClick={() => {
+            if (!canEditMap) return;
             if (activeTool === 'poi') {
               cancelDraft();
               return;
