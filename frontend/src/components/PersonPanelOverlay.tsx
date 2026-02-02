@@ -279,7 +279,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
           ) : canEditPerson ? (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <div className="relative">
+                <div className="relative min-w-0">
                   <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
                   <input
                     type="text"
@@ -389,7 +389,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         lastKnownWhen: e.target.value,
                       }))
                     }
-                    className="mt-1 h-10 w-full min-w-0 rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="mt-1 h-10 w-full max-w-full min-w-0 rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-600">
                     <AlertTriangle size={12} className="text-amber-600" />

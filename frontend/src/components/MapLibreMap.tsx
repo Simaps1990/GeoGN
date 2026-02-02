@@ -6167,10 +6167,11 @@ export default function MapLibreMap() {
 
       // Ferme le mini popup Paw (barre réduite) si affiché.
       setShowActiveVehicleTrack(false);
-      if (personPanelOpen && personPanelCollapsed && !personEdit) {
-        setPersonPanelOpen(false);
-        setPersonPanelCollapsed(false);
-      }
+      // IMPORTANT: ne pas dépendre d'états potentiellement "stale" dans le handler socket.
+      // On force la fermeture pour que l'UI Paw disparaisse jusqu'à la prochaine création.
+      setPersonEdit(false);
+      setPersonPanelOpen(false);
+      setPersonPanelCollapsed(false);
 
       // IMPORTANT: on nettoie aussi l'état "prev"/"pending" et on vide la source MapLibre,
       // sinon le mode "render kept previous" peut conserver la géométrie supprimée.
