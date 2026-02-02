@@ -1808,7 +1808,7 @@ export default function MapLibreMap() {
         // (via socket + refs), ne pas écraser l'état local (sinon Paw reste grisé).
         if (!tracks.length) {
           setVehicleTracksLoaded(true);
-          const hasLocalTrack = Boolean(activeVehicleTrackIdRef.current);
+          const hasLocalTrack = Boolean(activeVehicleTrackId) || Boolean(activeVehicleTrackIdRef.current);
           const hasLocalGeo = Object.keys(vehicleTrackGeojsonByIdRef.current ?? {}).length > 0;
           if (hasLocalTrack || hasLocalGeo) {
             return;
@@ -5980,6 +5980,7 @@ export default function MapLibreMap() {
       // Une piste nouvellement créée devient la piste active (sélectionnée) pour tous.
       // Elle peut rester masquée visuellement tant que Paw n'est pas activé.
       setActiveVehicleTrackId(track.id);
+      activeVehicleTrackIdRef.current = track.id;
 
       // Pour tous les utilisateurs (peu importe le rôle), une piste qui arrive
       // doit rester masquée tant qu'ils n'ont pas cliqué sur Paw.
@@ -5987,6 +5988,7 @@ export default function MapLibreMap() {
       const createdBy = typeof track.createdBy === 'string' ? track.createdBy : null;
       if (!user?.id || !createdBy || user.id !== createdBy) {
         setShowActiveVehicleTrack(false);
+        showActiveVehicleTrackRef.current = false;
         setPersonPanelOpen(false);
         setPersonPanelCollapsed(false);
         setPersonEdit(false);
