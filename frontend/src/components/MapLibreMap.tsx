@@ -5990,6 +5990,25 @@ export default function MapLibreMap() {
       if (cacheGeo && allowTomtom) {
         setVehicleTrackGeojsonById((prev) => ({ ...prev, [track.id]: cacheGeo as any }));
       }
+
+      try {
+        const createdBy = typeof track.createdBy === 'string' ? track.createdBy : null;
+        // Afficher la notification uniquement aux autres utilisateurs.
+        if (!user?.id || !createdBy || user.id !== createdBy) {
+          const rawName = typeof msg?.createdByDisplayName === 'string' ? msg.createdByDisplayName : null;
+          const name = (rawName && rawName.trim()) || (createdBy ? buildUserDisplayName(createdBy) : null);
+          if (name) {
+            setActivityToast(`${name} vient de créer une piste`);
+          } else {
+            setActivityToast(`Une piste vient d'être créée`);
+          }
+
+          // Signal sur l'icône paramètres (puce rouge) pour attirer l'attention.
+          setSettingsNotification(true);
+        }
+      } catch {
+        // En cas d'erreur, rester silencieux plutôt que notifier le créateur par erreur.
+      }
     }
 
     function onVehicleTrackUpdated(msg: any) {
@@ -7500,6 +7519,7 @@ export default function MapLibreMap() {
         onDelete={onDeletePoi}
         creatorLabel={creatorLabel}
         canEditMap={canEditMap}
+        canStartTrack={isAdmin}
         hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
         actionBusy={actionBusy}
       />
@@ -7559,10 +7579,12 @@ export default function MapLibreMap() {
         setPersonPanelCollapsed={setPersonPanelCollapsed}
         setPersonPanelOpen={setPersonPanelOpen}
         setShowActiveVehicleTrack={setShowActiveVehicleTrack}
+        showActiveVehicleTrack={showActiveVehicleTrack}
         mapInstance={mapInstanceRef.current}
         mapReady={mapReady}
         applyHeatmapVisibility={applyHeatmapVisibility}
         showEstimationHeatmap={showEstimationHeatmapRef.current}
+        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
         missionTraceRetentionSeconds={mission?.traceRetentionSeconds ?? null}
         setTimerSecondsInput={setTimerSecondsInput}
         setTimerError={setTimerError}

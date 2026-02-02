@@ -65,10 +65,13 @@ type MapRightToolbarProps = {
   setPersonPanelCollapsed: (v: boolean) => void;
   setPersonPanelOpen: (v: boolean) => void;
   setShowActiveVehicleTrack: (v: boolean) => void;
+  showActiveVehicleTrack: boolean;
   mapInstance: MapLibreMapInstance | null;
   mapReady: boolean;
   applyHeatmapVisibility: (map: MapLibreMapInstance, show: boolean) => void;
   showEstimationHeatmap: boolean;
+
+  hasActiveTestVehicleTrack: boolean;
 
   missionTraceRetentionSeconds: number | null;
   setTimerSecondsInput: (v: string) => void;
@@ -121,10 +124,12 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   setPersonPanelCollapsed,
   setPersonPanelOpen,
   setShowActiveVehicleTrack,
+  showActiveVehicleTrack,
   mapInstance,
   mapReady,
   applyHeatmapVisibility,
   showEstimationHeatmap,
+  hasActiveTestVehicleTrack,
   missionTraceRetentionSeconds,
   setTimerSecondsInput,
   setTimerError,
@@ -366,6 +371,11 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   setDismissedPersonCaseId(selectedMissionId, personCase.id);
                 }
 
+                if (!isAdmin && !hasActiveTestVehicleTrack) {
+                  setNoProjectionToast(true);
+                  return;
+                }
+
                 if (!personCase) {
                   if (!isAdmin) {
                     setNoProjectionToast(true);
@@ -399,6 +409,11 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   return;
                 }
 
+                if (!isAdmin && hasActiveTestVehicleTrack) {
+                  setShowActiveVehicleTrack(!showActiveVehicleTrack);
+                  return;
+                }
+
                 setPersonEdit(false);
                 setPersonPanelCollapsed(true);
                 setPersonPanelOpen(true);
@@ -409,10 +424,17 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               }}
               className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
                 personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-              } ${!isAdmin && !personCase ? 'opacity-60' : ''}`}
+              } ${!isAdmin && !hasActiveTestVehicleTrack ? 'opacity-60' : ''}`}
               title="Activité"
             >
-              <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
+              <PawPrint
+                className={
+                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveTestVehicleTrack && showActiveVehicleTrack)
+                    ? 'text-blue-600'
+                    : 'text-gray-600'
+                }
+                size={20}
+              />
               {projectionNotification && !(userId && personCase?.createdBy === userId) ? (
                 <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
               ) : null}
