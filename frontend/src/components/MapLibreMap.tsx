@@ -5979,9 +5979,9 @@ export default function MapLibreMap() {
 
       setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, track));
 
-      if (!activeVehicleTrackId) {
-        setActiveVehicleTrackId(track.id);
-      }
+      // Une piste nouvellement créée devient la piste active (sélectionnée) pour tous.
+      // Elle peut rester masquée visuellement tant que Paw n'est pas activé.
+      setActiveVehicleTrackId(track.id);
 
       // Pour tous les utilisateurs (peu importe le rôle), une piste qui arrive
       // doit rester masquée tant qu'ils n'ont pas cliqué sur Paw.
