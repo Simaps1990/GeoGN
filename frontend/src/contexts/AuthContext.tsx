@@ -56,45 +56,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        // 1) Session BFF (Keycloak) optionnelle.
-        // IMPORTANT: en prod, /api/me peut ne pas exister (404). On ne tente ce flux
-        // que si explicitement activé via env.
-        const bffEnabled = (import.meta as any).env?.VITE_BFF_ENABLED === '1';
-        if (bffEnabled) {
-          try {
-            const baseUrl = getApiBaseUrl();
-            const res = await fetch(`${baseUrl}/api/me`, {
-              method: 'GET',
-              credentials: 'include',
-            });
-            if (res.ok) {
-              const data: any = await res.json().catch(() => null);
-              if (data && data.authenticated && data.user) {
-                // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
-                const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
-                  method: 'POST',
-                  credentials: 'include',
-                });
-                if (attachRes.ok) {
-                  const attach: any = await attachRes.json().catch(() => null);
-                  if (attach && attach.accessToken && attach.refreshToken && attach.user) {
-                    setTokens(attach.accessToken, attach.refreshToken);
-                    try {
-                      if (attach.user.id) {
-                        localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
-                      }
-                    } catch {
-                      // ignore
+        // 1) Tenter d'abord une session BFF (Keycloak) via /api/me
+        try {
+          const baseUrl = getApiBaseUrl();
+          const res = await fetch(`${baseUrl}/api/me`, {
+            method: 'GET',
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const data: any = await res.json().catch(() => null);
+            if (data && data.authenticated && data.user) {
+              // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
+              const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
+                method: 'POST',
+                credentials: 'include',
+              });
+              if (attachRes.ok) {
+                const attach: any = await attachRes.json().catch(() => null);
+                if (attach && attach.accessToken && attach.refreshToken && attach.user) {
+                  setTokens(attach.accessToken, attach.refreshToken);
+                  try {
+                    if (attach.user.id) {
+                      localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
                     }
-                    setUser(attach.user as ApiUser);
-                    return;
+                  } catch {
+                    // ignore
                   }
+                  setUser(attach.user as ApiUser);
+                  return;
                 }
               }
             }
-          } catch {
-            // ignore, on retombe sur le flux JWT existant
           }
+        } catch {
+          // ignore, on retombe sur le flux JWT existant
         }
 
         // 2) Sinon, tenter l'API JWT existante

@@ -71,7 +71,7 @@ type MapRightToolbarProps = {
   applyHeatmapVisibility: (map: MapLibreMapInstance, show: boolean) => void;
   showEstimationHeatmap: boolean;
 
-  hasActiveVehicleTrack: boolean;
+  hasActiveTestVehicleTrack: boolean;
 
   missionTraceRetentionSeconds: number | null;
   setTimerSecondsInput: (v: string) => void;
@@ -129,7 +129,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   mapReady,
   applyHeatmapVisibility,
   showEstimationHeatmap,
-  hasActiveVehicleTrack,
+  hasActiveTestVehicleTrack,
   missionTraceRetentionSeconds,
   setTimerSecondsInput,
   setTimerError,
@@ -138,25 +138,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   isMapRotated,
   resetNorth,
 }: MapRightToolbarProps) {
-  const VEHICLE_TRACK_DEBUG = (() => {
-    try {
-      if (typeof window === 'undefined') return false;
-      return window.localStorage.getItem('gtc_debug_vehicle_track') === '1';
-    } catch {
-      return false;
-    }
-  })();
-
-  const vtlog = (event: string, data?: any) => {
-    if (!VEHICLE_TRACK_DEBUG) return;
-    try {
-      // eslint-disable-next-line no-console
-      console.log(`[vehicle-track][paw] ${event}`, data ?? null);
-    } catch {
-      // ignore
-    }
-  };
-
   return (
     <div
       className="fixed right-4 top-[calc(env(safe-area-inset-top)+16px)] z-[1000] flex flex-col gap-2 touch-none"
@@ -384,16 +365,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
             <button
               type="button"
               onClick={() => {
-                vtlog('click', {
-                  missionId: selectedMissionId ?? null,
-                  isAdmin,
-                  hasActiveVehicleTrack,
-                  showActiveVehicleTrack,
-                  personPanelOpen,
-                  personPanelCollapsed,
-                  personCaseId: personCase?.id ?? null,
-                });
-                // Admin: ouvre le panneau personne. Membre: toggle l'affichage de la piste.
                 const map = mapInstance;
 
                 setProjectionNotification(false);
@@ -401,7 +372,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   setDismissedPersonCaseId(selectedMissionId, personCase.id);
                 }
 
-                if (!isAdmin && !hasActiveVehicleTrack) {
+                if (!isAdmin && !hasActiveTestVehicleTrack) {
                   setNoProjectionToast(true);
                   return;
                 }
@@ -426,11 +397,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   setPersonPanelOpen(false);
                   setPersonPanelCollapsed(false);
                   if (map && mapReady) applyHeatmapVisibility(map, false);
-                  vtlog('toggle', {
-                    missionId: selectedMissionId ?? null,
-                    next: false,
-                    prev: true,
-                  });
                   return;
                 }
 
@@ -441,15 +407,10 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   if (map && mapReady) {
                     applyHeatmapVisibility(map, showEstimationHeatmap);
                   }
-                  vtlog('toggle', {
-                    missionId: selectedMissionId ?? null,
-                    next: true,
-                    prev: false,
-                  });
                   return;
                 }
 
-                if (!isAdmin && hasActiveVehicleTrack) {
+                if (!isAdmin && hasActiveTestVehicleTrack) {
                   const next = !showActiveVehicleTrack;
                   setShowActiveVehicleTrack(next);
                   if (next) {
@@ -460,11 +421,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                     setPersonPanelOpen(false);
                     setPersonPanelCollapsed(false);
                   }
-                  vtlog('toggle', {
-                    missionId: selectedMissionId ?? null,
-                    next,
-                    prev: showActiveVehicleTrack,
-                  });
                   return;
                 }
 
@@ -472,22 +428,18 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                 setPersonPanelCollapsed(true);
                 setPersonPanelOpen(true);
                 setShowActiveVehicleTrack(true);
-                vtlog('admin_open_panel', {
-                  missionId: selectedMissionId ?? null,
-                  showActiveVehicleTrack: true,
-                });
                 if (map && mapReady) {
                   applyHeatmapVisibility(map, showEstimationHeatmap);
                 }
               }}
               className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
                 personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-              } ${!isAdmin && !hasActiveVehicleTrack ? 'opacity-60' : ''}`}
+              } ${!isAdmin && !hasActiveTestVehicleTrack ? 'opacity-60' : ''}`}
               title="Activité"
             >
               <PawPrint
                 className={
-                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveVehicleTrack && showActiveVehicleTrack)
+                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveTestVehicleTrack && showActiveVehicleTrack)
                     ? 'text-blue-600'
                     : 'text-gray-600'
                 }

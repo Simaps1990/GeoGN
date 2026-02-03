@@ -369,25 +369,6 @@ export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
-
-  const VEHICLE_TRACK_DEBUG = (() => {
-    try {
-      if (typeof window === 'undefined') return false;
-      return window.localStorage.getItem('gtc_debug_vehicle_track') === '1';
-    } catch {
-      return false;
-    }
-  })();
-
-  const vtlog = (event: string, data?: any) => {
-    if (!VEHICLE_TRACK_DEBUG) return;
-    try {
-      // eslint-disable-next-line no-console
-      console.log(`[vehicle-track][ui] ${event}`, data ?? null);
-    } catch {
-      // ignore
-    }
-  };
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirmDialog();
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastSnapshotAtRef = useRef<number>(0);
@@ -823,9 +804,6 @@ export default function MapLibreMap() {
 
   const [vehicleTracks, setVehicleTracks] = useState<ApiVehicleTrack[]>([]);
   const [, setVehicleTracksTotal] = useState(0);
-  const [hasRemoteActiveVehicleTrack, setHasRemoteActiveVehicleTrack] = useState(false);
-  const hasRemoteActiveVehicleTrackRef = useRef<boolean>(false);
-  const [lastKnownVehicleTrackId, setLastKnownVehicleTrackId] = useState<string | null>(null);
   // Indique si la liste des pistes véhicule a déjà été chargée au moins une fois
   // pour la mission courante durant cette session.
   const [vehicleTracksLoaded, setVehicleTracksLoaded] = useState(false);
@@ -895,15 +873,13 @@ export default function MapLibreMap() {
     vehicleTrackGeojsonByIdRef.current = vehicleTrackGeojsonById;
   }, [vehicleTrackGeojsonById]);
 
-  useEffect(() => {
-    hasRemoteActiveVehicleTrackRef.current = hasRemoteActiveVehicleTrack;
-  }, [hasRemoteActiveVehicleTrack]);
-
   const isTestTrack = (track: ApiVehicleTrack | null | undefined): boolean => {
     if (!track) return false;
     if (track.algorithm === 'road_graph') return true;
     return !!track.label && /TEST/i.test(track.label);
   };
+
+  const filterAllowedVehicleTracks = (tracks: ApiVehicleTrack[]): ApiVehicleTrack[] => tracks.filter((t) => isTestTrack(t));
 
   const activeVehicleTrack = useMemo(() => {
     if (!activeVehicleTrackId) return null;
@@ -922,12 +898,7 @@ export default function MapLibreMap() {
     return found;
   }, [activeVehicleTrackId, vehicleTracks]);
 
-  const hasActiveVehicleTrack = Boolean(
-    hasRemoteActiveVehicleTrack ||
-      lastKnownVehicleTrackId ||
-      activeVehicleTrackIdRef.current ||
-      activeVehicleTrackId
-  );
+  const hasActiveTestVehicleTrack = !!(activeVehicleTrack && isTestTrack(activeVehicleTrack));
 
   // Persiste les changements d'ID actif / visibilité dans localStorage.
   useEffect(() => {
@@ -1528,31 +1499,6 @@ export default function MapLibreMap() {
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
 
-  useEffect(() => {
-    vtlog('state', {
-      missionId: selectedMissionId ?? null,
-      activeVehicleTrackId: activeVehicleTrackId ?? null,
-      activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-      lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-      hasRemoteActiveVehicleTrack,
-      hasRemoteActiveVehicleTrackRef: hasRemoteActiveVehicleTrackRef.current,
-      hasActiveVehicleTrack,
-      showActiveVehicleTrack,
-      showActiveVehicleTrackRef: showActiveVehicleTrackRef.current,
-      vehicleTracksCount: vehicleTracks.length,
-      vehicleTracksActiveCount: vehicleTracks.filter((t) => t.status === 'active').length,
-      vehicleTracksIds: vehicleTracks.slice(0, 10).map((t) => ({ id: t.id, status: t.status })),
-    });
-  }, [
-    selectedMissionId,
-    activeVehicleTrackId,
-    lastKnownVehicleTrackId,
-    hasRemoteActiveVehicleTrack,
-    hasActiveVehicleTrack,
-    showActiveVehicleTrack,
-    vehicleTracks,
-  ]);
-
   const creatorLabel = (() => {
     if (!selectedPoi?.createdBy) return 'Créé par inconnu';
     const id = selectedPoi.createdBy as string;
@@ -1582,7 +1528,7 @@ export default function MapLibreMap() {
   }, [selectedPoi]);
 
   const onStartTrackFromPoi = useCallback(() => {
-    if (hasActiveVehicleTrack) {
+    if (hasActiveTestVehicleTrack) {
       setActivityToast('une piste est deja en cours');
       return;
     }
@@ -1602,7 +1548,7 @@ export default function MapLibreMap() {
     setShowActiveVehicleTrack(true);
 
     setSelectedPoi(null);
-  }, [hasActiveVehicleTrack, selectedPoi]);
+  }, [hasActiveTestVehicleTrack, selectedPoi]);
 
   const onEditPoi = useCallback(() => {
     if (!selectedPoi) return;
@@ -1857,71 +1803,26 @@ export default function MapLibreMap() {
     (async () => {
       try {
         const missionIdAtCall = selectedMissionId;
-        vtlog('api:listVehicleTracks:start', {
-          missionId: missionIdAtCall,
-          query: vehicleTracksQuery,
-          activeVehicleTrackId: activeVehicleTrackId ?? null,
-          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-          hasRemoteActiveVehicleTrack,
-          showActiveVehicleTrack,
-        });
         const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
         if (cancelled) return;
 
-        vtlog('api:listVehicleTracks:done', {
-          missionId: missionIdAtCall,
-          count: tracks.length,
-          ids: tracks.slice(0, 10).map((t) => ({ id: t.id, status: t.status })),
-          activeCount: tracks.filter((t) => t.status === 'active').length,
-        });
+        setVehicleTracksLoaded(true);
+        const filtered = filterAllowedVehicleTracks(tracks);
+        setVehicleTracks(filtered);
+        setVehicleTracksTotal(filtered.length);
 
-        // IMPORTANT: si l'API renvoie 0 pistes mais qu'on a déjà une piste en mémoire
-        // (via socket + refs), ne pas écraser l'état local (sinon Paw reste grisé).
-        if (!tracks.length) {
-          setVehicleTracksLoaded(true);
-          const hasLocalTrack = Boolean(activeVehicleTrackId) || Boolean(activeVehicleTrackIdRef.current);
-          const hasLocalGeo = Object.keys(vehicleTrackGeojsonByIdRef.current ?? {}).length > 0;
-          if (hasLocalTrack || hasLocalGeo) {
-            vtlog('api:listVehicleTracks:empty_keep_local', {
-              missionId: missionIdAtCall,
-              hasLocalTrack,
-              hasLocalGeo,
-              activeVehicleTrackId: activeVehicleTrackId ?? null,
-              activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-              lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-            });
-            // Si le state n'est pas encore synchronisé mais que la ref a l'ID,
-            // le réinjecter pour que l'UI (Paw) ne reste pas grisée.
-            const refId = activeVehicleTrackIdRef.current;
-            if (!activeVehicleTrackId && typeof refId === 'string' && refId) {
-              setActiveVehicleTrackId(refId);
-            }
-            // On conserve aussi le flag d'activité si la piste est connue localement.
-            setHasRemoteActiveVehicleTrack(true);
-            if (!lastKnownVehicleTrackId && typeof refId === 'string' && refId) {
-              setLastKnownVehicleTrackId(refId);
-            }
-            return;
+        // Si la mission n'a plus aucune piste, on nettoie complètement l'état
+        // associé aux suivis pour éviter qu'une géométrie ancienne reste
+        // accrochée dans la carte ou dans la mémoire React.
+        if (!filtered.length) {
+          if (activeVehicleTrackId) {
+            setActiveVehicleTrackId(null);
           }
-
-          vtlog('api:listVehicleTracks:empty_reset', {
-            missionId: missionIdAtCall,
-            hasLocalTrack,
-            hasLocalGeo,
-          });
-
-          setVehicleTracks([]);
-          setVehicleTracksTotal(0);
-          setActiveVehicleTrackId(null);
-          setVehicleTrackGeojsonById({});
+          if (Object.keys(vehicleTrackGeojsonById).length > 0) {
+            setVehicleTrackGeojsonById({});
+          }
           return;
         }
-
-        setVehicleTracksLoaded(true);
-        setVehicleTracks(tracks);
-        setVehicleTracksTotal(tracks.length);
-        setHasRemoteActiveVehicleTrack(tracks.some((t) => t.status === 'active'));
 
         const currentId = activeVehicleTrackId;
         // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
@@ -1934,17 +1835,8 @@ export default function MapLibreMap() {
           // Fallback : on prend la première piste autorisée (TEST) si aucune piste
           // n'est marquée explicitement "active".
           const active = tracks.find((t) => t.status === 'active');
-          nextActiveId = active?.id ?? (tracks[0]?.id ?? null);
+          nextActiveId = active?.id ?? (filtered[0]?.id ?? null);
         }
-
-        vtlog('api:listVehicleTracks:choose_active', {
-          missionId: missionIdAtCall,
-          currentId: currentId ?? null,
-          stillExists,
-          nextActiveId: nextActiveId ?? null,
-          first: tracks[0]?.id ?? null,
-          activeFromList: tracks.find((t) => t.status === 'active')?.id ?? null,
-        });
 
         if (!nextActiveId) {
           // Aucune piste active trouvée : on s'assure de bien
@@ -1953,12 +1845,10 @@ export default function MapLibreMap() {
           if (activeVehicleTrackId) {
             setActiveVehicleTrackId(null);
           }
-          setLastKnownVehicleTrackId(null);
         } else {
           if (nextActiveId !== activeVehicleTrackId) {
             setActiveVehicleTrackId(nextActiveId);
           }
-          setLastKnownVehicleTrackId(nextActiveId);
 
           if (!vehicleTrackGeojsonById[nextActiveId]) {
             try {
@@ -1986,10 +1876,6 @@ export default function MapLibreMap() {
           }
         }
       } catch {
-        vtlog('api:listVehicleTracks:error', {
-          missionId: selectedMissionId ?? null,
-          query: vehicleTracksQuery,
-        });
         if (cancelled) return;
       }
     })();
@@ -6069,22 +5955,8 @@ export default function MapLibreMap() {
       const track = msg?.track as ApiVehicleTrack | undefined;
       if (!track || !track.id) return;
 
-      vtlog('socket:created:recv', {
-        missionId: selectedMissionId,
-        actorUserId: typeof msg?.actorUserId === 'string' ? msg.actorUserId : null,
-        trackId: track.id,
-        status: (track as any)?.status ?? null,
-        createdBy: (track as any)?.createdBy ?? null,
-        hasCacheGeo: !!track.cache?.payloadGeojson,
-        provider: (track.cache?.meta as any)?.provider ?? null,
-        before: {
-          activeVehicleTrackId: activeVehicleTrackId ?? null,
-          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-          hasRemoteActiveVehicleTrack,
-          showActiveVehicleTrack,
-        },
-      });
+      // Ne garder que les pistes TEST.
+      if (!isTestTrack(track)) return;
 
       try {
         const provider = (track.cache?.meta as any)?.provider as string | undefined;
@@ -6107,22 +5979,9 @@ export default function MapLibreMap() {
 
       setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, track));
 
-      // À la création, on considère qu'une piste est active pour la mission.
-      // (Le backend crée avec status='active', mais on reste robuste si le champ manque.)
-      setHasRemoteActiveVehicleTrack(true);
-      setLastKnownVehicleTrackId(track.id);
-
-      // Une piste nouvellement créée devient la piste active (sélectionnée) pour tous.
-      // Elle peut rester masquée visuellement tant que Paw n'est pas activé.
-      setActiveVehicleTrackId(track.id);
-      activeVehicleTrackIdRef.current = track.id;
-
-      vtlog('socket:created:applied', {
-        trackId: track.id,
-        afterRef: {
-          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-        },
-      });
+      if (!activeVehicleTrackId) {
+        setActiveVehicleTrackId(track.id);
+      }
 
       // Pour tous les utilisateurs (peu importe le rôle), une piste qui arrive
       // doit rester masquée tant qu'ils n'ont pas cliqué sur Paw.
@@ -6130,7 +5989,6 @@ export default function MapLibreMap() {
       const createdBy = typeof track.createdBy === 'string' ? track.createdBy : null;
       if (!user?.id || !createdBy || user.id !== createdBy) {
         setShowActiveVehicleTrack(false);
-        showActiveVehicleTrackRef.current = false;
         setPersonPanelOpen(false);
         setPersonPanelCollapsed(false);
         setPersonEdit(false);
@@ -6175,28 +6033,24 @@ export default function MapLibreMap() {
     function onVehicleTrackUpdated(msg: any) {
       if (!selectedMissionId || msg?.missionId !== selectedMissionId) return;
 
-      vtlog('socket:updated:recv', {
-        missionId: selectedMissionId,
-        hasFullTrack: !!msg?.track,
-        trackId: (msg?.track?.id ?? msg?.trackId) ?? null,
-        status: msg?.track?.status ?? msg?.status ?? null,
-        before: {
-          activeVehicleTrackId: activeVehicleTrackId ?? null,
-          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-          hasRemoteActiveVehicleTrack,
-        },
-      });
-
       const full = msg?.track as ApiVehicleTrack | undefined;
       if (full && full.id) {
-        setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, full));
-        if (full.status === 'active') {
-          setHasRemoteActiveVehicleTrack(true);
-          setLastKnownVehicleTrackId(full.id);
+        // Ne garder que les pistes TEST.
+        if (!isTestTrack(full)) {
+          setVehicleTracks((prev) => prev.filter((t) => t.id !== full.id));
+          setVehicleTrackGeojsonById((prev) => {
+            if (!prev[full.id]) return prev;
+            const next = { ...prev };
+            delete next[full.id];
+            return next;
+          });
+          setActiveVehicleTrackId((currentId) => (currentId === full.id ? null : currentId));
+          return;
         }
+        setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, full));
         const cacheGeo = full.cache?.payloadGeojson;
         const provider = (full.cache?.meta as any)?.provider as string | undefined;
+        const isTest = isTestTrack(full);
         const allowTomtom =
           provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
 
@@ -6205,33 +6059,16 @@ export default function MapLibreMap() {
         // Paw puisse faire réapparaître un ancien carroyage.
         if (full.status !== 'active') {
           setActiveVehicleTrackId((currentId) => (currentId === full.id ? null : currentId));
-          // Ne couper le flag que si on est sûr qu'il n'y a plus aucune piste active.
-          // (Sinon, Paw reste grisé à tort pour les autres.)
-          setHasRemoteActiveVehicleTrack((prevFlag) => {
-            if (!prevFlag) return false;
-            const anyOtherActive = vehicleTracks.some((t) => t.id !== full.id && t.status === 'active');
-            if (anyOtherActive) return true;
-            // si la piste stoppée/expirée était celle pointée par la ref, on coupe.
-            if (activeVehicleTrackIdRef.current === full.id) return false;
-            return prevFlag;
-          });
           setVehicleTrackGeojsonById((prev) => {
             if (!prev[full.id]) return prev;
             const next = { ...prev };
             delete next[full.id];
             return next;
           });
-
-          setLastKnownVehicleTrackId((cur) => (cur === full.id ? null : cur));
-          vtlog('socket:updated:full_inactive', {
-            trackId: full.id,
-            status: full.status,
-            activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          });
           return;
         }
 
-        if (cacheGeo && allowTomtom) {
+        if (cacheGeo && (!isTest || allowTomtom)) {
           try {
             const budget = (full.cache?.meta as any)?.budgetSec;
             // Trace les mises à jour d'isochrone côté front (branche full.track)
@@ -6254,36 +6091,6 @@ export default function MapLibreMap() {
 
       const trackId = typeof msg?.trackId === 'string' ? msg.trackId : undefined;
       if (!trackId) return;
-
-      if (typeof msg.status === 'string') {
-        const st = msg.status as ApiVehicleTrackStatus;
-        if (st === 'active') {
-          setHasRemoteActiveVehicleTrack(true);
-          setLastKnownVehicleTrackId(trackId);
-          if (!activeVehicleTrackIdRef.current) {
-            activeVehicleTrackIdRef.current = trackId;
-          }
-          vtlog('socket:updated:delta_active', {
-            trackId,
-            status: st,
-            afterRef: {
-              activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-            },
-          });
-        } else {
-          setLastKnownVehicleTrackId((cur) => (cur === trackId ? null : cur));
-          setHasRemoteActiveVehicleTrack((prevFlag) => {
-            if (!prevFlag) return false;
-            if (activeVehicleTrackIdRef.current === trackId) return false;
-            return prevFlag;
-          });
-          vtlog('socket:updated:delta_inactive', {
-            trackId,
-            status: st,
-            activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          });
-        }
-      }
 
       setVehicleTracks((prev) =>
         prev.map((t) => {
@@ -6311,9 +6118,11 @@ export default function MapLibreMap() {
 
       const cacheGeo = msg?.cache?.payloadGeojson;
       const provider = (msg?.cache?.meta as any)?.provider as string | undefined;
+      const track = vehicleTracks.find((t) => t.id === trackId);
+      const isTest = isTestTrack(track);
       const allowTomtom =
         provider === 'tomtom_reachable_range' || provider === 'tomtom_reachable_range_fallback_circle';
-      if (cacheGeo && allowTomtom) {
+      if (cacheGeo && (!isTest || allowTomtom)) {
         try {
           const budget = (msg?.cache?.meta as any)?.budgetSec;
           const f0 = (cacheGeo as any)?.features?.[0];
@@ -6343,17 +6152,6 @@ export default function MapLibreMap() {
       const trackId = typeof msg?.trackId === 'string' ? msg.trackId : undefined;
       if (!trackId) return;
 
-      vtlog('socket:deleted:recv', {
-        missionId: selectedMissionId,
-        trackId,
-        before: {
-          activeVehicleTrackId: activeVehicleTrackId ?? null,
-          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
-          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
-          hasRemoteActiveVehicleTrack,
-        },
-      });
-
       // Supprime la piste côté liste
       setVehicleTracks((prev) => prev.filter((t) => t.id !== trackId));
 
@@ -6366,21 +6164,13 @@ export default function MapLibreMap() {
 
       // Et désactive toute piste active pour masquer complètement la forme.
       setActiveVehicleTrackId((currentId) => (currentId === trackId ? null : currentId));
-      setHasRemoteActiveVehicleTrack(false);
-      setLastKnownVehicleTrackId((cur) => (cur === trackId ? null : cur));
-
-      vtlog('socket:deleted:applied', {
-        missionId: selectedMissionId,
-        trackId,
-      });
 
       // Ferme le mini popup Paw (barre réduite) si affiché.
       setShowActiveVehicleTrack(false);
-      // IMPORTANT: ne pas dépendre d'états potentiellement "stale" dans le handler socket.
-      // On force la fermeture pour que l'UI Paw disparaisse jusqu'à la prochaine création.
-      setPersonEdit(false);
-      setPersonPanelOpen(false);
-      setPersonPanelCollapsed(false);
+      if (personPanelOpen && personPanelCollapsed && !personEdit) {
+        setPersonPanelOpen(false);
+        setPersonPanelCollapsed(false);
+      }
 
       // IMPORTANT: on nettoie aussi l'état "prev"/"pending" et on vide la source MapLibre,
       // sinon le mode "render kept previous" peut conserver la géométrie supprimée.
@@ -6850,6 +6640,26 @@ export default function MapLibreMap() {
       const b = ring[ring.length - 1];
       if (a[0] === b[0] && a[1] === b[1]) return ring;
       return [...ring, [a[0], a[1]]];
+    };
+
+    const getCenter = (fc: any): { lng: number; lat: number } | null => {
+      const f0 = fc?.features?.[0];
+      const c = f0?.properties?.center;
+      if (c && typeof c.lng === 'number' && typeof c.lat === 'number') return { lng: c.lng, lat: c.lat };
+      const ring = getRing(fc);
+      if (!ring || ring.length < 3) return null;
+      // simple centroid approx (average of vertices)
+      let sumLng = 0;
+      let sumLat = 0;
+      let n = 0;
+      for (let i = 0; i < ring.length - 1; i += 1) {
+        const p = ring[i];
+        sumLng += p[0];
+        sumLat += p[1];
+        n += 1;
+      }
+      if (n <= 0) return null;
+      return { lng: sumLng / n, lat: sumLat / n };
     };
 
     const smoothRing = (ringIn: [number, number][], passes: number): [number, number][] => {
@@ -7736,7 +7546,7 @@ export default function MapLibreMap() {
         creatorLabel={creatorLabel}
         canEditMap={canEditMap}
         canStartTrack={isAdmin}
-        hasActiveVehicleTrack={hasActiveVehicleTrack}
+        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
         actionBusy={actionBusy}
       />
 
@@ -7800,7 +7610,7 @@ export default function MapLibreMap() {
         mapReady={mapReady}
         applyHeatmapVisibility={applyHeatmapVisibility}
         showEstimationHeatmap={showEstimationHeatmapRef.current}
-        hasActiveVehicleTrack={hasActiveVehicleTrack}
+        hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
         missionTraceRetentionSeconds={mission?.traceRetentionSeconds ?? null}
         setTimerSecondsInput={setTimerSecondsInput}
         setTimerError={setTimerError}
@@ -7833,7 +7643,7 @@ export default function MapLibreMap() {
           setConfirmDeletePersonCaseOpen={setConfirmDeletePersonCaseOpen}
           setPersonPanelCollapsed={setPersonPanelCollapsed}
           setPersonPanelOpen={setPersonPanelOpen}
-          hasActiveVehicleTrack={hasActiveVehicleTrack}
+          hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
           estimation={estimation}
           mobilityLabel={mobilityLabel}
           normalizeMobility={normalizeMobility}

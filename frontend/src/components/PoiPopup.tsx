@@ -41,7 +41,7 @@ type PoiPopupProps = {
   creatorLabel: string;
   canEditMap: boolean;
   canStartTrack: boolean;
-  hasActiveVehicleTrack: boolean;
+  hasActiveTestVehicleTrack: boolean;
   actionBusy: boolean;
 };
 
@@ -110,7 +110,7 @@ export const PoiPopup = memo(function PoiPopup({
   creatorLabel,
   canEditMap,
   canStartTrack,
-  hasActiveVehicleTrack,
+  hasActiveTestVehicleTrack,
   actionBusy,
 }: PoiPopupProps) {
   if (!poi) return null;
@@ -153,7 +153,7 @@ export const PoiPopup = memo(function PoiPopup({
                 type="button"
                 onClick={onStartTrack}
                 className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 ${
-                  hasActiveVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
+                  hasActiveTestVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
                 }`}
                 title="Démarrer une piste depuis ce POI"
               >

@@ -18,7 +18,7 @@ type PersonPanelOverlayProps = {
   setPersonPanelCollapsed: (v: boolean) => void;
   setPersonPanelOpen: (v: boolean) => void;
 
-  hasActiveVehicleTrack: boolean;
+  hasActiveTestVehicleTrack: boolean;
   estimation: any;
   mobilityLabel: (m: any) => string;
   normalizeMobility: (m: any) => any;
@@ -72,7 +72,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
   setConfirmDeletePersonCaseOpen,
   setPersonPanelCollapsed,
   setPersonPanelOpen,
-  hasActiveVehicleTrack,
+  hasActiveTestVehicleTrack,
   estimation,
   mobilityLabel,
   normalizeMobility,
@@ -226,7 +226,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 ) : null}
               </div>
 
-              {estimation && !hasActiveVehicleTrack ? (
+              {estimation && !hasActiveTestVehicleTrack ? (
                 <div className="rounded-2xl border p-3 md:col-span-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs font-semibold text-gray-700">Estimation</div>
@@ -278,8 +278,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
             </div>
           ) : canEditPerson ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
-                <div className="relative min-w-0 w-full">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="relative">
                   <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
                   <input
                     type="text"
@@ -363,7 +363,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 </div>
                 <div
                   onClick={() => {
-                    if (hasActiveVehicleTrack) return;
+                    if (hasActiveTestVehicleTrack) return;
                     const el = lastKnownWhenInputRef.current;
                     if (!el) return;
                     // showPicker est supporté par la plupart des navigateurs modernes
@@ -373,7 +373,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       el.focus();
                     }
                   }}
-                  className="cursor-pointer min-w-0 w-full overflow-hidden"
+                  className="cursor-pointer min-w-0"
                 >
                   <div className="text-xs font-semibold text-gray-700">Date / heure</div>
                   <input
@@ -382,15 +382,14 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     value={personDraft.lastKnownWhen}
                     min={minLiveTrackWhenLocalMinute}
                     max={nowLocalMinute}
-                    disabled={hasActiveVehicleTrack}
+                    disabled={hasActiveTestVehicleTrack}
                     onChange={(e) =>
                       setPersonDraft((p: any) => ({
                         ...p,
                         lastKnownWhen: e.target.value,
                       }))
                     }
-                    style={{ WebkitAppearance: 'none' } as any}
-                    className="mt-1 block h-10 w-full max-w-full min-w-0 box-border appearance-none rounded-2xl border px-3 py-2 text-sm leading-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="mt-1 h-10 w-full min-w-0 rounded-2xl border px-3 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-600">
                     <AlertTriangle size={12} className="text-amber-600" />
