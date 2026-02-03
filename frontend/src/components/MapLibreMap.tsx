@@ -369,6 +369,25 @@ export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
+
+  const VEHICLE_TRACK_DEBUG = (() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      return window.localStorage.getItem('gtc_debug_vehicle_track') === '1';
+    } catch {
+      return false;
+    }
+  })();
+
+  const vtlog = (event: string, data?: any) => {
+    if (!VEHICLE_TRACK_DEBUG) return;
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[vehicle-track][ui] ${event}`, data ?? null);
+    } catch {
+      // ignore
+    }
+  };
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirmDialog();
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastSnapshotAtRef = useRef<number>(0);
@@ -1509,6 +1528,31 @@ export default function MapLibreMap() {
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
 
+  useEffect(() => {
+    vtlog('state', {
+      missionId: selectedMissionId ?? null,
+      activeVehicleTrackId: activeVehicleTrackId ?? null,
+      activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+      lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+      hasRemoteActiveVehicleTrack,
+      hasRemoteActiveVehicleTrackRef: hasRemoteActiveVehicleTrackRef.current,
+      hasActiveVehicleTrack,
+      showActiveVehicleTrack,
+      showActiveVehicleTrackRef: showActiveVehicleTrackRef.current,
+      vehicleTracksCount: vehicleTracks.length,
+      vehicleTracksActiveCount: vehicleTracks.filter((t) => t.status === 'active').length,
+      vehicleTracksIds: vehicleTracks.slice(0, 10).map((t) => ({ id: t.id, status: t.status })),
+    });
+  }, [
+    selectedMissionId,
+    activeVehicleTrackId,
+    lastKnownVehicleTrackId,
+    hasRemoteActiveVehicleTrack,
+    hasActiveVehicleTrack,
+    showActiveVehicleTrack,
+    vehicleTracks,
+  ]);
+
   const creatorLabel = (() => {
     if (!selectedPoi?.createdBy) return 'Créé par inconnu';
     const id = selectedPoi.createdBy as string;
@@ -1813,8 +1857,24 @@ export default function MapLibreMap() {
     (async () => {
       try {
         const missionIdAtCall = selectedMissionId;
+        vtlog('api:listVehicleTracks:start', {
+          missionId: missionIdAtCall,
+          query: vehicleTracksQuery,
+          activeVehicleTrackId: activeVehicleTrackId ?? null,
+          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+          hasRemoteActiveVehicleTrack,
+          showActiveVehicleTrack,
+        });
         const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
         if (cancelled) return;
+
+        vtlog('api:listVehicleTracks:done', {
+          missionId: missionIdAtCall,
+          count: tracks.length,
+          ids: tracks.slice(0, 10).map((t) => ({ id: t.id, status: t.status })),
+          activeCount: tracks.filter((t) => t.status === 'active').length,
+        });
 
         // IMPORTANT: si l'API renvoie 0 pistes mais qu'on a déjà une piste en mémoire
         // (via socket + refs), ne pas écraser l'état local (sinon Paw reste grisé).
@@ -1823,6 +1883,14 @@ export default function MapLibreMap() {
           const hasLocalTrack = Boolean(activeVehicleTrackId) || Boolean(activeVehicleTrackIdRef.current);
           const hasLocalGeo = Object.keys(vehicleTrackGeojsonByIdRef.current ?? {}).length > 0;
           if (hasLocalTrack || hasLocalGeo) {
+            vtlog('api:listVehicleTracks:empty_keep_local', {
+              missionId: missionIdAtCall,
+              hasLocalTrack,
+              hasLocalGeo,
+              activeVehicleTrackId: activeVehicleTrackId ?? null,
+              activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+              lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+            });
             // Si le state n'est pas encore synchronisé mais que la ref a l'ID,
             // le réinjecter pour que l'UI (Paw) ne reste pas grisée.
             const refId = activeVehicleTrackIdRef.current;
@@ -1836,6 +1904,12 @@ export default function MapLibreMap() {
             }
             return;
           }
+
+          vtlog('api:listVehicleTracks:empty_reset', {
+            missionId: missionIdAtCall,
+            hasLocalTrack,
+            hasLocalGeo,
+          });
 
           setVehicleTracks([]);
           setVehicleTracksTotal(0);
@@ -1862,6 +1936,15 @@ export default function MapLibreMap() {
           const active = tracks.find((t) => t.status === 'active');
           nextActiveId = active?.id ?? (tracks[0]?.id ?? null);
         }
+
+        vtlog('api:listVehicleTracks:choose_active', {
+          missionId: missionIdAtCall,
+          currentId: currentId ?? null,
+          stillExists,
+          nextActiveId: nextActiveId ?? null,
+          first: tracks[0]?.id ?? null,
+          activeFromList: tracks.find((t) => t.status === 'active')?.id ?? null,
+        });
 
         if (!nextActiveId) {
           // Aucune piste active trouvée : on s'assure de bien
@@ -1903,6 +1986,10 @@ export default function MapLibreMap() {
           }
         }
       } catch {
+        vtlog('api:listVehicleTracks:error', {
+          missionId: selectedMissionId ?? null,
+          query: vehicleTracksQuery,
+        });
         if (cancelled) return;
       }
     })();
@@ -5982,6 +6069,23 @@ export default function MapLibreMap() {
       const track = msg?.track as ApiVehicleTrack | undefined;
       if (!track || !track.id) return;
 
+      vtlog('socket:created:recv', {
+        missionId: selectedMissionId,
+        actorUserId: typeof msg?.actorUserId === 'string' ? msg.actorUserId : null,
+        trackId: track.id,
+        status: (track as any)?.status ?? null,
+        createdBy: (track as any)?.createdBy ?? null,
+        hasCacheGeo: !!track.cache?.payloadGeojson,
+        provider: (track.cache?.meta as any)?.provider ?? null,
+        before: {
+          activeVehicleTrackId: activeVehicleTrackId ?? null,
+          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+          hasRemoteActiveVehicleTrack,
+          showActiveVehicleTrack,
+        },
+      });
+
       try {
         const provider = (track.cache?.meta as any)?.provider as string | undefined;
         const metaBudget = (track.cache?.meta as any)?.budgetSec as number | undefined;
@@ -6012,6 +6116,13 @@ export default function MapLibreMap() {
       // Elle peut rester masquée visuellement tant que Paw n'est pas activé.
       setActiveVehicleTrackId(track.id);
       activeVehicleTrackIdRef.current = track.id;
+
+      vtlog('socket:created:applied', {
+        trackId: track.id,
+        afterRef: {
+          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+        },
+      });
 
       // Pour tous les utilisateurs (peu importe le rôle), une piste qui arrive
       // doit rester masquée tant qu'ils n'ont pas cliqué sur Paw.
@@ -6064,6 +6175,19 @@ export default function MapLibreMap() {
     function onVehicleTrackUpdated(msg: any) {
       if (!selectedMissionId || msg?.missionId !== selectedMissionId) return;
 
+      vtlog('socket:updated:recv', {
+        missionId: selectedMissionId,
+        hasFullTrack: !!msg?.track,
+        trackId: (msg?.track?.id ?? msg?.trackId) ?? null,
+        status: msg?.track?.status ?? msg?.status ?? null,
+        before: {
+          activeVehicleTrackId: activeVehicleTrackId ?? null,
+          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+          hasRemoteActiveVehicleTrack,
+        },
+      });
+
       const full = msg?.track as ApiVehicleTrack | undefined;
       if (full && full.id) {
         setVehicleTracks((prev) => upsertVehicleTrackKeepOrder(prev, full));
@@ -6099,6 +6223,11 @@ export default function MapLibreMap() {
           });
 
           setLastKnownVehicleTrackId((cur) => (cur === full.id ? null : cur));
+          vtlog('socket:updated:full_inactive', {
+            trackId: full.id,
+            status: full.status,
+            activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+          });
           return;
         }
 
@@ -6134,12 +6263,24 @@ export default function MapLibreMap() {
           if (!activeVehicleTrackIdRef.current) {
             activeVehicleTrackIdRef.current = trackId;
           }
+          vtlog('socket:updated:delta_active', {
+            trackId,
+            status: st,
+            afterRef: {
+              activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+            },
+          });
         } else {
           setLastKnownVehicleTrackId((cur) => (cur === trackId ? null : cur));
           setHasRemoteActiveVehicleTrack((prevFlag) => {
             if (!prevFlag) return false;
             if (activeVehicleTrackIdRef.current === trackId) return false;
             return prevFlag;
+          });
+          vtlog('socket:updated:delta_inactive', {
+            trackId,
+            status: st,
+            activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
           });
         }
       }
@@ -6202,6 +6343,17 @@ export default function MapLibreMap() {
       const trackId = typeof msg?.trackId === 'string' ? msg.trackId : undefined;
       if (!trackId) return;
 
+      vtlog('socket:deleted:recv', {
+        missionId: selectedMissionId,
+        trackId,
+        before: {
+          activeVehicleTrackId: activeVehicleTrackId ?? null,
+          activeVehicleTrackIdRef: activeVehicleTrackIdRef.current ?? null,
+          lastKnownVehicleTrackId: lastKnownVehicleTrackId ?? null,
+          hasRemoteActiveVehicleTrack,
+        },
+      });
+
       // Supprime la piste côté liste
       setVehicleTracks((prev) => prev.filter((t) => t.id !== trackId));
 
@@ -6216,6 +6368,11 @@ export default function MapLibreMap() {
       setActiveVehicleTrackId((currentId) => (currentId === trackId ? null : currentId));
       setHasRemoteActiveVehicleTrack(false);
       setLastKnownVehicleTrackId((cur) => (cur === trackId ? null : cur));
+
+      vtlog('socket:deleted:applied', {
+        missionId: selectedMissionId,
+        trackId,
+      });
 
       // Ferme le mini popup Paw (barre réduite) si affiché.
       setShowActiveVehicleTrack(false);
