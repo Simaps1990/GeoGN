@@ -40,7 +40,6 @@ type PoiPopupProps = {
   onDelete: () => void;
   creatorLabel: string;
   canEditMap: boolean;
-  canStartTrack: boolean;
   hasActiveTestVehicleTrack: boolean;
   actionBusy: boolean;
 };
@@ -109,7 +108,6 @@ export const PoiPopup = memo(function PoiPopup({
   onDelete,
   creatorLabel,
   canEditMap,
-  canStartTrack,
   hasActiveTestVehicleTrack,
   actionBusy,
 }: PoiPopupProps) {
@@ -148,18 +146,16 @@ export const PoiPopup = memo(function PoiPopup({
             >
               <Navigation2 size={16} />
             </button>
-            {canStartTrack ? (
-              <button
-                type="button"
-                onClick={onStartTrack}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 ${
-                  hasActiveTestVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
-                }`}
-                title="Démarrer une piste depuis ce POI"
-              >
-                <PawPrint size={16} />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={onStartTrack}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 ${
+                hasActiveTestVehicleTrack ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
+              }`}
+              title="Démarrer une piste depuis ce POI"
+            >
+              <PawPrint size={16} />
+            </button>
           </div>
           {canEditMap ? (
             <div className="flex items-center gap-2">

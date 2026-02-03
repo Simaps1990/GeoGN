@@ -65,13 +65,10 @@ type MapRightToolbarProps = {
   setPersonPanelCollapsed: (v: boolean) => void;
   setPersonPanelOpen: (v: boolean) => void;
   setShowActiveVehicleTrack: (v: boolean) => void;
-  showActiveVehicleTrack: boolean;
   mapInstance: MapLibreMapInstance | null;
   mapReady: boolean;
   applyHeatmapVisibility: (map: MapLibreMapInstance, show: boolean) => void;
   showEstimationHeatmap: boolean;
-
-  hasActiveTestVehicleTrack: boolean;
 
   missionTraceRetentionSeconds: number | null;
   setTimerSecondsInput: (v: string) => void;
@@ -124,12 +121,10 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   setPersonPanelCollapsed,
   setPersonPanelOpen,
   setShowActiveVehicleTrack,
-  showActiveVehicleTrack,
   mapInstance,
   mapReady,
   applyHeatmapVisibility,
   showEstimationHeatmap,
-  hasActiveTestVehicleTrack,
   missionTraceRetentionSeconds,
   setTimerSecondsInput,
   setTimerError,
@@ -170,11 +165,10 @@ export const MapRightToolbar = memo(function MapRightToolbar({
         <Layers className="mx-auto text-gray-600" size={20} />
       </button>
 
-      {role !== 'viewer' ? (
+      {canEditMap ? (
         <button
           type="button"
           onClick={() => {
-            if (!canEditMap) return;
             if (activeTool === 'poi') {
               cancelDraft();
               return;
@@ -286,7 +280,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
 
       <div
         className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-          settingsMenuOpen ? `${isAdmin ? 'h-[328px]' : 'h-[272px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
+          settingsMenuOpen ? `${isAdmin ? 'h-[274px]' : 'h-[216px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
         }`}
       >
         <div className="flex flex-col gap-2">
@@ -372,11 +366,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   setDismissedPersonCaseId(selectedMissionId, personCase.id);
                 }
 
-                if (!isAdmin && !hasActiveTestVehicleTrack) {
-                  setNoProjectionToast(true);
-                  return;
-                }
-
                 if (!personCase) {
                   if (!isAdmin) {
                     setNoProjectionToast(true);
@@ -410,20 +399,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   return;
                 }
 
-                if (!isAdmin && hasActiveTestVehicleTrack) {
-                  const next = !showActiveVehicleTrack;
-                  setShowActiveVehicleTrack(next);
-                  if (next) {
-                    setPersonEdit(false);
-                    setPersonPanelCollapsed(true);
-                    setPersonPanelOpen(true);
-                  } else {
-                    setPersonPanelOpen(false);
-                    setPersonPanelCollapsed(false);
-                  }
-                  return;
-                }
-
                 setPersonEdit(false);
                 setPersonPanelCollapsed(true);
                 setPersonPanelOpen(true);
@@ -434,17 +409,10 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               }}
               className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
                 personPanelOpen ? 'ring-blue-500/25' : 'ring-black/10'
-              } ${!isAdmin && !hasActiveTestVehicleTrack ? 'opacity-60' : ''}`}
+              } ${!isAdmin && !personCase ? 'opacity-60' : ''}`}
               title="Activité"
             >
-              <PawPrint
-                className={
-                  (isAdmin && personPanelOpen && personCase) || (!isAdmin && hasActiveTestVehicleTrack && showActiveVehicleTrack)
-                    ? 'text-blue-600'
-                    : 'text-gray-600'
-                }
-                size={20}
-              />
+              <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
               {projectionNotification && !(userId && personCase?.createdBy === userId) ? (
                 <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
               ) : null}
