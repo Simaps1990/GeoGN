@@ -3239,8 +3239,9 @@ export default function MapLibreMap() {
     safeMoveToTop('pois');
     safeMoveToTop('pois-labels');
 
-    safeMoveToTop('trace-line');
+    // Others traces should remain underneath my own trace.
     safeMoveToTop('others-traces-line');
+    safeMoveToTop('trace-line');
     safeMoveToTop('others-points');
     safeMoveToTop('others-points-inactive-dot');
     safeMoveToTop('others-labels');
