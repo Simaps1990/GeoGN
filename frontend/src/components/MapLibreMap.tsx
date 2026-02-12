@@ -3364,14 +3364,14 @@ export default function MapLibreMap() {
           paint: {
             'line-color': '#00ff00',
             'line-width': 8,
-            'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
+            'line-opacity': 0.85,
           },
           layout: {
             'line-join': 'round',
-            'line-cap': 'butt',
+            'line-cap': 'round',
           },
         },
-        'me-dot'
+        undefined,
       );
     }
 
@@ -3475,7 +3475,7 @@ export default function MapLibreMap() {
           'line-color': ['coalesce', ['get', 'color'], '#2563eb'],
           'line-width': 8,
           // Use per-feature opacity to support fading gradient on other users' traces as well.
-          'line-opacity': ['coalesce', ['get', 'opacity'], 0.9],
+          'line-opacity': 0.85,
         },
       });
     }
@@ -5751,20 +5751,41 @@ export default function MapLibreMap() {
     };
 
     const applyRemotePosition = (msg: any) => {
-      if (!msg?.userId || typeof msg.lng !== 'number' || typeof msg.lat !== 'number') return;
+      if (!msg?.userId) return;
+
+      const lng =
+        typeof msg.lng === 'number'
+          ? msg.lng
+          : typeof msg.lng === 'string'
+            ? Number.parseFloat(msg.lng)
+            : Number.NaN;
+      const lat =
+        typeof msg.lat === 'number'
+          ? msg.lat
+          : typeof msg.lat === 'string'
+            ? Number.parseFloat(msg.lat)
+            : Number.NaN;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
 
       // If it's me, also feed my local trace from socket events (update/bulk/snapshot)
       // so my rendering behaves the same way as other users.
       if (user?.id && msg.userId === user.id) {
-        const now = normalizeRemoteTime(msg.t, Date.now());
-        setLastPos({ lng: msg.lng, lat: msg.lat });
+        const now = normalizeRemoteTime(
+          typeof msg.t === 'number'
+            ? msg.t
+            : typeof msg.t === 'string'
+              ? Number.parseFloat(msg.t)
+              : msg.t,
+          Date.now(),
+        );
+        setLastPos({ lng, lat });
         setTracePoints((prev) => {
           const last = prev.length ? prev[prev.length - 1] : null;
-          if (last && last.lng === msg.lng && last.lat === msg.lat && Math.abs(last.t - now) < 500) {
+          if (last && last.lng === lng && last.lat === lat && Math.abs(last.t - now) < 500) {
             return prev;
           }
           const cutoff = Date.now() - traceRetentionMs;
-          const next = [...prev, { lng: msg.lng, lat: msg.lat, t: now }]
+          const next = [...prev, { lng, lat, t: now }]
             .filter((p) => p.t >= cutoff)
             .slice(-maxTracePoints);
           return next;
@@ -5777,11 +5798,14 @@ export default function MapLibreMap() {
       if (memberColor) {
         otherColorsRef.current[msg.userId] = memberColor;
       }
-      const now = normalizeRemoteTime(msg.t, Date.now());
+      const now = normalizeRemoteTime(
+        typeof msg.t === 'number' ? msg.t : typeof msg.t === 'string' ? Number.parseFloat(msg.t) : msg.t,
+        Date.now(),
+      );
 
       const traces = otherTracesRef.current[msg.userId] ?? [];
       const cutoff = Date.now() - traceRetentionMs;
-      const nextTraces = [...traces, { lng: msg.lng, lat: msg.lat, t: now }]
+      const nextTraces = [...traces, { lng, lat, t: now }]
         .filter((p) => p.t >= cutoff)
         .slice(-maxTracePoints);
       otherTracesRef.current[msg.userId] = nextTraces;
@@ -5789,7 +5813,7 @@ export default function MapLibreMap() {
 
       setOtherPositions((prev) => ({
         ...prev,
-        [msg.userId]: { lng: msg.lng, lat: msg.lat, t: now },
+        [msg.userId]: { lng, lat, t: now },
       }));
     };
 
@@ -7281,7 +7305,6 @@ export default function MapLibreMap() {
     const inactiveColor = '#9ca3af';
     const features: any[] = [];
     const segmentGapMs = 30_000;
-    const opacities = [1, 0.8, 0.6, 0.4, 0.2];
 
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       // Ne jamais rendre la trace "others" pour l'utilisateur courant.
@@ -7297,14 +7320,12 @@ export default function MapLibreMap() {
       const n = pts.length;
       let segment: { lng: number; lat: number; t: number }[] = [];
       let prevT: number | null = null;
-      let prevBucket: number | null = null;
-      let prevPoint: { lng: number; lat: number; t: number } | null = null;
 
-      const flush = (bucket: number | null) => {
-        if (segment.length >= 2 && bucket !== null) {
+      const flush = () => {
+        if (segment.length >= 2) {
           features.push({
             type: 'Feature',
-            properties: { userId, color, inactive: isInactive ? 1 : 0, opacity: opacities[bucket] ?? 0.9 },
+            properties: { userId, color, inactive: isInactive ? 1 : 0 },
             geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
           });
         }
@@ -7315,58 +7336,19 @@ export default function MapLibreMap() {
         const p = pts[i];
         if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
         if (typeof p.t !== 'number' || !Number.isFinite(p.t)) continue;
-
-        const bucket = n > 0 ? Math.min(4, Math.max(0, Math.floor(((n - 1 - i) * 5) / n))) : 0;
         const isGap = prevT !== null && p.t - prevT > segmentGapMs;
-        const bucketChanged = prevBucket !== null && bucket !== prevBucket;
 
-        if ((isGap || bucketChanged) && segment.length) {
-          flush(prevBucket);
-
-      // Si après filtrage on n'a au final qu'un seul point pour cet utilisateur,
-      // créer un tout petit segment 2-points pour que la pointe de la trace
-      // arrive exactement sous le marker (comme pour la trace "me").
-      if (features.length === 0 && n === 1) {
-        const only = pts[0];
-        if (
-          only &&
-          typeof only.lng === 'number' &&
-          typeof only.lat === 'number' &&
-          typeof only.t === 'number' &&
-          Number.isFinite(only.t)
-        ) {
-          const lng = only.lng;
-          const lat = only.lat;
-          features.push({
-            type: 'Feature',
-            properties: { userId, color, inactive: isInactive ? 1 : 0, opacity: opacities[0] ?? 0.9 },
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [lng, lat],
-                [lng + 1e-9, lat + 1e-9],
-              ],
-            },
-          });
-        }
-      }
-
-          // Si on change de bucket (mais pas de trou), dupliquer le point précédent pour éviter un trou visuel.
-          if (!isGap && prevPoint) {
-            segment.push(prevPoint, p);
-          } else {
-            segment.push(p);
-          }
+        if (isGap && segment.length) {
+          flush();
+          segment.push(p);
         } else {
           segment.push(p);
         }
 
         prevT = p.t;
-        prevBucket = bucket;
-        prevPoint = p;
       }
 
-      flush(prevBucket);
+      flush();
     }
 
     src.setData({ type: 'FeatureCollection', features } as any);
@@ -7408,21 +7390,18 @@ export default function MapLibreMap() {
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
 
       const segmentGapMs = 30_000;
-      const opacities = [1, 0.8, 0.6, 0.4, 0.2];
       const n = filtered.length;
 
       const selfFeatures: any[] = [];
       let segment: { lng: number; lat: number; t: number }[] = [];
       let prevT: number | null = null;
-      let prevBucket: number | null = null;
-      let prevPoint: { lng: number; lat: number; t: number } | null = null;
 
-      const flush = (bucket: number | null) => {
-        if (segment.length >= 2 && bucket !== null) {
+      const flush = () => {
+        if (segment.length >= 2) {
           selfFeatures.push({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: segment.map((x) => [x.lng, x.lat]) },
-            properties: { opacity: opacities[bucket] ?? 0.9 },
+            properties: {},
           });
         }
         segment = [];
@@ -7430,31 +7409,19 @@ export default function MapLibreMap() {
 
       for (let i = 0; i < n; i++) {
         const p = filtered[i];
-        const bucket = n > 0 ? Math.min(4, Math.max(0, Math.floor(((n - 1 - i) * 5) / n))) : 0;
-
         const isGap = prevT !== null && p.t - prevT > segmentGapMs;
-        const bucketChanged = prevBucket !== null && bucket !== prevBucket;
 
-        if ((isGap || bucketChanged) && segment.length) {
-          flush(prevBucket);
-
-          // Si on change de bucket (mais pas de trou), dupliquer le point précédent
-          // pour éviter un micro-trou visuel entre les 2 opacités.
-          if (!isGap && prevPoint) {
-            segment.push(prevPoint, p);
-          } else {
-            segment.push(p);
-          }
+        if (isGap && segment.length) {
+          flush();
+          segment.push(p);
         } else {
           segment.push(p);
         }
 
         prevT = p.t;
-        prevBucket = bucket;
-        prevPoint = p;
       }
 
-      flush(prevBucket);
+      flush();
 
       // If we only have a single point in the filtered trace, emit a tiny
       // 2-point LineString to keep the trace visible instead of clearing it.
@@ -7471,7 +7438,7 @@ export default function MapLibreMap() {
               [lng + 1e-9, lat + 1e-9],
             ],
           },
-          properties: { opacity: opacities[0] ?? 0.9 },
+          properties: {},
         });
       }
 
