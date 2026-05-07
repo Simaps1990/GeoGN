@@ -20,6 +20,7 @@ import {
   type ApiMissionMember,
 } from '../lib/api';
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { getSocket } from '../lib/socket';
 
 export default function MissionContactsPage() {
   const { missionId } = useParams();
@@ -259,6 +260,61 @@ export default function MissionContactsPage() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionId]);
+
+  // Real-time socket events
+  useEffect(() => {
+    if (!missionId) return;
+
+    const socket = getSocket();
+
+    const onJoinRequestCreated = (msg: any) => {
+      if (msg.missionId === missionId && msg.request?.requestedBy) {
+        setJoinRequests((prev) => {
+          // Dedup by requestedBy.id to avoid duplicates
+          const existing = prev.find((r) => r.requestedBy?.id === msg.request.requestedBy.id);
+          if (existing) return prev;
+          
+          // Add temporary local entry
+          const tempRequest: ApiMissionJoinRequest = {
+            id: `local-${msg.request.requestedBy.id}-${Date.now()}`,
+            status: 'pending',
+            createdAt: msg.request.createdAt,
+            requestedBy: msg.request.requestedBy,
+          };
+          return [tempRequest, ...prev];
+        });
+      }
+    };
+
+    const onJoinRequestResolved = (msg: any) => {
+      if (msg.missionId === missionId) {
+        // Remove the request by requesterId
+        setJoinRequests((prev) => prev.filter((r) => r.requestedBy?.id !== msg.requesterId));
+        
+        // If accepted, refresh members
+        if (msg.status === 'accepted') {
+          listMissionMembers(missionId).then(setMembers).catch(() => {});
+        }
+      }
+    };
+
+    const onMemberUpdated = (msg: any) => {
+      if (msg.missionId === missionId) {
+        // Refresh members when they're updated
+        listMissionMembers(missionId).then(setMembers).catch(() => {});
+      }
+    };
+
+    socket.on('join-request:created', onJoinRequestCreated);
+    socket.on('join-request:resolved', onJoinRequestResolved);
+    socket.on('member:updated', onMemberUpdated);
+
+    return () => {
+      socket.off('join-request:created', onJoinRequestCreated);
+      socket.off('join-request:resolved', onJoinRequestResolved);
+      socket.off('member:updated', onMemberUpdated);
+    };
   }, [missionId]);
 
   const shareText = useMemo(() => {

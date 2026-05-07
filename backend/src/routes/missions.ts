@@ -3,9 +3,16 @@ import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionModel } from '../models/mission.js';
 import { MissionMemberModel } from '../models/missionMember.js';
-import { TraceModel } from '../models/trace.js';
+import { MissionInviteModel } from '../models/missionInvite.js';
+import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
+import { ZoneModel } from '../models/zone.js';
 import { PositionModel } from '../models/position.js';
+import { TraceModel } from '../models/trace.js';
+import { PoiModel } from '../models/poi.js';
+import { PersonCaseModel } from '../models/personCase.js';
 import { PositionCurrentModel } from '../models/positionCurrent.js';
+import { VehicleTrackModel } from '../models/vehicleTrack.js';
+import { HuntIsochroneModel } from '../models/huntIsochrone.js';
 import { UserModel } from '../models/user.js';
 
 type CreateMissionBody = {
@@ -308,13 +315,48 @@ export async function missionsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'INVALID_ID' });
     }
 
-    const membership = await MissionMemberModel.findOne({ missionId: id, userId: req.userId, removedAt: null }).lean();
+    const membership = await MissionMemberModel.findOne({
+      missionId: id,
+      userId: req.userId,
+      removedAt: null,
+    }).lean();
     if (!membership || membership.role !== 'admin') {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
 
-    await MissionMemberModel.deleteMany({ missionId: id });
-    await MissionModel.deleteOne({ _id: id });
+    // Notifier les clients connectés AVANT la suppression effective,
+    // pour qu'ils puissent quitter proprement la mission côté UI.
+    try {
+      app.io?.to(`mission:${id}`).emit('mission:deleted', { missionId: id });
+    } catch {
+      // emit non bloquant
+    }
+
+    const missionObjectId = new mongoose.Types.ObjectId(id);
+
+    // Cascade en parallèle. On loggue les échecs partiels mais on ne fail pas
+    // la requête : tout ce qui peut être supprimé doit l'être.
+    const results = await Promise.allSettled([
+      MissionMemberModel.deleteMany({ missionId: missionObjectId }),
+      MissionInviteModel.deleteMany({ missionId: missionObjectId }),
+      MissionJoinRequestModel.deleteMany({ missionId: missionObjectId }),
+      ZoneModel.deleteMany({ missionId: missionObjectId }),
+      PositionModel.deleteMany({ missionId: missionObjectId }),
+      PositionCurrentModel.deleteMany({ missionId: missionObjectId }),
+      TraceModel.deleteMany({ missionId: missionObjectId }),
+      PoiModel.deleteMany({ missionId: missionObjectId }),
+      PersonCaseModel.deleteMany({ missionId: missionObjectId }),
+      VehicleTrackModel.deleteMany({ missionId: missionObjectId }),
+      HuntIsochroneModel.deleteMany({ missionId: missionObjectId }),
+    ]);
+
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        req.log.warn({ err: r.reason, missionId: id }, 'Mission cascade delete: partial failure');
+      }
+    }
+
+    await MissionModel.deleteOne({ _id: missionObjectId });
 
     return reply.send({ ok: true });
   });

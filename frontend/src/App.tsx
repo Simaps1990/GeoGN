@@ -1,17 +1,20 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
 import AppShell from './pages/AppShell';
-import MissionsPage from './pages/MissionsPage';
-import ContactsPage from './pages/ContactsPage';
-import ProfilePage from './pages/ProfilePage';
-import CurrentMissionPage from './pages/CurrentMissionPage';
-import MissionLayout from './pages/MissionLayout';
-import MissionMapPage from './pages/MissionMapPage';
-import MissionZonesPage from './pages/MissionZonesPage';
-import MissionPoisPage from './pages/MissionPoisPage';
-import MissionContactsPage from './pages/MissionContactsPage';
 import { MissionProvider, useMission } from './contexts/MissionContext';
+
+// Lazy-loaded pages
+const MissionsPage = lazy(() => import('./pages/MissionsPage'));
+const ContactsPage = lazy(() => import('./pages/ContactsPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const CurrentMissionPage = lazy(() => import('./pages/CurrentMissionPage'));
+const MissionLayout = lazy(() => import('./pages/MissionLayout'));
+const MissionMapPage = lazy(() => import('./pages/MissionMapPage'));
+const MissionZonesPage = lazy(() => import('./pages/MissionZonesPage'));
+const MissionPoisPage = lazy(() => import('./pages/MissionPoisPage'));
+const MissionContactsPage = lazy(() => import('./pages/MissionContactsPage'));
 
 function MapGate() {
   const { selectedMissionId } = useMission();
@@ -41,27 +44,29 @@ function AppContent() {
   }
 
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<IndexRedirect />} />
-        <Route path="/map" element={<MapGate />} />
-        <Route path="/home" element={<CurrentMissionPage />} />
-        <Route path="/missions" element={<MissionsPage />} />
-        <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="*" element={<Navigate to="/map" replace />} />
-      </Route>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<IndexRedirect />} />
+          <Route path="/map" element={<MapGate />} />
+          <Route path="/home" element={<CurrentMissionPage />} />
+          <Route path="/missions" element={<MissionsPage />} />
+          <Route path="/contacts" element={<ContactsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="*" element={<Navigate to="/map" replace />} />
+        </Route>
 
-      <Route path="/m/:missionId/*" element={<Navigate to="/mission/:missionId" replace />} />
+        <Route path="/m/:missionId/*" element={<Navigate to="/mission/:missionId" replace />} />
 
-      <Route path="/mission/:missionId/*" element={<MissionLayout />}>
-        <Route index element={<Navigate to="map" replace />} />
-        <Route path="map" element={<MissionMapPage />} />
-        <Route path="zones" element={<MissionZonesPage />} />
-        <Route path="pois" element={<MissionPoisPage />} />
-        <Route path="contacts" element={<MissionContactsPage />} />
-      </Route>
-    </Routes>
+        <Route path="/mission/:missionId/*" element={<MissionLayout />}>
+          <Route index element={<Navigate to="map" replace />} />
+          <Route path="map" element={<MissionMapPage />} />
+          <Route path="zones" element={<MissionZonesPage />} />
+          <Route path="pois" element={<MissionPoisPage />} />
+          <Route path="contacts" element={<MissionContactsPage />} />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }
 

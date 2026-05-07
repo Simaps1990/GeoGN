@@ -13,6 +13,11 @@ type AuthedSocket = {
     userId: string;
     missionId?: string;
     requestedRetentionSeconds?: number;
+    cached?: {
+      memberColor: string;
+      retentionSeconds: number;
+      checkedAt: number;
+    };
   };
 };
 
@@ -130,6 +135,11 @@ export function setupSocket(app: FastifyInstance) {
   io.on('connection', (socket) => {
     const userId = (socket as any as AuthedSocket).data.userId;
 
+    // Join user-specific room for direct notifications
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      socket.join(`user:${userId}`);
+    }
+
     socket.on(
       'mission:join',
       async (payload: { missionId: string; retentionSeconds?: number }, ack?: (res: any) => void) => {
@@ -164,6 +174,16 @@ export function setupSocket(app: FastifyInstance) {
           (socket as any as AuthedSocket).data.missionId = missionId;
           (socket as any as AuthedSocket).data.requestedRetentionSeconds = requested;
           socket.join(`mission:${missionId}`);
+
+          // Populate cache with member color and mission retention seconds
+          const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null }).select({ color: 1 }).lean();
+          const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+          
+          (socket as any as AuthedSocket).data.cached = {
+            memberColor: (member?.color && String(member.color).trim()) || '#3b82f6',
+            retentionSeconds: mission?.traceRetentionSeconds ?? 3600,
+            checkedAt: Date.now(),
+          };
 
           ack?.({ ok: true });
           socket.emit('mission:joined', { missionId });
@@ -244,10 +264,46 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        const ok = await requireMissionMember(userId, missionId);
-        if (!ok) {
-          ack?.({ ok: false, error: 'FORBIDDEN' });
+        // Validate latitude and longitude bounds
+        if (!Number.isFinite(payload.lng) || !Number.isFinite(payload.lat) ||
+            payload.lat < -90 || payload.lat > 90 ||
+            payload.lng < -180 || payload.lng > 180) {
+          ack?.({ ok: false, error: 'INVALID_POSITION' });
           return;
+        }
+
+        // Use cache if available and recent (< 30 seconds)
+        const cached = (socket as any as AuthedSocket).data.cached;
+        let memberColor: string;
+        let retentionSeconds: number;
+
+        if (cached && Date.now() - cached.checkedAt < 30_000) {
+          memberColor = cached.memberColor;
+          retentionSeconds = cached.retentionSeconds;
+        } else {
+          // Cache expired or missing, fetch from DB
+          const ok = await requireMissionMember(userId, missionId);
+          if (!ok) {
+            // Clear cache and reject
+            (socket as any as AuthedSocket).data.cached = undefined;
+            ack?.({ ok: false, error: 'FORBIDDEN' });
+            return;
+          }
+
+          const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null })
+            .select({ color: 1 })
+            .lean();
+          memberColor = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
+
+          const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+          retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+
+          // Update cache
+          (socket as any as AuthedSocket).data.cached = {
+            memberColor,
+            retentionSeconds,
+            checkedAt: Date.now(),
+          };
         }
 
         const nowMs = Date.now();
@@ -268,8 +324,6 @@ export function setupSocket(app: FastifyInstance) {
           { upsert: true }
         );
 
-        const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
-        const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
         const expiresAt = new Date(t.getTime() + Math.max(0, retentionSeconds) * 1000);
 
         const key = `${missionId}:${userId}`;
@@ -277,15 +331,10 @@ export function setupSocket(app: FastifyInstance) {
         const diff = tMs - lastTs;
 
         if (diff >= TRACE_THROTTLE_MS) {
-          const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null })
-            .select({ color: 1 })
-            .lean();
-          const color = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
-
           await TraceModel.create({
             missionId: new mongoose.Types.ObjectId(missionId),
             userId: new mongoose.Types.ObjectId(userId),
-            color,
+            color: memberColor,
             loc: { type: 'Point', coordinates: [payload.lng, payload.lat] },
             createdAt: t,
             expiresAt,
@@ -320,10 +369,38 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        const ok = await requireMissionMember(userId, missionId);
-        if (!ok) {
-          ack?.({ ok: false, error: 'FORBIDDEN' });
-          return;
+        // Use cache if available and recent (< 30 seconds)
+        const cached = (socket as any as AuthedSocket).data.cached;
+        let memberColor: string;
+        let retentionSeconds: number;
+
+        if (cached && Date.now() - cached.checkedAt < 30_000) {
+          memberColor = cached.memberColor;
+          retentionSeconds = cached.retentionSeconds;
+        } else {
+          // Cache expired or missing, fetch from DB
+          const ok = await requireMissionMember(userId, missionId);
+          if (!ok) {
+            // Clear cache and reject
+            (socket as any as AuthedSocket).data.cached = undefined;
+            ack?.({ ok: false, error: 'FORBIDDEN' });
+            return;
+          }
+
+          const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null })
+            .select({ color: 1 })
+            .lean();
+          memberColor = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
+
+          const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
+          retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
+
+          // Update cache
+          (socket as any as AuthedSocket).data.cached = {
+            memberColor,
+            retentionSeconds,
+            checkedAt: Date.now(),
+          };
         }
 
         const points = Array.isArray(payload?.points) ? payload.points : [];
@@ -337,15 +414,22 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        const mission = await MissionModel.findById(missionId).select({ traceRetentionSeconds: 1 }).lean();
-        const retentionSeconds = mission?.traceRetentionSeconds ?? 3600;
         const nowMs = Date.now();
         const cutoffMs = nowMs - Math.max(0, retentionSeconds) * 1000;
 
-        const member = await MissionMemberModel.findOne({ missionId, userId, removedAt: null })
-          .select({ color: 1 })
-          .lean();
-        const color = (member?.color && typeof member.color === 'string' ? member.color.trim() : '') || '#3b82f6';
+        // Validate all points
+        for (const p of points) {
+          if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') {
+            ack?.({ ok: false, error: 'INVALID_POSITION' });
+            return;
+          }
+          if (!Number.isFinite(p.lng) || !Number.isFinite(p.lat) ||
+              p.lat < -90 || p.lat > 90 ||
+              p.lng < -180 || p.lng > 180) {
+            ack?.({ ok: false, error: 'INVALID_POSITION' });
+            return;
+          }
+        }
 
         const pointsSorted = [...points].sort((a, b) => {
           const ta = typeof a.t === 'number' && Number.isFinite(a.t) ? a.t : nowMs;
@@ -360,29 +444,28 @@ export function setupSocket(app: FastifyInstance) {
         const lastGlobalTs = lastTraceTsByUserMission.get(key) ?? 0;
         let lastTsInBulk = lastGlobalTs;
 
+        // Pas de throttle pour les bulks : ces points viennent typiquement d'une période
+        // offline et doivent être restitués fidèlement (1Hz au lieu de 0.5Hz).
+        // Le hardcap 200 points/bulk reste en vigueur (cf. ligne ~412).
         for (const p of pointsSorted) {
           if (!p || typeof p.lng !== 'number' || typeof p.lat !== 'number') continue;
           const tMs = typeof p.t === 'number' && Number.isFinite(p.t) ? p.t : nowMs;
           if (tMs < cutoffMs) continue;
           if (tMs > nowMs + 60_000) continue;
 
-          let shouldThrottleWithGlobal = tMs >= lastGlobalTs;
+          const t = new Date(tMs);
+          const expiresAt = new Date(tMs + Math.max(0, retentionSeconds) * 1000);
 
-          const baseTs = shouldThrottleWithGlobal ? lastGlobalTs : lastTsInBulk;
-          const diff = tMs - baseTs;
-          if (diff >= TRACE_THROTTLE_MS) {
-            const t = new Date(tMs);
-            const expiresAt = new Date(tMs + Math.max(0, retentionSeconds) * 1000);
+          traceDocs.push({
+            missionId: new mongoose.Types.ObjectId(missionId),
+            userId: new mongoose.Types.ObjectId(userId),
+            color: memberColor,
+            loc: { type: 'Point', coordinates: [p.lng, p.lat] },
+            createdAt: t,
+            expiresAt,
+          });
 
-            traceDocs.push({
-              missionId: new mongoose.Types.ObjectId(missionId),
-              userId: new mongoose.Types.ObjectId(userId),
-              color,
-              loc: { type: 'Point', coordinates: [p.lng, p.lat] },
-              createdAt: t,
-              expiresAt,
-            });
-
+          if (tMs > lastTsInBulk) {
             lastTsInBulk = tMs;
           }
 

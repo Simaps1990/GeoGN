@@ -1,8 +1,9 @@
-import { Outlet, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useRef } from 'react';
+import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useMission } from '../contexts/MissionContext';
 import { useAuth } from '../contexts/AuthContext';
 import MissionTabs from '../components/MissionTabs';
+import { useMissionGeolocation } from '../hooks/useMissionGeolocation';
 import { getSocket } from '../lib/socket';
 
 export default function MissionLayout() {
@@ -10,20 +11,8 @@ export default function MissionLayout() {
   const { selectedMissionId, selectMission } = useMission();
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isMapRoute = !!missionId && location.pathname.endsWith(`/mission/${missionId}/map`);
-  const watchIdRef = useRef<number | null>(null);
-  const pendingBulkRef = useRef<{ lng: number; lat: number; t: number; speed?: number; heading?: number; accuracy?: number }[]>([]);
-
-  const ts = () => {
-    try {
-      const d = new Date();
-      const p2 = (n: number) => String(n).padStart(2, '0');
-      const p3 = (n: number) => String(n).padStart(3, '0');
-      return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
-    } catch {
-      return '';
-    }
-  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -36,173 +25,39 @@ export default function MissionLayout() {
     }
   }, [missionId, selectedMissionId, selectMission]);
 
-  // Keep sending position updates while navigating mission menus.
+  // Nouveau useEffect pour écouter mission:deleted
   useEffect(() => {
     if (!missionId) return;
-    if (!user?.id) return;
-
     const socket = getSocket();
-    // Always (re)join the mission room so we continue receiving updates / snapshots.
-    const ensureJoined = () => {
-      socket.emit('mission:join', { missionId });
-    };
-    ensureJoined();
 
-    const pendingKey = `geogn.pendingPos.${missionId}.${user.id}`;
-    try {
-      const raw = localStorage.getItem(pendingKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          pendingBulkRef.current = parsed
-            .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
-            .slice(-5000);
-        }
+    const onMissionDeleted = (msg: any) => {
+      if (!msg || msg.missionId !== missionId) return;
+      // La mission active vient d'être supprimée par un autre admin.
+      // On désélectionne et on redirige vers la liste des missions.
+      if (selectedMissionId === missionId) {
+        selectMission('');
       }
-    } catch {
-      // ignore
-    }
-
-    const persistPending = () => {
-      try {
-        localStorage.setItem(pendingKey, JSON.stringify(pendingBulkRef.current.slice(-5000)));
-      } catch {
-        // ignore
-      }
+      navigate('/');
     };
 
-    const flushPending = () => {
-      const pts = pendingBulkRef.current;
-      if (!pts || pts.length === 0) return;
-      if (!socket.connected) return;
-      socket.emit('position:bulk', { points: pts }, (res: any) => {
-        if (res && res.ok) {
-          pendingBulkRef.current = [];
-          persistPending();
-        }
-      });
-    };
-
-    const onConnect = () => {
-      ensureJoined();
-      flushPending();
-    };
-
-    socket.on('connect', onConnect);
-    socket.on('reconnect', onConnect as any);
-    setTimeout(flushPending, 300);
-
-    const pushOnePositionNow = () => {
-      if (!navigator.geolocation) return;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const payload = {
-            lng: pos.coords.longitude,
-            lat: pos.coords.latitude,
-            speed: pos.coords.speed ?? undefined,
-            heading: pos.coords.heading ?? undefined,
-            accuracy: pos.coords.accuracy ?? undefined,
-            t: Date.now(),
-          };
-          try {
-            // eslint-disable-next-line no-console
-            console.log('[position]', ts(), 'pushOnePositionNow', {
-              missionId,
-              lng: payload.lng,
-              lat: payload.lat,
-              t: payload.t,
-              socketConnected: socket.connected,
-            });
-          } catch {
-            // ignore
-          }
-          if (socket.connected) {
-            socket.emit('position:update', payload);
-          } else {
-            pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
-            persistPending();
-          }
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-      );
-    };
-
-    const onVisibilityOrFocus = () => {
-      if (document.visibilityState !== 'visible') return;
-      // iOS: after backgrounding, socket may be reconnected but not re-joined.
-      ensureJoined();
-      flushPending();
-      pushOnePositionNow();
-    };
-
-    window.addEventListener('focus', onVisibilityOrFocus);
-    document.addEventListener('visibilitychange', onVisibilityOrFocus);
-
-    if (navigator.geolocation && !isMapRoute) {
-      // Clear any previous watcher.
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        (pos) => {
-          const lng = pos.coords.longitude;
-          const lat = pos.coords.latitude;
-          const t = Date.now();
-          const payload = {
-            lng,
-            lat,
-            speed: pos.coords.speed ?? undefined,
-            heading: pos.coords.heading ?? undefined,
-            accuracy: pos.coords.accuracy ?? undefined,
-            t,
-          };
-
-          try {
-            // eslint-disable-next-line no-console
-            console.log('[position]', ts(), 'watchPosition', {
-              missionId,
-              lng: payload.lng,
-              lat: payload.lat,
-              t: payload.t,
-              socketConnected: socket.connected,
-            });
-          } catch {
-            // ignore
-          }
-
-          if (socket.connected) {
-            socket.emit('position:update', payload);
-          } else {
-            pendingBulkRef.current = [...pendingBulkRef.current, payload].slice(-5000);
-            persistPending();
-          }
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-      );
-    }
-
+    socket.on('mission:deleted', onMissionDeleted);
     return () => {
-      socket.off('connect', onConnect);
-      socket.off('reconnect', onConnect as any);
-      persistPending();
-
-      window.removeEventListener('focus', onVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
-
-      if (watchIdRef.current !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
+      socket.off('mission:deleted', onMissionDeleted);
     };
-  }, [missionId, user?.id, location.pathname]);
+  }, [missionId, selectedMissionId, selectMission, navigate]);
+
+  // Géolocalisation centralisée. On désactive ce watcher quand on est sur la
+  // route map, parce que MapLibreMap a son propre watcher avec une logique
+  // de tracePoints locale qui sera unifiée plus tard (refactor MapLibreMap).
+  useMissionGeolocation({
+    missionId: missionId ?? null,
+    userId: user?.id ?? null,
+    enabled: !isMapRoute,
+  });
 
   return (
     <div className={isMapRoute ? 'min-h-screen bg-gray-50' : 'min-h-screen bg-gray-50 pb-[max(env(safe-area-inset-bottom),10px)]'}>
-      <div className="w-full" key={location.pathname}>
+      <div className="w-full">
         <Outlet />
       </div>
       <MissionTabs />

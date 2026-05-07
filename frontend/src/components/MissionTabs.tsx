@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { BookUser, Map, MapPin, CircleDotDashed } from 'lucide-react';
 import { listMissionJoinRequests } from '../lib/api';
+import { getSocket } from '../lib/socket';
 
 type Tab = {
   to: string;
@@ -23,6 +24,7 @@ export default function MissionTabs() {
 
     let cancelled = false;
 
+    // Initial fetch
     async function refresh() {
       if (!missionId) return;
       try {
@@ -35,13 +37,29 @@ export default function MissionTabs() {
     }
 
     void refresh();
-    const id = window.setInterval(() => {
-      void refresh();
-    }, 15000);
+
+    // Socket events for real-time updates
+    const socket = getSocket();
+
+    const onJoinRequestCreated = (msg: any) => {
+      if (msg.missionId === missionId && !cancelled) {
+        setPendingJoinCount((prev) => prev + 1);
+      }
+    };
+
+    const onJoinRequestResolved = (msg: any) => {
+      if (msg.missionId === missionId && !cancelled) {
+        setPendingJoinCount((prev) => Math.max(0, prev - 1));
+      }
+    };
+
+    socket.on('join-request:created', onJoinRequestCreated);
+    socket.on('join-request:resolved', onJoinRequestResolved);
 
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      socket.off('join-request:created', onJoinRequestCreated);
+      socket.off('join-request:resolved', onJoinRequestResolved);
     };
   }, [missionId]);
 

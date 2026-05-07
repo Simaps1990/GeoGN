@@ -225,7 +225,7 @@ async function rawFetch(path: string, init?: RequestInit) {
   }
 }
 
-async function refreshTokens() {
+export async function refreshTokens() {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
   if (!refreshToken) return null;
 

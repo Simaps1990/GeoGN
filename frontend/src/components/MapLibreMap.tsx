@@ -409,6 +409,8 @@ export default function MapLibreMap() {
 
   const otherColorsRef = useRef<Record<string, string>>({});
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
+  const persistSelfTraceTimeoutRef = useRef<number | null>(null);
+  const persistOthersTraceTimeoutRef = useRef<number | null>(null);
 
   const [memberColors, setMemberColors] = useState<Record<string, string>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -2808,26 +2810,54 @@ export default function MapLibreMap() {
   }, [mapReady, selectedMissionId, user?.id, memberColors]);
 
   // Persist self trace for this mission while the app is open.
+  // Debounced to avoid blocking the main thread on every position update.
   useEffect(() => {
     if (!selectedMissionId || !user?.id) return;
     const key = `geogn.trace.self.${selectedMissionId}.${user.id}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(tracePoints));
-    } catch {
-      // storage might be full; ignore
+
+    if (persistSelfTraceTimeoutRef.current !== null) {
+      window.clearTimeout(persistSelfTraceTimeoutRef.current);
     }
+    persistSelfTraceTimeoutRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(key, JSON.stringify(tracePoints));
+      } catch {
+        // storage might be full; ignore
+      }
+    }, 1500);
+
+    return () => {
+      if (persistSelfTraceTimeoutRef.current !== null) {
+        window.clearTimeout(persistSelfTraceTimeoutRef.current);
+        persistSelfTraceTimeoutRef.current = null;
+      }
+    };
   }, [tracePoints, selectedMissionId, user?.id]);
 
   // Persist others traces for this mission based on the ref, whenever positions update.
+  // Debounced to avoid blocking the main thread on every position update.
   useEffect(() => {
     if (!selectedMissionId) return;
     const key = `geogn.trace.others.${selectedMissionId}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(otherTracesRef.current));
-    } catch {
-      // ignore storage errors
+
+    if (persistOthersTraceTimeoutRef.current !== null) {
+      window.clearTimeout(persistOthersTraceTimeoutRef.current);
     }
-  }, [otherPositions, selectedMissionId]);
+    persistOthersTraceTimeoutRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(key, JSON.stringify(otherTracesRef.current));
+      } catch {
+        // ignore storage errors
+      }
+    }, 1500);
+
+    return () => {
+      if (persistOthersTraceTimeoutRef.current !== null) {
+        window.clearTimeout(persistOthersTraceTimeoutRef.current);
+        persistOthersTraceTimeoutRef.current = null;
+      }
+    };
+  }, [selectedMissionId, othersActivityTick]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -5723,35 +5753,104 @@ export default function MapLibreMap() {
             .slice(-effectiveMaxTracePoints);
 
           if (normalizedSelf.length) {
-            // Remplacer complètement la trace locale par la trace du snapshot,
-            // pour éviter de garder d'anciens segments "fantômes" propres au client.
-            const merged = normalizedSelf
+            const fromSnapshot = normalizedSelf
               .filter((p) => p && typeof p.lng === 'number' && typeof p.lat === 'number' && typeof p.t === 'number')
               .sort((a, b) => a.t - b.t)
               .filter((p) => p.t >= effectiveCutoff);
 
-            const deduped: typeof merged = [];
-            for (const p of merged) {
-              const last = deduped.length ? deduped[deduped.length - 1] : null;
-              if (last && last.lng === p.lng && last.lat === p.lat && Math.abs(last.t - p.t) < 500) continue;
-              deduped.push(p);
-            }
+            setTracePoints((prevLocal) => {
+              // Si la trace locale est vide (ex: premier chargement, reload), le snapshot fait foi.
+              if (prevLocal.length === 0) {
+                const deduped: typeof fromSnapshot = [];
+                for (const p of fromSnapshot) {
+                  const last = deduped.length ? deduped[deduped.length - 1] : null;
+                  if (last && last.lng === p.lng && last.lat === p.lat && Math.abs(last.t - p.t) < 500) continue;
+                  deduped.push(p);
+                }
+                return deduped.slice(-effectiveMaxTracePoints);
+              }
 
-            const next = deduped.slice(-effectiveMaxTracePoints);
-            setTracePoints(next);
+              // Sinon : on merge en gardant la résolution la plus haute (locale).
+              // Le snapshot peut contenir des points plus anciens que ce qu'on a en local
+              // (ex: après un reload partiel), on les ajoute au début.
+              const localOldestT = prevLocal[0].t;
+              const olderFromSnapshot = fromSnapshot.filter((p) => p.t < localOldestT);
+
+              // Dédup par timestamp pour éviter les doublons exacts
+              const tSeen = new Set<number>();
+              const merged: typeof fromSnapshot = [];
+              for (const p of olderFromSnapshot) {
+                if (tSeen.has(p.t)) continue;
+                tSeen.add(p.t);
+                merged.push(p);
+              }
+              for (const p of prevLocal) {
+                if (tSeen.has(p.t)) continue;
+                tSeen.add(p.t);
+                merged.push(p);
+              }
+              return merged
+                .sort((a, b) => a.t - b.t)
+                .filter((p) => p.t >= effectiveCutoff)
+                .slice(-effectiveMaxTracePoints);
+            });
           }
         }
       }
 
-      // Le snapshot est la source de vérité pour les autres utilisateurs :
-      // remplacer complètement les positions et traces locales par celles reçues,
-      // même si le snapshot est vide (utile après une purge explicite).
-      otherTracesRef.current = nextOthersTraces;
-      setOtherPositions(nextOthers);
+      // Pour les TRACES des autres : on merge avec ce qu'on a déjà reçu en live.
+      // Le snapshot peut contenir des points anciens, et le live peut contenir
+      // des points plus récents arrivés entre la demande et la réception du snapshot.
+      const mergedOthersTraces: Record<string, { lng: number; lat: number; t: number }[]> = {};
+      const allOtherUserIds = new Set([
+        ...Object.keys(nextOthersTraces),
+        ...Object.keys(otherTracesRef.current),
+      ]);
+      for (const uid of allOtherUserIds) {
+        if (user?.id && uid === user.id) continue;
+        const fromSnapshot = nextOthersTraces[uid] ?? [];
+        const fromLocal = otherTracesRef.current[uid] ?? [];
+        const tSeen = new Set<number>();
+        const combined: { lng: number; lat: number; t: number }[] = [];
+        for (const p of fromSnapshot) {
+          if (tSeen.has(p.t)) continue;
+          tSeen.add(p.t);
+          combined.push(p);
+        }
+        for (const p of fromLocal) {
+          if (tSeen.has(p.t)) continue;
+          tSeen.add(p.t);
+          combined.push(p);
+        }
+        const filtered = combined
+          .sort((a, b) => a.t - b.t)
+          .filter((p) => p.t >= cutoff)
+          .slice(-maxTracePointsFromSnapshot);
+        if (filtered.length) {
+          mergedOthersTraces[uid] = filtered;
+        }
+      }
+      otherTracesRef.current = mergedOthersTraces;
+
+      // Pour les POSITIONS COURANTES : on garde le plus récent par user.
+      // Si un user n'apparaît pas dans le snapshot, on le retire (il a peut-être quitté).
+      setOtherPositions((prev) => {
+        const merged: Record<string, { lng: number; lat: number; t: number }> = {};
+        for (const [uid, p] of Object.entries(nextOthers)) {
+          const existing = prev[uid];
+          // Si on a une position locale plus récente, on la garde.
+          if (existing && existing.t > p.t) {
+            merged[uid] = existing;
+          } else {
+            merged[uid] = p;
+          }
+        }
+        return merged;
+      });
       setOthersActivityTick((v) => (v + 1) % 1_000_000);
     };
 
-    const applyRemotePosition = (msg: any) => {
+    const applyRemotePosition = (msg: any, opts?: { fromBulk?: boolean }) => {
       if (!msg?.userId) return;
 
       const lng =
@@ -5771,6 +5870,11 @@ export default function MapLibreMap() {
       // If it's me, also feed my local trace from socket events (update/bulk/snapshot)
       // so my rendering behaves the same way as other users.
       if (user?.id && msg.userId === user.id) {
+        // Ignore les echos de bulk pour soi : ces points sont déjà dans tracePoints
+        // (poussés directement par le watchPosition local), pas la peine de les ré-injecter.
+        if (opts?.fromBulk) {
+          return;
+        }
         const now = normalizeRemoteTime(
           typeof msg.t === 'number'
             ? msg.t
@@ -5827,7 +5931,7 @@ export default function MapLibreMap() {
       if (!msg.userId) return;
       const pts = Array.isArray(msg.points) ? msg.points : [];
       for (const p of pts) {
-        applyRemotePosition({ ...p, userId: msg.userId });
+        applyRemotePosition({ ...p, userId: msg.userId }, { fromBulk: true });
       }
     };
 
@@ -6622,26 +6726,7 @@ export default function MapLibreMap() {
       return [...ring, [a[0], a[1]]];
     };
 
-    const getCenter = (fc: any): { lng: number; lat: number } | null => {
-      const f0 = fc?.features?.[0];
-      const c = f0?.properties?.center;
-      if (c && typeof c.lng === 'number' && typeof c.lat === 'number') return { lng: c.lng, lat: c.lat };
-      const ring = getRing(fc);
-      if (!ring || ring.length < 3) return null;
-      // simple centroid approx (average of vertices)
-      let sumLng = 0;
-      let sumLat = 0;
-      let n = 0;
-      for (let i = 0; i < ring.length - 1; i += 1) {
-        const p = ring[i];
-        sumLng += p[0];
-        sumLat += p[1];
-        n += 1;
-      }
-      if (n <= 0) return null;
-      return { lng: sumLng / n, lat: sumLat / n };
-    };
-
+    
     const smoothRing = (ringIn: [number, number][], passes: number): [number, number][] => {
       let ring = ensureClosed(ringIn);
       if (ring.length < 4) return ring;

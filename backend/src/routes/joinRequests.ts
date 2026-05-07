@@ -60,6 +60,42 @@ function asObjectId(v: any): mongoose.Types.ObjectId | null {
   return null;
 }
 
+async function getMissionAdminUserIds(missionId: mongoose.Types.ObjectId | string): Promise<string[]> {
+  const admins = await MissionMemberModel.find({
+    missionId,
+    role: 'admin',
+    removedAt: null,
+  }).select({ userId: 1 }).lean();
+  return admins.map((a) => a.userId.toString());
+}
+
+async function notifyAdminsJoinRequestCreated(
+  app: FastifyInstance,
+  missionId: string,
+  requesterId: string
+) {
+  const requester = await UserModel.findById(requesterId)
+    .select({ displayName: 1, appUserId: 1 })
+    .lean();
+  const adminIds = await getMissionAdminUserIds(missionId);
+  const payload = {
+    missionId,
+    request: {
+      requestedBy: requester
+        ? {
+            id: requester._id.toString(),
+            appUserId: requester.appUserId,
+            displayName: requester.displayName,
+          }
+        : null,
+      createdAt: new Date(),
+    },
+  };
+  for (const adminId of adminIds) {
+    app.io?.to(`user:${adminId}`).emit('join-request:created', payload);
+  }
+}
+
 export async function joinRequestsRoutes(app: FastifyInstance) {
   app.get<{ Params: { missionId: string } }>('/missions/:missionId/members', async (req, reply) => {
     try {
@@ -217,6 +253,9 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
           { $set: { status: 'pending', createdAt: new Date(), handledBy: null, handledAt: null } }
         );
 
+        // Notifier les admins de la nouvelle demande
+        await notifyAdminsJoinRequestCreated(app, missionId, req.userId);
+
         return reply.code(201).send({ ok: true });
       }
 
@@ -224,6 +263,9 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         { _id: existing._id },
         { $set: { status: 'pending', createdAt: new Date(), handledBy: null, handledAt: null } }
       );
+
+      // Notifier les admins de la nouvelle demande
+      await notifyAdminsJoinRequestCreated(app, missionId, req.userId);
 
       return reply.code(201).send({ ok: true });
     }
@@ -236,6 +278,9 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       handledBy: null,
       handledAt: null,
     });
+
+    // Notifier les admins de la nouvelle demande
+    await notifyAdminsJoinRequestCreated(app, missionId, req.userId);
 
     return reply.code(201).send({ ok: true });
   });
@@ -265,11 +310,17 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       .sort({ createdAt: -1 })
       .lean();
 
+    // On ne répare que les demandes "accepted" pour lesquelles AUCUN MissionMember n'a
+    // jamais été créé (cas où l'accept a crashé en cours). Si un MissionMember existe
+    // avec removedAt non null (admin a viré le user), on NE répare PAS : c'est intentionnel.
     const repairs: mongoose.Types.ObjectId[] = [];
     for (const r of reqsRaw) {
       if ((r as any).status !== 'accepted') continue;
-      const stillMember = await MissionMemberModel.findOne({ missionId, userId: (r as any).requestedBy, removedAt: null }).lean();
-      if (!stillMember) repairs.push((r as any)._id);
+      const memberAny = await MissionMemberModel.findOne({
+        missionId,
+        userId: (r as any).requestedBy,
+      }).lean();
+      if (!memberAny) repairs.push((r as any)._id);
     }
 
     if (repairs.length) {
@@ -383,21 +434,33 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
           member: { userId: joinRequestedBy.toString(), role: desiredRole, color: memberColor },
         });
 
+        // Notify admins and requester that the request was resolved
+        const adminIds = await getMissionAdminUserIds(missionId);
+        const notificationPayload = {
+          missionId,
+          requestId: requestObjectId.toString(),
+          status: 'accepted' as const,
+          requesterId: joinRequestedBy.toString(),
+        };
+        
+        // Notify all admins
+        for (const adminId of adminIds) {
+          app.io?.to(`user:${adminId}`).emit('join-request:resolved', notificationPayload);
+        }
+        
+        // Notify the requester
+        app.io?.to(`user:${joinRequestedBy.toString()}`).emit('join-request:resolved', notificationPayload);
+
         // Add to global contacts in both directions (admin <-> requester)
         try {
           await Promise.all([ensureContact(adminUserObjectId, joinRequestedBy), ensureContact(joinRequestedBy, adminUserObjectId)]);
         } catch (e: any) {
-          console.error('[join-requests.accept] contact sync failed', e);
+          req.log.error('[join-requests.accept] contact sync failed', e);
         }
 
         return reply.send({ ok: true });
       } catch (e: any) {
-        try {
-          (req as any)?.log?.error?.(e);
-        } catch {
-          // ignore
-        }
-        console.error('[join-requests.accept] failed', e);
+        req.log.error('[join-requests.accept] failed', e);
         if (e?.name === 'CastError') {
           return reply.code(500).send({ error: 'CAST_ERROR' });
         }
@@ -464,6 +527,17 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         member: { userId: memberUserId, role: (updated as any).role, color: (updated as any).color },
       });
 
+      // Invalider le cache socket du membre pour que la prochaine
+      // position GPS re-vérifie le membership en DB.
+      try {
+        const sockets = await app.io?.in(`user:${memberUserId}`).fetchSockets() ?? [];
+        for (const s of sockets) {
+          (s.data as any).cached = undefined;
+        }
+      } catch {
+        // non bloquant
+      }
+
       return reply.send({ ok: true });
     }
   );
@@ -509,6 +583,17 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
 
       app.io?.to(`mission:${missionId}`).emit('position:clear', { missionId, userId: memberUserId });
 
+      // Invalider le cache socket du membre pour que la prochaine
+      // position GPS re-vérifie le membership en DB.
+      try {
+        const sockets = await app.io?.in(`user:${memberUserId}`).fetchSockets() ?? [];
+        for (const s of sockets) {
+          (s.data as any).cached = undefined;
+        }
+      } catch {
+        // non bloquant
+      }
+
       return reply.send({ ok: true });
     }
   );
@@ -545,6 +630,23 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         { _id: joinReq._id },
         { $set: { status: 'declined', handledBy: new mongoose.Types.ObjectId(req.userId), handledAt: now } }
       );
+
+      // Notify admins and requester that the request was resolved
+      const adminIds = await getMissionAdminUserIds(missionId);
+      const notificationPayload = {
+        missionId,
+        requestId: joinReq._id.toString(),
+        status: 'declined' as const,
+        requesterId: (joinReq as any).requestedBy.toString(),
+      };
+      
+      // Notify all admins
+      for (const adminId of adminIds) {
+        app.io?.to(`user:${adminId}`).emit('join-request:resolved', notificationPayload);
+      }
+      
+      // Notify the requester
+      app.io?.to(`user:${(joinReq as any).requestedBy.toString()}`).emit('join-request:resolved', notificationPayload);
 
       return reply.send({ ok: true });
     }
