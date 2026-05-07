@@ -6,6 +6,7 @@ import {
   CircleDotDashed,
   Compass,
   Crosshair,
+  Grid3x3,
   Layers,
   MapPin,
   Navigation2,
@@ -79,6 +80,11 @@ type MapRightToolbarProps = {
 
   isMapRotated: boolean;
   resetNorth: () => void;
+
+  gridViewMode: 'off' | 'admin-select' | 'member-highlight';
+  gridViewToggle: () => void;
+  gridViewResetBadge: () => void;
+  gridViewBadgeCount: number;
 };
 
 export const MapRightToolbar = memo(function MapRightToolbar({
@@ -132,6 +138,10 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   setActionError,
   isMapRotated,
   resetNorth,
+  gridViewMode,
+  gridViewToggle,
+  gridViewResetBadge,
+  gridViewBadgeCount,
 }: MapRightToolbarProps) {
   return (
     <div
@@ -280,7 +290,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
 
       <div
         className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-          settingsMenuOpen ? `${isAdmin ? 'h-[336px]' : 'h-[272px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
+          settingsMenuOpen ? `${isAdmin ? 'h-[400px]' : 'h-[336px]'} ring-1 ring-inset ring-black/10` : 'h-12 ring-0'
         }`}
       >
         <div className="flex flex-col gap-2">
@@ -433,6 +443,25 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                 <Timer className="text-gray-600" size={20} />
               </button>
             ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                gridViewToggle();
+                gridViewResetBadge();
+              }}
+              className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                gridViewMode !== 'off' ? 'ring-blue-500/25' : 'ring-black/10'
+              }`}
+              title={gridViewMode === 'off' ? 'Activer le mode grille' : gridViewMode === 'admin-select' ? 'Désactiver le mode sélection' : 'Désactiver le mode mise en évidence'}
+            >
+              <Grid3x3 className={gridViewMode !== 'off' ? 'text-blue-600' : 'text-gray-600'} size={20} />
+              {gridViewBadgeCount > 0 ? (
+                <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+                  {gridViewBadgeCount}
+                </span>
+              ) : null}
+            </button>
           </div>
         </div>
       </div>

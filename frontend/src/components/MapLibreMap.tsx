@@ -40,6 +40,8 @@ import {
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
+import { useGridView } from '../contexts/GridViewContext';
+import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { getSocket } from '../lib/socket';
 import {
   createPoi,
@@ -49,13 +51,14 @@ import {
   deleteZone,
   getPersonCase,
   getMission,
-  listPois,
   listMissionMembers,
+  listPois,
   listZones,
   upsertPersonCase,
   updatePoi,
   updateZone,
   updateMission,
+  assignZoneToUsers,
   createVehicleTrack,
   listVehicleTracks,
   deleteVehicleTrack,
@@ -64,6 +67,7 @@ import {
   type ApiPoi,
   type ApiPersonCase,
   type ApiZone,
+  type ApiMissionMember,
   type ApiVehicleTrack,
   type ApiVehicleTrackStatus,
   type ApiVehicleTrackVehicleType,
@@ -174,16 +178,24 @@ function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: num
   const metersPerDegLng = 111_320 * Math.cos(latRad);
 
   const coords: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const a = (i / steps) * Math.PI * 2;
-    const dx = Math.cos(a) * radiusMeters;
-    const dy = Math.sin(a) * radiusMeters;
-    const lng = center.lng + dx / metersPerDegLng;
-    const lat = center.lat + dy / metersPerDegLat;
-    coords.push([lng, lat]);
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dx = (radiusMeters / metersPerDegLng) * Math.cos(angle);
+    const dy = (radiusMeters / metersPerDegLat) * Math.sin(angle);
+    coords.push([center.lng + dx, center.lat + dy]);
   }
+  coords.push(coords[0]);
+  return { type: 'Polygon', coordinates: [coords] };
+}
 
-  return { type: 'Polygon' as const, coordinates: [coords] };
+function getPolygonCenter(coords: [number, number][]): { lng: number; lat: number } {
+  let x = 0;
+  let y = 0;
+  for (const [lng, lat] of coords) {
+    x += lng;
+    y += lat;
+  }
+  return { lng: x / coords.length, lat: y / coords.length };
 }
 
 function isPointInZone(lng: number, lat: number, z: ApiZone) {
@@ -241,6 +253,39 @@ function getZoneBbox(z: ApiZone) {
   }
 
   return null;
+}
+
+function getGridCellSelection(lng: number, lat: number, z: ApiZone) {
+  if (!z.grid?.rows || !z.grid?.cols) return null;
+  if ((z.grid as any)?.orientation === 'diag45') return null;
+  const bbox = getZoneBbox(z);
+  if (!bbox) return null;
+  if (lng < bbox.minLng || lng > bbox.maxLng || lat < bbox.minLat || lat > bbox.maxLat) return null;
+  const rows = Math.max(1, z.grid.rows);
+  const cols = Math.max(1, Math.min(26, z.grid.cols));
+  const dx = (bbox.maxLng - bbox.minLng) / cols;
+  const dy = (bbox.maxLat - bbox.minLat) / rows;
+  const col = Math.min(cols - 1, Math.max(0, Math.floor((lng - bbox.minLng) / dx)));
+  const row = Math.min(rows - 1, Math.max(0, Math.floor((lat - bbox.minLat) / dy)));
+  const text = `${String.fromCharCode('A'.charCodeAt(0) + col)}${row + 1}`;
+  const minLng = bbox.minLng + col * dx;
+  const maxLng = minLng + dx;
+  const minLat = bbox.minLat + row * dy;
+  const maxLat = minLat + dy;
+  return {
+    id: `${z.id}:grid:${text}`,
+    text,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [minLng, minLat],
+        [maxLng, minLat],
+        [maxLng, maxLat],
+        [minLng, maxLat],
+        [minLng, minLat],
+      ]],
+    },
+  };
 }
 
 function closeRing(ring: number[][]) {
@@ -1500,6 +1545,10 @@ export default function MapLibreMap() {
   );
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
+  const { mode, selectedZoneIds, highlightedZoneIds, toggle, toggleSelection, resetBadge } = useGridView();
+  const { assignmentsByZoneId, refetch: refetchAssignments, assignmentsVersion } = useZoneAssignments(selectedMissionId);
+  const [zoneAssignmentMembers, setZoneAssignmentMembers] = useState<ApiMissionMember[]>([]);
+  const [zoneAssignmentSelectedMemberId, setZoneAssignmentSelectedMemberId] = useState('');
 
   const creatorLabel = (() => {
     if (!selectedPoi?.createdBy) return 'Créé par inconnu';
@@ -1507,6 +1556,29 @@ export default function MapLibreMap() {
     const name = buildUserDisplayName(id);
     return `Créé par ${name}`;
   })();
+
+  useEffect(() => {
+    if (!selectedMissionId) {
+      setZoneAssignmentMembers([]);
+      setZoneAssignmentSelectedMemberId('');
+      return;
+    }
+
+    let alive = true;
+    listMissionMembers(selectedMissionId)
+      .then((members) => {
+        if (!alive) return;
+        setZoneAssignmentMembers(members.filter((m) => m.isActive));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setZoneAssignmentMembers([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [selectedMissionId]);
 
   const onExpandPersonPanel = useCallback(() => {
     setPersonPanelCollapsed(false);
@@ -3617,6 +3689,15 @@ export default function MapLibreMap() {
     if (!map.getSource('zones-labels')) {
       map.addSource('zones-labels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
+    if (!map.getSource('zones-selected')) {
+      map.addSource('zones-selected', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('zones-highlighted')) {
+      map.addSource('zones-highlighted', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('zones-assignments-labels')) {
+      map.addSource('zones-assignments-labels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
     if (!map.getLayer('zones-fill')) {
       map.addLayer({
         id: 'zones-fill',
@@ -3636,6 +3717,56 @@ export default function MapLibreMap() {
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#16a34a'],
           'line-width': 2,
+        },
+      });
+    }
+
+    if (!map.getLayer('zones-selected-fill')) {
+      map.addLayer({
+        id: 'zones-selected-fill',
+        type: 'fill',
+        source: 'zones-selected',
+        paint: {
+          'fill-color': '#3b82f6',
+          'fill-opacity': 0.4,
+        },
+        layout: {
+          visibility: 'none',
+        },
+      });
+    }
+
+    if (!map.getLayer('zones-highlighted-fill')) {
+      map.addLayer({
+        id: 'zones-highlighted-fill',
+        type: 'fill',
+        source: 'zones-highlighted',
+        paint: {
+          'fill-color': '#22c55e',
+          'fill-opacity': 0.4,
+        },
+        layout: {
+          visibility: 'none',
+        },
+      });
+    }
+
+    if (!map.getLayer('zones-assignments-labels')) {
+      map.addLayer({
+        id: 'zones-assignments-labels',
+        type: 'symbol',
+        source: 'zones-assignments-labels',
+        layout: {
+          'text-field': ['get', 'memberName'],
+          'text-size': 11,
+          'text-anchor': 'center',
+          'text-offset': [0, 0],
+          visibility: 'none',
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 2,
         },
       });
     }
@@ -4911,6 +5042,39 @@ export default function MapLibreMap() {
     if (!map) return;
     if (!mapReady) return;
 
+    const onZoneClick = (e: maplibregl.MapMouseEvent) => {
+      if (mode === 'off') return;
+
+      const features = map.queryRenderedFeatures(e.point, { layers: ['zones-fill', 'zones-outline', 'zones-grid-lines'] });
+      if (!features || features.length === 0) return;
+
+      const zoneId = (features[0].properties?.id ?? features[0].properties?.zoneId) as string;
+      const sectorId = features[0].properties?.sectorId as string | undefined;
+      if (!zoneId) return;
+      const clickedZone = zones.find((z) => z.id === zoneId);
+      const gridCell = clickedZone ? getGridCellSelection(e.lngLat.lng, e.lngLat.lat, clickedZone) : null;
+      const selectionId = gridCell?.id ?? (sectorId ? `${zoneId}:${sectorId}` : zoneId);
+
+      if (mode === 'admin-select') {
+        toggleSelection(selectionId);
+      } else if (mode === 'member-highlight') {
+        // TODO: Show ZoneAssignmentsPopup with assigned members
+        console.log('Zone clicked in member-highlight mode:', zoneId);
+      }
+    };
+
+    map.on('click', onZoneClick);
+
+    return () => {
+      map.off('click', onZoneClick);
+    };
+  }, [mapReady, mode, toggleSelection, zones]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+
     const onCameraClick = (e: any) => {
       try {
         const feats = map.queryRenderedFeatures(e.point, { layers: ['cameras'] }) as any[];
@@ -5135,17 +5299,17 @@ export default function MapLibreMap() {
               comment: payload.comment,
               color: payload.color,
               type: payload.type,
-              circle: payload.type === 'circle' ? payload.circle : null,
-              polygon: payload.type === 'polygon' ? payload.polygon : null,
+              circle: null,
+              polygon: payload.polygon,
               grid: null,
               sectors: null,
-              createdBy: user?.id ?? 'offline',
+              assignments: [],
+              createdBy: user?.id ?? '',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            setZones((prev) => [optimistic, ...prev]);
-            enqueueAction(selectedMissionId, { entity: 'zone', op: 'create', localId, payload, t: Date.now() });
-          }
+            // TODO: use optimistic update
+            void optimistic;
 
           // close modal as success
           setDraftTitle('');
@@ -5158,6 +5322,7 @@ export default function MapLibreMap() {
           setDraftLngLat(null);
           polygonDraftRef.current = [];
           return;
+        }
         } catch {
           // fallthrough
         }
@@ -6289,6 +6454,14 @@ export default function MapLibreMap() {
     socket.on('zone:updated', onZoneUpdated);
     socket.on('zone:deleted', onZoneDeleted);
 
+    const onZoneAssignedToYou = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      if (!msg.assignedByUserName) return;
+      setActivityToast(`${msg.assignedByUserName} vous a attribué une zone de recherche`);
+    };
+
+    socket.on('zone:assigned:you', onZoneAssignedToYou);
+
     socket.on('person-case:upserted', onPersonCaseUpserted);
     socket.on('person-case:deleted', onPersonCaseDeleted);
 
@@ -7340,6 +7513,217 @@ export default function MapLibreMap() {
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
+
+    const selectedSource = map.getSource('zones-selected') as GeoJSONSource | undefined;
+    const highlightedSource = map.getSource('zones-highlighted') as GeoJSONSource | undefined;
+    const labelsSource = map.getSource('zones-assignments-labels') as GeoJSONSource | undefined;
+
+    if (!selectedSource || !highlightedSource || !labelsSource) return;
+
+    const selectedFeatures: any[] = [];
+    const highlightedFeatures: any[] = [];
+    const labelsFeatures: any[] = [];
+
+    for (const z of zones) {
+      if (selectedZoneIds.includes(z.id)) {
+        if (z.type === 'circle' && z.circle) {
+          selectedFeatures.push({
+            type: 'Feature',
+            properties: { id: z.id },
+            geometry: circleToPolygon(z.circle.center, z.circle.radiusMeters),
+          });
+        }
+        if (z.type === 'polygon' && z.polygon) {
+          selectedFeatures.push({ type: 'Feature', properties: { id: z.id }, geometry: z.polygon });
+        }
+      }
+      if (Array.isArray(z.sectors)) {
+        for (const s of z.sectors) {
+          if (selectedZoneIds.includes(`${z.id}:${s.sectorId}`)) {
+            selectedFeatures.push({ type: 'Feature', properties: { id: z.id, sectorId: s.sectorId }, geometry: s.geometry });
+          }
+        }
+      }
+      if (z.grid?.rows && z.grid?.cols) {
+        const bbox = getZoneBbox(z);
+        if (bbox) {
+          const rows = Math.max(1, z.grid.rows);
+          const cols = Math.max(1, Math.min(26, z.grid.cols));
+          const dx = (bbox.maxLng - bbox.minLng) / cols;
+          const dy = (bbox.maxLat - bbox.minLat) / rows;
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const text = `${String.fromCharCode('A'.charCodeAt(0) + c)}${r + 1}`;
+              if (!selectedZoneIds.includes(`${z.id}:grid:${text}`)) continue;
+              const minLng = bbox.minLng + c * dx;
+              const maxLng = minLng + dx;
+              const minLat = bbox.minLat + r * dy;
+              const maxLat = minLat + dy;
+              selectedFeatures.push({
+                type: 'Feature',
+                properties: { id: z.id, gridCell: text },
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]],
+                },
+              });
+            }
+          }
+        }
+      }
+
+      const isAssignedToCurrentUser =
+        !!user &&
+        !!assignmentsByZoneId.get(z.id)?.some((assignment) => assignment.userId === user.id);
+
+      // In member-highlight mode, highlight the entire zone if user is assigned (zone-level)
+      if ((highlightedZoneIds.includes(z.id) || isAssignedToCurrentUser) && mode === 'member-highlight') {
+        if (z.type === 'circle' && z.circle) {
+          highlightedFeatures.push({
+            type: 'Feature',
+            properties: { id: z.id },
+            geometry: circleToPolygon(z.circle.center, z.circle.radiusMeters),
+          });
+        }
+        if (z.type === 'polygon' && z.polygon) {
+          highlightedFeatures.push({ type: 'Feature', properties: { id: z.id }, geometry: z.polygon });
+        }
+        if (Array.isArray(z.sectors)) {
+          for (const s of z.sectors) {
+            highlightedFeatures.push({ type: 'Feature', properties: { id: z.id, sectorId: s.sectorId }, geometry: s.geometry });
+          }
+        }
+      }
+
+      // In member-highlight mode, also highlight specific grid cells where user is assigned
+      if (mode === 'member-highlight' && user && z.grid?.rows && z.grid?.cols) {
+        const assignments = assignmentsByZoneId.get(z.id);
+        if (assignments) {
+          const userAssignments = assignments.filter((a) => a.userId === user.id && a.gridCellId);
+          if (userAssignments.length > 0) {
+            const bbox = getZoneBbox(z);
+            if (bbox) {
+              const rows = Math.max(1, z.grid.rows);
+              const cols = Math.max(1, Math.min(26, z.grid.cols));
+              const dx = (bbox.maxLng - bbox.minLng) / cols;
+              const dy = (bbox.maxLat - bbox.minLat) / rows;
+
+              for (const assignment of userAssignments) {
+                if (!assignment.gridCellId) continue;
+                const match = assignment.gridCellId.match(/^([A-Z])(\d+)$/);
+                if (match) {
+                  const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
+                  const row = parseInt(match[2], 10) - 1;
+                  if (col >= 0 && col < cols && row >= 0 && row < rows) {
+                    const minLng = bbox.minLng + col * dx;
+                    const maxLng = bbox.minLng + (col + 1) * dx;
+                    const minLat = bbox.minLat + row * dy;
+                    const maxLat = bbox.minLat + (row + 1) * dy;
+                    highlightedFeatures.push({
+                      type: 'Feature',
+                      properties: { id: z.id, gridCellId: assignment.gridCellId },
+                      geometry: {
+                        type: 'Polygon',
+                        coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]],
+                      },
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const assignments = assignmentsByZoneId.get(z.id);
+      if (assignments && assignments.length > 0) {
+        // Group assignments by gridCellId (or null for zone-level assignments)
+        const assignmentsByCell = new Map<string | null, typeof assignments>();
+        for (const assignment of assignments) {
+          const key = assignment.gridCellId ?? null;
+          if (!assignmentsByCell.has(key)) {
+            assignmentsByCell.set(key, []);
+          }
+          assignmentsByCell.get(key)!.push(assignment);
+        }
+
+        for (const [cellKey, cellAssignments] of assignmentsByCell.entries()) {
+          for (let i = 0; i < cellAssignments.length; i++) {
+            const assignment = cellAssignments[i];
+            const memberName = buildUserDisplayName(assignment.userId);
+
+            // If assignment has gridCellId, position label at that cell's center
+            if (cellKey && z.grid?.rows && z.grid?.cols) {
+              const bbox = getZoneBbox(z);
+              if (bbox) {
+                const rows = Math.max(1, z.grid.rows);
+                const cols = Math.max(1, Math.min(26, z.grid.cols));
+                const dx = (bbox.maxLng - bbox.minLng) / cols;
+                const dy = (bbox.maxLat - bbox.minLat) / rows;
+
+                const match = cellKey.match(/^([A-Z])(\d+)$/);
+                if (match) {
+                  const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
+                  const row = parseInt(match[2], 10) - 1;
+                  if (col >= 0 && col < cols && row >= 0 && row < rows) {
+                    const centerLng = bbox.minLng + (col + 0.5) * dx;
+                    const centerLat = bbox.minLat + (row + 0.5) * dy;
+                    // Add vertical offset for each additional user
+                    const offsetLat = i * 0.0002; // Small offset in degrees
+                    labelsFeatures.push({
+                      type: 'Feature',
+                      properties: { zoneId: z.id, memberName, userId: assignment.userId },
+                      geometry: { type: 'Point', coordinates: [centerLng, centerLat - offsetLat] },
+                    });
+                  }
+                }
+              }
+            } else {
+              // Fallback: position at zone center with vertical offset
+              const center = z.type === 'circle' && z.circle
+                ? z.circle.center
+                : z.type === 'polygon' && z.polygon
+                ? getPolygonCenter(z.polygon.coordinates[0] as [number, number][])
+                : null;
+
+              if (center) {
+                const offsetLat = i * 0.0002; // Small offset in degrees
+                labelsFeatures.push({
+                  type: 'Feature',
+                  properties: { zoneId: z.id, memberName, userId: assignment.userId },
+                  geometry: { type: 'Point', coordinates: [center.lng, center.lat - offsetLat] },
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    selectedSource.setData({ type: 'FeatureCollection', features: selectedFeatures });
+    highlightedSource.setData({ type: 'FeatureCollection', features: highlightedFeatures });
+    labelsSource.setData({ type: 'FeatureCollection', features: labelsFeatures });
+
+    console.log('Label generation complete:', { labelsCount: labelsFeatures.length, mode });
+
+    const selectedLayer = map.getLayer('zones-selected-fill');
+    const highlightedLayer = map.getLayer('zones-highlighted-fill');
+    const labelsLayer = map.getLayer('zones-assignments-labels');
+
+    if (selectedLayer) {
+      map.setLayoutProperty('zones-selected-fill', 'visibility', mode === 'admin-select' ? 'visible' : 'none');
+    }
+    if (highlightedLayer) {
+      map.setLayoutProperty('zones-highlighted-fill', 'visibility', mode === 'member-highlight' ? 'visible' : 'none');
+    }
+    if (labelsLayer) {
+      map.setLayoutProperty('zones-assignments-labels', 'visibility', mode !== 'off' ? 'visible' : 'none');
+    }
+  }, [zones, selectedZoneIds, highlightedZoneIds, assignmentsByZoneId, assignmentsVersion, mode, mapReady]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
     const src = map.getSource('others') as GeoJSONSource | undefined;
     if (!src) return;
 
@@ -7615,7 +7999,7 @@ export default function MapLibreMap() {
         mapInstance={mapInstanceRef.current}
         mapReady={mapReady}
         applyHeatmapVisibility={applyHeatmapVisibility}
-        showEstimationHeatmap={showEstimationHeatmapRef.current}
+        showEstimationHeatmap={showEstimationHeatmap}
         missionTraceRetentionSeconds={mission?.traceRetentionSeconds ?? null}
         setTimerSecondsInput={setTimerSecondsInput}
         setTimerError={setTimerError}
@@ -7623,7 +8007,96 @@ export default function MapLibreMap() {
         setActionError={setActionError}
         isMapRotated={isMapRotated}
         resetNorth={resetNorth}
+        gridViewMode={mode}
+        gridViewToggle={toggle}
+        gridViewResetBadge={resetBadge}
+        gridViewBadgeCount={mode === 'admin-select' ? selectedZoneIds.length : mode === 'member-highlight' ? highlightedZoneIds.length : 0}
       />
+
+      {mode === 'admin-select' && selectedZoneIds.length > 0 ? (
+        <div
+          className="fixed bottom-4 left-4 right-4 z-[1200] rounded-3xl border bg-white/95 p-4 shadow-2xl backdrop-blur"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Carrés sélectionnés ({selectedZoneIds.length} carré{selectedZoneIds.length > 1 ? 's' : ''})</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                for (const id of selectedZoneIds) toggleSelection(id);
+              }}
+              className="rounded-xl border bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            >
+              Vider
+            </button>
+          </div>
+
+          <div className="flex max-h-20 flex-wrap gap-2 overflow-auto">
+            {selectedZoneIds.map((id) => {
+              const parts = id.split(':').slice(1);
+              const cell = parts.filter((p) => p !== 'grid').join(':') || parts[parts.length - 1] || id;
+              return (
+                <span key={id} className="rounded-full bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
+                  {cell}
+                </span>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <select
+              value={zoneAssignmentSelectedMemberId}
+              onChange={(e) => setZoneAssignmentSelectedMemberId(e.target.value)}
+              className="h-11 min-w-0 flex-1 rounded-2xl border bg-white px-3 text-sm outline-none focus:border-blue-500"
+            >
+              <option value="">Choisir un membre</option>
+              <option key="test-user" value="507f1f77bcf86cd799439011">
+                Moi (test)
+              </option>
+              {zoneAssignmentMembers
+                .filter((member) => member.user)
+                .map((member) => (
+                  <option key={member.user!.id} value={member.user!.id}>
+                    {member.user!.id === user?.id ? 'Moi' : member.user!.displayName}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              disabled={!zoneAssignmentSelectedMemberId}
+              onClick={async () => {
+                if (!selectedMissionId || !zoneAssignmentSelectedMemberId) return;
+                const firstSelectionId = selectedZoneIds[0];
+                const zoneId = firstSelectionId.split(':')[0];
+                const gridCellId = firstSelectionId.includes(':grid:')
+                  ? firstSelectionId.split(':').slice(2).join(':')
+                  : undefined;
+                try {
+                  await assignZoneToUsers(zoneId, [zoneAssignmentSelectedMemberId], gridCellId);
+                  setZoneAssignmentSelectedMemberId('');
+                  // Show toast notification (since Socket.IO doesn't work with auth disabled)
+                  const assigneeName = zoneAssignmentMembers.find((m) => m.user?.id === zoneAssignmentSelectedMemberId)?.user?.displayName ?? 'Moi (test)';
+                  setActivityToast(`Zone attribuée à ${assigneeName}`);
+                  // Clear selection after assignment
+                  for (const id of selectedZoneIds) toggleSelection(id);
+                  await refetchAssignments();
+                } catch (e: any) {
+                  console.error('Assignment failed:', e);
+                  alert(`Erreur d'assignation: ${e?.message || 'Erreur inconnue'}`);
+                }
+              }}
+              className="h-11 rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+            >
+              Assigner
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {personPanelOpen && personPanelCollapsed && !personEdit ? (
         <PersonPanelCollapsedBar

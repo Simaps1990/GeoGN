@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
-import { MissionMemberModel } from '../models/missionMember.js';
+import { MissionMemberModel, type MissionMemberDoc } from '../models/missionMember.js';
 import { ZoneModel, type ZoneType } from '../models/zone.js';
 import { UserModel } from '../models/user.js';
 
@@ -40,6 +40,20 @@ type UpdateZoneBody = Partial<CreateZoneBody>;
 
 async function getMembership(userId: string, missionId: string) {
   return MissionMemberModel.findOne({ missionId, userId, removedAt: null }).lean();
+}
+
+async function getActiveAdminMembership(
+  missionId: string | mongoose.Types.ObjectId,
+  userId: string
+): Promise<MissionMemberDoc | null> {
+  if (!mongoose.Types.ObjectId.isValid(missionId.toString())) return null;
+  const m = await MissionMemberModel.findOne({
+    missionId,
+    userId,
+    removedAt: null,
+  }).lean();
+  if (!m || m.role !== 'admin') return null;
+  return m;
 }
 
 export async function zonesRoutes(app: FastifyInstance) {
@@ -82,6 +96,12 @@ export async function zonesRoutes(app: FastifyInstance) {
           createdBy: z.createdBy.toString(),
           createdAt: z.createdAt,
           updatedAt: z.updatedAt,
+          assignments: (z.assignments ?? []).map((a: any) => ({
+            userId: a.userId.toString(),
+            assignedAt: a.assignedAt,
+            assignedByUserId: a.assignedByUserId?.toString() ?? null,
+            gridCellId: a.gridCellId ?? null,
+          })),
         }))
       );
     }
@@ -283,6 +303,177 @@ export async function zonesRoutes(app: FastifyInstance) {
       app.io?.to(`mission:${missionId}`).emit('zone:deleted', { missionId, zoneId });
 
       return reply.send({ ok: true });
+    }
+  );
+
+  app.post<{ Params: { zoneId: string }; Body: { userIds: string[]; gridCellId?: string } }>(
+    '/zones/:zoneId/assignments',
+    async (req: FastifyRequest<{ Params: { zoneId: string }; Body: { userIds: string[]; gridCellId?: string } }>, reply: FastifyReply) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { zoneId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(zoneId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
+
+      const body = req.body as any;
+      const userIds = body?.userIds;
+      const gridCellId = body?.gridCellId;
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return reply.code(400).send({ error: 'INVALID_BODY' });
+      }
+      if (userIds.length > 50) {
+        return reply.code(400).send({ error: 'TOO_MANY_USERS' });
+      }
+      for (const uid of userIds) {
+        if (!mongoose.Types.ObjectId.isValid(uid)) {
+          return reply.code(400).send({ error: 'INVALID_ID' });
+        }
+      }
+
+      const zone = await ZoneModel.findById(zoneId).lean();
+      if (!zone) {
+        return reply.code(404).send({ error: 'ZONE_NOT_FOUND' });
+      }
+
+      const adminMembership = await getActiveAdminMembership(zone.missionId, req.userId);
+      if (!adminMembership) {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      const validMemberships = await MissionMemberModel.find({
+        missionId: zone.missionId,
+        userId: { $in: userIds },
+        removedAt: null,
+      }).select({ userId: 1 }).lean();
+      const validUserIds = new Set(validMemberships.map((m) => m.userId.toString()));
+      const filteredUserIds = userIds.filter((uid) => validUserIds.has(uid));
+
+      if (filteredUserIds.length === 0) {
+        return reply.code(400).send({ error: 'NO_VALID_MEMBERS' });
+      }
+
+      const alreadyAssignedUserIds = new Set((zone.assignments ?? []).map((a: any) => a.userId.toString()));
+      const newlyAssignedUserIds = filteredUserIds.filter((uid) => !alreadyAssignedUserIds.has(uid));
+      const alreadyAssignedButNeedUpdate = gridCellId
+        ? (zone.assignments ?? []).filter((a: any) => alreadyAssignedUserIds.has(a.userId.toString()) && !a.gridCellId)
+        : [];
+
+      // Add new assignments
+      if (newlyAssignedUserIds.length > 0) {
+        const now = new Date();
+        const newEntries = newlyAssignedUserIds.map((uid) => ({
+          userId: new mongoose.Types.ObjectId(uid),
+          assignedAt: now,
+          assignedByUserId: new mongoose.Types.ObjectId(req.userId),
+          ...(gridCellId ? { gridCellId } : {}),
+        }));
+        await ZoneModel.updateOne(
+          { _id: zoneId },
+          { $push: { assignments: { $each: newEntries } } }
+        );
+      }
+
+      // Update existing assignments to add gridCellId
+      if (alreadyAssignedButNeedUpdate.length > 0) {
+        for (const assignment of alreadyAssignedButNeedUpdate) {
+          await ZoneModel.updateOne(
+            { _id: zoneId, 'assignments.userId': assignment.userId },
+            { $set: { 'assignments.$.gridCellId': gridCellId } }
+          );
+        }
+      }
+
+      const updated = await ZoneModel.findById(zoneId).lean();
+
+      const assigner = await UserModel.findById(req.userId).select({ displayName: 1 }).lean();
+
+      // Notify users who were assigned (including those whose assignments were updated with gridCellId)
+      const allNotifiedUserIds = [...newlyAssignedUserIds, ...alreadyAssignedButNeedUpdate.map((a) => a.userId.toString())];
+      for (const uid of allNotifiedUserIds) {
+        app.io?.to(`user:${uid}`).emit('zone:assigned:you', {
+          missionId: zone.missionId.toString(),
+          zoneId: zone._id.toString(),
+          zoneName: zone.title,
+          assignedByUserName: assigner?.displayName ?? null,
+        });
+      }
+
+      app.io?.to(`mission:${zone.missionId}`).emit('zone:assignments:changed', {
+        missionId: zone.missionId.toString(),
+        zoneId: zone._id.toString(),
+        assignments: (updated!.assignments ?? []).map((a: any) => ({
+          userId: a.userId.toString(),
+          assignedAt: a.assignedAt.toISOString(),
+          assignedByUserId: a.assignedByUserId.toString(),
+          gridCellId: a.gridCellId ?? null,
+        })),
+      });
+
+      for (const uid of newlyAssignedUserIds) {
+        app.io?.to(`user:${uid}`).emit('zone:assigned:you', {
+          missionId: zone.missionId.toString(),
+          zoneId: zone._id.toString(),
+          zoneName: zone.title,
+          assignedByUserName: assigner?.displayName ?? null,
+        });
+      }
+
+      return reply.send({
+        ok: true,
+        assignments: updated!.assignments,
+        newlyAssignedCount: newlyAssignedUserIds.length,
+      });
+    }
+  );
+
+  app.delete<{ Params: { zoneId: string; userId: string } }>(
+    '/zones/:zoneId/assignments/:userId',
+    async (req: FastifyRequest<{ Params: { zoneId: string; userId: string } }>, reply: FastifyReply) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { zoneId, userId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(zoneId) || !mongoose.Types.ObjectId.isValid(userId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
+
+      const zone = await ZoneModel.findById(zoneId).lean();
+      if (!zone) {
+        return reply.code(404).send({ error: 'ZONE_NOT_FOUND' });
+      }
+
+      const adminMembership = await getActiveAdminMembership(zone.missionId, req.userId);
+      if (!adminMembership) {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      await ZoneModel.updateOne(
+        { _id: zoneId },
+        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId) } } }
+      );
+
+      const updated = await ZoneModel.findById(zoneId).lean();
+
+      app.io?.to(`mission:${zone.missionId}`).emit('zone:assignments:changed', {
+        missionId: zone.missionId.toString(),
+        zoneId: zone._id.toString(),
+        assignments: (updated!.assignments ?? []).map((a: any) => ({
+          userId: a.userId.toString(),
+          assignedAt: a.assignedAt.toISOString(),
+          assignedByUserId: a.assignedByUserId.toString(),
+        })),
+      });
+
+      return reply.send({ ok: true, assignments: updated!.assignments });
     }
   );
 }

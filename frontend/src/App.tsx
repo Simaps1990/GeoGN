@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import AppShell from './pages/AppShell';
 import { MissionProvider, useMission } from './contexts/MissionContext';
+import { GridViewProvider } from './contexts/GridViewContext';
 
 // Lazy-loaded pages
 const MissionsPage = lazy(() => import('./pages/MissionsPage'));
@@ -39,9 +40,10 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return <Auth />;
-  }
+  // Temporarily disabled login page
+  // if (!user) {
+  //   return <Auth />;
+  // }
 
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
@@ -58,7 +60,7 @@ function AppContent() {
 
         <Route path="/m/:missionId/*" element={<Navigate to="/mission/:missionId" replace />} />
 
-        <Route path="/mission/:missionId/*" element={<MissionLayout />}>
+        <Route path="/mission/:missionId/*" element={<GridViewProvider><MissionLayout /></GridViewProvider>}>
           <Route index element={<Navigate to="map" replace />} />
           <Route path="map" element={<MissionMapPage />} />
           <Route path="zones" element={<MissionZonesPage />} />

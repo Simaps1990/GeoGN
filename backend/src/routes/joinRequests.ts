@@ -6,6 +6,7 @@ import { MissionMemberModel } from '../models/missionMember.js';
 import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
 import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
+import { ZoneModel } from '../models/zone.js';
 
 const MEMBER_COLOR_PALETTE = [
   '#ef4444',
@@ -592,6 +593,19 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         }
       } catch {
         // non bloquant
+      }
+
+      // Purger toutes les attributions de carrés pour ce membre
+      const pullResult = await ZoneModel.updateMany(
+        { missionId, 'assignments.userId': memberUserId },
+        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(memberUserId) } } }
+      );
+
+      if (pullResult.modifiedCount > 0) {
+        // Forcer un refetch des zones côté tous les clients de la mission
+        app.io?.to(`mission:${missionId}`).emit('mission:zones-refetch', {
+          missionId: missionId.toString(),
+        });
       }
 
       return reply.send({ ok: true });

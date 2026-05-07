@@ -205,6 +205,7 @@ export default function MissionZonesPage() {
     <div className="p-4 pb-24">
       {dialog}
       <h1 className="text-xl font-bold text-gray-900">Gestion des Zones</h1>
+      {editError && !editingId ? <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{editError}</div> : null}
       {loading ? (
         <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
       ) : zones.length === 0 ? (
@@ -431,11 +432,13 @@ export default function MissionZonesPage() {
                             try {
                               await deleteZone(missionId, z.id);
                               setZones((prev) => prev.filter((x) => x.id !== z.id));
-                            } catch {
+                            } catch (e: any) {
                               const offline = !navigator.onLine;
                               if (offline) {
                                 setZones((prev) => prev.filter((x) => x.id !== z.id));
                                 enqueueOfflineAction({ entity: 'zone', op: 'delete', id: z.id, t: Date.now() });
+                              } else {
+                                setEditError(e?.message ?? 'DELETE_ZONE_FAILED');
                               }
                             } finally {
                               setBusyId(null);

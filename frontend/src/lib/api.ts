@@ -55,6 +55,13 @@ export type ApiPoi = {
   createdAt: string;
 };
 
+export type ApiZoneAssignment = {
+  userId: string;
+  assignedAt: string;
+  assignedByUserId: string;
+  gridCellId?: string;
+};
+
 export type ApiZone = {
   id: string;
   title: string;
@@ -71,6 +78,7 @@ export type ApiZone = {
         geometry: { type: 'Polygon'; coordinates: number[][][] };
       }[]
     | null;
+  assignments: ApiZoneAssignment[];
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -209,12 +217,13 @@ async function rawFetch(path: string, init?: RequestInit) {
   const url = `${getApiBaseUrl()}${path}`;
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+  const hasBody = init?.body != null;
   try {
     return await fetch(url, {
       ...init,
       signal: init?.signal ?? controller.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         ...(init?.headers ?? {}),
       },
     });
@@ -860,6 +869,29 @@ export async function deleteZone(missionId: string, zoneId: string) {
     throw new Error(body?.error ?? 'DELETE_ZONE_FAILED');
   }
   return (await res.json()) as { ok: true };
+}
+
+export async function assignZoneToUsers(zoneId: string, userIds: string[], gridCellId?: string) {
+  const res = await apiFetch(`/zones/${encodeURIComponent(zoneId)}/assignments`, {
+    method: 'POST',
+    body: JSON.stringify({ userIds, ...(gridCellId ? { gridCellId } : {}) }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'ASSIGN_ZONE_FAILED');
+  }
+  return (await res.json()) as { ok: true; assignments: ApiZoneAssignment[]; newlyAssignedCount: number };
+}
+
+export async function unassignZoneFromUser(zoneId: string, userId: string) {
+  const res = await apiFetch(`/zones/${encodeURIComponent(zoneId)}/assignments/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'UNASSIGN_ZONE_FAILED');
+  }
+  return (await res.json()) as { ok: true; assignments: ApiZoneAssignment[] };
 }
 
 export async function updateZone(

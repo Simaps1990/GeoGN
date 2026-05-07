@@ -24,6 +24,13 @@ export interface ZoneGrid {
   orientation?: 'vertical' | 'diag45';
 }
 
+export interface ZoneAssignment {
+  userId: mongoose.Types.ObjectId;
+  assignedAt: Date;
+  assignedByUserId: mongoose.Types.ObjectId;
+  gridCellId?: string; // e.g., "A1", "B2" for grid cell assignments
+}
+
 export interface ZoneDoc {
   _id: mongoose.Types.ObjectId;
   missionId: mongoose.Types.ObjectId;
@@ -35,6 +42,7 @@ export interface ZoneDoc {
   polygon?: GeoJSONPolygon;
   sectors?: ZoneSector[];
   grid?: ZoneGrid;
+  assignments: ZoneAssignment[];
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +74,16 @@ const ZoneGridSchema = new Schema<ZoneGrid>(
   { _id: false }
 );
 
+const ZoneAssignmentSchema = new Schema<ZoneAssignment>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    assignedAt: { type: Date, required: true, default: () => new Date() },
+    assignedByUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    gridCellId: { type: String, required: false },
+  },
+  { _id: false }
+);
+
 const ZoneSchema = new Schema<ZoneDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
@@ -83,6 +101,7 @@ const ZoneSchema = new Schema<ZoneDoc>(
     polygon: { type: GeoJSONPolygonSchema, required: false },
     sectors: { type: [ZoneSectorSchema], required: false },
     grid: { type: ZoneGridSchema, required: false },
+    assignments: { type: [ZoneAssignmentSchema], default: [] },
     createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
     createdAt: { type: Date, required: true, default: () => new Date() },
     updatedAt: { type: Date, required: true, default: () => new Date() },
@@ -92,5 +111,6 @@ const ZoneSchema = new Schema<ZoneDoc>(
 
 ZoneSchema.index({ polygon: '2dsphere' });
 ZoneSchema.index({ 'sectors.geometry': '2dsphere' });
+ZoneSchema.index({ missionId: 1, 'assignments.userId': 1 });
 
 export const ZoneModel = mongoose.model<ZoneDoc>('Zone', ZoneSchema);
