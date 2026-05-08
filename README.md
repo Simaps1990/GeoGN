@@ -493,6 +493,7 @@ try {
 }
 ```
 
+
 **Lectures MongoDB (Backend)**
 - Toujours utiliser `.lean()` pour éviter les surcharges Mongoose
 ```typescript
