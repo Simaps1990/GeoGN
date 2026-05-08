@@ -193,14 +193,15 @@ export async function oidcPlugin(app: FastifyInstance) {
     // Redirige également vers le logout Keycloak pour fermer la session SSO côté IdP.
     const issuerUrl = process.env.OIDC_ISSUER_URL;
     const clientId = process.env.OIDC_CLIENT_ID;
-    const frontendBaseUrl = process.env.FRONTEND_BASE_URL ?? '/';
+    const frontendBaseUrl = (process.env.FRONTEND_BASE_URL ?? '/').replace(/\/$/, '');
+    const postLogoutRedirectUri = `${frontendBaseUrl}/login`;
     if (!issuerUrl || !clientId) {
-      return reply.send({ ok: true });
+      return reply.redirect(postLogoutRedirectUri);
     }
 
     const logoutUrl = `${issuerUrl.replace(/\/$/, '')}/protocol/openid-connect/logout?client_id=${encodeURIComponent(
       clientId
-    )}&post_logout_redirect_uri=${encodeURIComponent(frontendBaseUrl)}`;
+    )}&post_logout_redirect_uri=${encodeURIComponent(postLogoutRedirectUri)}`;
 
     return reply.redirect(logoutUrl);
   }
