@@ -268,4 +268,13 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.send({ ok: true });
     }
   );
+
+  // Logout route - always available, not dependent on OIDC configuration
+  app.post('/api/logout', async (req: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({ ok: true });
+  });
+
+  app.get('/api/logout', async (req: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({ ok: true });
+  });
 }
