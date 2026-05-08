@@ -8055,9 +8055,6 @@ export default function MapLibreMap() {
               className="h-11 min-w-0 flex-1 rounded-2xl border bg-white px-3 text-sm outline-none focus:border-blue-500"
             >
               <option value="">Choisir un membre</option>
-              <option key="test-user" value="507f1f77bcf86cd799439011">
-                Moi (test)
-              </option>
               {zoneAssignmentMembers
                 .filter((member) => member.user)
                 .map((member) => (
@@ -8079,8 +8076,7 @@ export default function MapLibreMap() {
                 try {
                   await assignZoneToUsers(zoneId, [zoneAssignmentSelectedMemberId], gridCellId);
                   setZoneAssignmentSelectedMemberId('');
-                  // Show toast notification (since Socket.IO doesn't work with auth disabled)
-                  const assigneeName = zoneAssignmentMembers.find((m) => m.user?.id === zoneAssignmentSelectedMemberId)?.user?.displayName ?? 'Moi (test)';
+                  const assigneeName = zoneAssignmentMembers.find((m) => m.user?.id === zoneAssignmentSelectedMemberId)?.user?.displayName ?? 'ce membre';
                   setActivityToast(`Zone attribuée à ${assigneeName}`);
                   // Clear selection after assignment
                   for (const id of selectedZoneIds) toggleSelection(id);

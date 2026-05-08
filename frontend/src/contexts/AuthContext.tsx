@@ -58,37 +58,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const explicitLogout = localStorage.getItem(EXPLICIT_LOGOUT_KEY) === 'true';
+        if (explicitLogout) {
+          clearTokens();
+          setUser(null);
+          return;
+        }
 
         // 1) Tenter d'abord une session BFF (Keycloak) via /api/me
         try {
-          if (!explicitLogout) {
-            const baseUrl = getApiBaseUrl();
-            const res = await fetch(`${baseUrl}/api/me`, {
-              method: 'GET',
-              credentials: 'include',
-            });
-            if (res.ok) {
-              const data: any = await res.json().catch(() => null);
-              if (data && data.authenticated && data.user) {
-                // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
-                const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
-                  method: 'POST',
-                  credentials: 'include',
-                });
-                if (attachRes.ok) {
-                  const attach: any = await attachRes.json().catch(() => null);
-                  if (attach && attach.accessToken && attach.refreshToken && attach.user) {
-                    setTokens(attach.accessToken, attach.refreshToken);
-                    try {
-                      if (attach.user.id) {
-                        localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
-                      }
-                    } catch {
-                      // ignore
+          const baseUrl = getApiBaseUrl();
+          const res = await fetch(`${baseUrl}/api/me`, {
+            method: 'GET',
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const data: any = await res.json().catch(() => null);
+            if (data && data.authenticated && data.user) {
+              // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
+              const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
+                method: 'POST',
+                credentials: 'include',
+              });
+              if (attachRes.ok) {
+                const attach: any = await attachRes.json().catch(() => null);
+                if (attach && attach.accessToken && attach.refreshToken && attach.user) {
+                  setTokens(attach.accessToken, attach.refreshToken);
+                  try {
+                    if (attach.user.id) {
+                      localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
                     }
-                    setUser(attach.user as ApiUser);
-                    return;
+                  } catch {
+                    // ignore
                   }
+                  setUser(attach.user as ApiUser);
+                  return;
                 }
               }
             }
@@ -179,6 +182,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshUser = async () => {
+    if (localStorage.getItem(EXPLICIT_LOGOUT_KEY) === 'true') {
+      clearTokens();
+      clearCachedMissionState();
+      setUser(null);
+      return;
+    }
+
     try {
       const current = await me();
 

@@ -40,14 +40,19 @@ function AppContent() {
     );
   }
 
-  // Temporarily disabled login page
-  // if (!user) {
-  //   return <Auth />;
-  // }
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Auth />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
 
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <Routes>
+        <Route path="/login" element={<Navigate to="/home" replace />} />
         <Route element={<AppShell />}>
           <Route index element={<IndexRedirect />} />
           <Route path="/map" element={<MapGate />} />
@@ -83,4 +88,3 @@ function App() {
 }
 
 export default App;
-// logout fix
