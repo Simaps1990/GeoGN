@@ -1,6 +1,7 @@
+// Netlify deploy trigger
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Auth from './components/Auth';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { RouterProvider, createBrowserRouter, useNavigate, useLocation } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import AppShell from './pages/AppShell';
 import { MissionProvider, useMission } from './contexts/MissionContext';
