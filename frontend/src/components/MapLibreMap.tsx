@@ -7684,8 +7684,8 @@ export default function MapLibreMap() {
                   const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
                   const row = parseInt(match[2], 10) - 1;
                   if (col >= 0 && col < cols && row >= 0 && row < rows) {
-                    const labelLng = bbox.minLng + (col + 0.92) * dx;
-                    const labelLat = bbox.minLat + (row + 0.92) * dy;
+                    const labelLng = bbox.minLng + (col + 0.85) * dx;
+                    const labelLat = bbox.minLat + (row + 0.85) * dy;
                     const offsetLng = i * dx * 0.14;
                     labelsFeatures.push({
                       type: 'Feature',
