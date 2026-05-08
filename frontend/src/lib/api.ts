@@ -883,8 +883,9 @@ export async function assignZoneToUsers(zoneId: string, userIds: string[], gridC
   return (await res.json()) as { ok: true; assignments: ApiZoneAssignment[]; newlyAssignedCount: number };
 }
 
-export async function unassignZoneFromUser(zoneId: string, userId: string) {
-  const res = await apiFetch(`/zones/${encodeURIComponent(zoneId)}/assignments/${encodeURIComponent(userId)}`, {
+export async function unassignZoneFromUser(zoneId: string, userId: string, gridCellId?: string) {
+  const query = gridCellId ? `?gridCellId=${encodeURIComponent(gridCellId)}` : '';
+  const res = await apiFetch(`/zones/${encodeURIComponent(zoneId)}/assignments/${encodeURIComponent(userId)}${query}`, {
     method: 'DELETE',
   });
   if (!res.ok) {

@@ -59,6 +59,7 @@ import {
   updateZone,
   updateMission,
   assignZoneToUsers,
+  unassignZoneFromUser,
   createVehicleTrack,
   listVehicleTracks,
   deleteVehicleTrack,
@@ -1556,6 +1557,25 @@ export default function MapLibreMap() {
     const name = buildUserDisplayName(id);
     return `Créé par ${name}`;
   })();
+
+  const selectedGridCellAssignments = useMemo(() => {
+    return selectedZoneIds.flatMap((selectionId) => {
+      if (!selectionId.includes(':grid:')) return [];
+      const zoneId = selectionId.split(':')[0];
+      const gridCellId = selectionId.split(':').slice(2).join(':');
+      const assignments = assignmentsByZoneId.get(zoneId) ?? [];
+      return assignments
+        .filter((assignment) => assignment.gridCellId === gridCellId)
+        .map((assignment) => ({
+          selectionId,
+          zoneId,
+          gridCellId,
+          userId: assignment.userId,
+          name: buildUserDisplayName(assignment.userId),
+          color: memberColors[assignment.userId] ?? '#3b82f6',
+        }));
+    });
+  }, [selectedZoneIds, assignmentsByZoneId, assignmentsVersion, memberColors, memberNames, user?.id, user?.displayName]);
 
   useEffect(() => {
     if (!selectedMissionId) {
@@ -3754,19 +3774,16 @@ export default function MapLibreMap() {
     if (!map.getLayer('zones-assignments-labels')) {
       map.addLayer({
         id: 'zones-assignments-labels',
-        type: 'symbol',
+        type: 'circle',
         source: 'zones-assignments-labels',
-        layout: {
-          'text-field': ['get', 'memberName'],
-          'text-size': 11,
-          'text-anchor': 'center',
-          'text-offset': [0, 0],
-          visibility: 'none',
-        },
         paint: {
-          'text-color': '#111827',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 2,
+          'circle-radius': 6,
+          'circle-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+        layout: {
+          visibility: 'none',
         },
       });
     }
@@ -7595,8 +7612,8 @@ export default function MapLibreMap() {
         }
       }
 
-      // In member-highlight mode, also highlight specific grid cells where user is assigned
-      if (mode === 'member-highlight' && user && z.grid?.rows && z.grid?.cols) {
+      // Highlight specific grid cells where the current user is assigned in grid modes
+      if ((mode === 'member-highlight' || mode === 'admin-select') && user && z.grid?.rows && z.grid?.cols) {
         const assignments = assignmentsByZoneId.get(z.id);
         if (assignments) {
           const userAssignments = assignments.filter((a) => a.userId === user.id && a.gridCellId);
@@ -7651,6 +7668,7 @@ export default function MapLibreMap() {
           for (let i = 0; i < cellAssignments.length; i++) {
             const assignment = cellAssignments[i];
             const memberName = buildUserDisplayName(assignment.userId);
+            const memberColor = memberColors[assignment.userId] ?? '#3b82f6';
 
             // If assignment has gridCellId, position label at that cell's center
             if (cellKey && z.grid?.rows && z.grid?.cols) {
@@ -7666,14 +7684,13 @@ export default function MapLibreMap() {
                   const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
                   const row = parseInt(match[2], 10) - 1;
                   if (col >= 0 && col < cols && row >= 0 && row < rows) {
-                    const centerLng = bbox.minLng + (col + 0.5) * dx;
-                    const centerLat = bbox.minLat + (row + 0.5) * dy;
-                    // Add vertical offset for each additional user
-                    const offsetLat = i * 0.0002; // Small offset in degrees
+                    const labelLng = bbox.minLng + (col + 0.92) * dx;
+                    const labelLat = bbox.minLat + (row + 0.92) * dy;
+                    const offsetLng = i * dx * 0.14;
                     labelsFeatures.push({
                       type: 'Feature',
-                      properties: { zoneId: z.id, memberName, userId: assignment.userId },
-                      geometry: { type: 'Point', coordinates: [centerLng, centerLat - offsetLat] },
+                      properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
+                      geometry: { type: 'Point', coordinates: [labelLng - offsetLng, labelLat] },
                     });
                   }
                 }
@@ -7690,7 +7707,7 @@ export default function MapLibreMap() {
                 const offsetLat = i * 0.0002; // Small offset in degrees
                 labelsFeatures.push({
                   type: 'Feature',
-                  properties: { zoneId: z.id, memberName, userId: assignment.userId },
+                  properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
                   geometry: { type: 'Point', coordinates: [center.lng, center.lat - offsetLat] },
                 });
               }
@@ -7704,8 +7721,6 @@ export default function MapLibreMap() {
     highlightedSource.setData({ type: 'FeatureCollection', features: highlightedFeatures });
     labelsSource.setData({ type: 'FeatureCollection', features: labelsFeatures });
 
-    console.log('Label generation complete:', { labelsCount: labelsFeatures.length, mode });
-
     const selectedLayer = map.getLayer('zones-selected-fill');
     const highlightedLayer = map.getLayer('zones-highlighted-fill');
     const labelsLayer = map.getLayer('zones-assignments-labels');
@@ -7714,12 +7729,12 @@ export default function MapLibreMap() {
       map.setLayoutProperty('zones-selected-fill', 'visibility', mode === 'admin-select' ? 'visible' : 'none');
     }
     if (highlightedLayer) {
-      map.setLayoutProperty('zones-highlighted-fill', 'visibility', mode === 'member-highlight' ? 'visible' : 'none');
+      map.setLayoutProperty('zones-highlighted-fill', 'visibility', mode === 'member-highlight' || mode === 'admin-select' ? 'visible' : 'none');
     }
     if (labelsLayer) {
       map.setLayoutProperty('zones-assignments-labels', 'visibility', mode !== 'off' ? 'visible' : 'none');
     }
-  }, [zones, selectedZoneIds, highlightedZoneIds, assignmentsByZoneId, assignmentsVersion, mode, mapReady]);
+  }, [zones, selectedZoneIds, highlightedZoneIds, assignmentsByZoneId, assignmentsVersion, memberColors, mode, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -8047,6 +8062,51 @@ export default function MapLibreMap() {
               );
             })}
           </div>
+
+          {selectedGridCellAssignments.length > 0 ? (
+            <div className="mt-3 flex max-h-24 flex-wrap gap-2 overflow-auto">
+              {selectedGridCellAssignments.map((assignment) => (
+                <span
+                  key={`${assignment.selectionId}:${assignment.userId}`}
+                  className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-xs font-semibold text-gray-800 shadow-sm"
+                  style={{
+                    borderColor: assignment.color,
+                    backgroundColor: `${assignment.color}22`,
+                  }}
+                >
+                  <span
+                    className="h-3 w-3 rounded-full border border-white shadow"
+                    style={{ backgroundColor: assignment.color }}
+                  />
+                  <span>{assignment.name}</span>
+                  <button
+                    type="button"
+                    className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-700"
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: 'Retirer cette attribution ?',
+                        message: `Voulez-vous retirer ${assignment.name} du carré ${assignment.gridCellId} uniquement ?`,
+                        confirmText: 'Oui',
+                        cancelText: 'Non',
+                      });
+                      if (!ok) return;
+                      try {
+                        await unassignZoneFromUser(assignment.zoneId, assignment.userId, assignment.gridCellId);
+                        await refetchAssignments();
+                        setActivityToast(`Attribution retirée pour ${assignment.name}`);
+                      } catch (e: any) {
+                        console.error('Unassignment failed:', e);
+                        alert(`Erreur de retrait: ${e?.message || 'Erreur inconnue'}`);
+                      }
+                    }}
+                    aria-label={`Retirer ${assignment.name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
 
           <div className="mt-3 flex gap-2">
             <select

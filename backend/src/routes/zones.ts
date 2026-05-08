@@ -432,9 +432,9 @@ export async function zonesRoutes(app: FastifyInstance) {
     }
   );
 
-  app.delete<{ Params: { zoneId: string; userId: string } }>(
+  app.delete<{ Params: { zoneId: string; userId: string }; Querystring: { gridCellId?: string } }>(
     '/zones/:zoneId/assignments/:userId',
-    async (req: FastifyRequest<{ Params: { zoneId: string; userId: string } }>, reply: FastifyReply) => {
+    async (req: FastifyRequest<{ Params: { zoneId: string; userId: string }; Querystring: { gridCellId?: string } }>, reply: FastifyReply) => {
       try {
         requireAuth(req);
       } catch (e: any) {
@@ -442,6 +442,7 @@ export async function zonesRoutes(app: FastifyInstance) {
       }
 
       const { zoneId, userId } = req.params;
+      const { gridCellId } = req.query;
       if (!mongoose.Types.ObjectId.isValid(zoneId) || !mongoose.Types.ObjectId.isValid(userId)) {
         return reply.code(400).send({ error: 'INVALID_ID' });
       }
@@ -458,7 +459,7 @@ export async function zonesRoutes(app: FastifyInstance) {
 
       await ZoneModel.updateOne(
         { _id: zoneId },
-        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId) } } }
+        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId), ...(gridCellId ? { gridCellId } : {}) } } }
       );
 
       const updated = await ZoneModel.findById(zoneId).lean();
@@ -470,6 +471,7 @@ export async function zonesRoutes(app: FastifyInstance) {
           userId: a.userId.toString(),
           assignedAt: a.assignedAt.toISOString(),
           assignedByUserId: a.assignedByUserId.toString(),
+          gridCellId: a.gridCellId ?? null,
         })),
       });
 
