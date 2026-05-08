@@ -1,4 +1,4 @@
-// Netlify deploy trigger
+/* Netlify deploy trigger - logout redirect fix */
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { RouterProvider, createBrowserRouter, useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
