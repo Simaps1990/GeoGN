@@ -6,7 +6,16 @@ export type AuthenticatedRequest = FastifyRequest & {
 };
 
 export function requireAuth(req: FastifyRequest): asserts req is AuthenticatedRequest {
-  // Temporarily disabled authentication for testing
-  (req as AuthenticatedRequest).userId = '507f1f77bcf86cd799439011';
-  return;
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw Object.assign(new Error('UNAUTHORIZED'), { statusCode: 401 });
+  }
+
+  const token = authHeader.slice(7);
+  const payload = verifyAccessToken(token);
+  if (!payload) {
+    throw Object.assign(new Error('INVALID_TOKEN'), { statusCode: 401 });
+  }
+
+  (req as AuthenticatedRequest).userId = payload.sub;
 }
