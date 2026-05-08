@@ -271,12 +271,10 @@ export async function authRoutes(app: FastifyInstance) {
 
   // Logout route - always available, not dependent on OIDC configuration
   app.post('/api/logout', async (req: FastifyRequest, reply: FastifyReply) => {
-    const frontendBaseUrl = process.env.FRONTEND_BASE_URL ?? '/';
-    return reply.redirect(`${frontendBaseUrl}/login`);
+    return reply.redirect('/login');
   });
 
   app.get('/api/logout', async (req: FastifyRequest, reply: FastifyReply) => {
-    const frontendBaseUrl = process.env.FRONTEND_BASE_URL ?? '/';
-    return reply.redirect(`${frontendBaseUrl}/login`);
+    return reply.redirect('/login');
   });
 }
