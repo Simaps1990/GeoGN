@@ -4,6 +4,7 @@ import { clearTokens, getApiBaseUrl, login, me, register, setTokens } from '../l
 
 const SELECTED_MISSION_KEY = 'geotacops.selectedMissionId';
 const LAST_USER_KEY = 'geotacops.lastUserId';
+const EXPLICIT_LOGOUT_KEY = 'geotacops.explicitLogout';
 
 function clearCachedMissionState() {
   try {
@@ -56,34 +57,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
+        const explicitLogout = localStorage.getItem(EXPLICIT_LOGOUT_KEY) === 'true';
+
         // 1) Tenter d'abord une session BFF (Keycloak) via /api/me
         try {
-          const baseUrl = getApiBaseUrl();
-          const res = await fetch(`${baseUrl}/api/me`, {
-            method: 'GET',
-            credentials: 'include',
-          });
-          if (res.ok) {
-            const data: any = await res.json().catch(() => null);
-            if (data && data.authenticated && data.user) {
-              // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
-              const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
-                method: 'POST',
-                credentials: 'include',
-              });
-              if (attachRes.ok) {
-                const attach: any = await attachRes.json().catch(() => null);
-                if (attach && attach.accessToken && attach.refreshToken && attach.user) {
-                  setTokens(attach.accessToken, attach.refreshToken);
-                  try {
-                    if (attach.user.id) {
-                      localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
+          if (!explicitLogout) {
+            const baseUrl = getApiBaseUrl();
+            const res = await fetch(`${baseUrl}/api/me`, {
+              method: 'GET',
+              credentials: 'include',
+            });
+            if (res.ok) {
+              const data: any = await res.json().catch(() => null);
+              if (data && data.authenticated && data.user) {
+                // On a une session BFF (Keycloak). On attache maintenant un compte appli + JWT.
+                const attachRes = await fetch(`${baseUrl}/auth/oidc/attach`, {
+                  method: 'POST',
+                  credentials: 'include',
+                });
+                if (attachRes.ok) {
+                  const attach: any = await attachRes.json().catch(() => null);
+                  if (attach && attach.accessToken && attach.refreshToken && attach.user) {
+                    setTokens(attach.accessToken, attach.refreshToken);
+                    try {
+                      if (attach.user.id) {
+                        localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
+                      }
+                    } catch {
+                      // ignore
                     }
-                  } catch {
-                    // ignore
+                    setUser(attach.user as ApiUser);
+                    return;
                   }
-                  setUser(attach.user as ApiUser);
-                  return;
                 }
               }
             }
@@ -128,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const u = await login(email, password);
     clearCachedMissionState();
     try {
+      localStorage.removeItem(EXPLICIT_LOGOUT_KEY);
       localStorage.setItem(LAST_USER_KEY, u.id);
     } catch {
       // ignore
@@ -139,6 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const u = await register(email, password, displayName);
     clearCachedMissionState();
     try {
+      localStorage.removeItem(EXPLICIT_LOGOUT_KEY);
       localStorage.setItem(LAST_USER_KEY, u.id);
     } catch {
       // ignore
@@ -151,6 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearTokens();
     clearCachedMissionState();
     try {
+      localStorage.setItem(EXPLICIT_LOGOUT_KEY, 'true');
       localStorage.removeItem(LAST_USER_KEY);
     } catch {
       // ignore
