@@ -157,15 +157,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
 
-    // 2) Redirection complète vers le backend pour fermer la session BFF/Keycloak
-    // Utiliser une navigation de page (pas fetch) pour éviter les problèmes CORS
-    // et laisser Keycloak gérer la redirection post-logout.
     try {
       const baseUrl = getApiBaseUrl();
-      window.location.href = `${baseUrl}/api/logout`;
+      await fetch(`${baseUrl}/api/logout`, {
+        method: 'GET',
+        credentials: 'include',
+      }).catch(() => null);
     } catch {
       // En cas de problème, on reste simplement déconnecté côté appli.
     }
+
+    window.location.href = '/login';
   };
 
   const refreshUser = async () => {

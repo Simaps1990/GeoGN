@@ -27,6 +27,15 @@ await app.register(cors, { origin: true, credentials: true });
 // OIDC / Keycloak BFF SSO (cookies + server-side tokens)
 if (process.env.OIDC_ISSUER_URL) {
   await app.register(oidcPlugin);
+} else {
+  const handleLocalLogout = async (_req: any, reply: any) => {
+    const frontendBaseUrl = (process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    reply.header('Set-Cookie', 'bff_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
+    return reply.redirect(`${frontendBaseUrl}/login`);
+  };
+
+  app.get('/api/logout', handleLocalLogout);
+  app.post('/api/logout', handleLocalLogout);
 }
 
 await connectMongo(mongoUri);
