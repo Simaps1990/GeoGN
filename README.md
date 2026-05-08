@@ -480,6 +480,42 @@ docker-compose up       # Lancer backend + MongoDB
 - Efficacité du cache socket (hit rate)
 - Volume des requêtes `position:update` vs `position:bulk`
 
+## Fonctionnalités d'Assignment de Grille
+
+### Overview
+Les zones de recherche peuvent être divisées en grilles (lignes x colonnes) pour permettre des assignments plus précis au niveau des cellules individuelles.
+
+### Assignments au Niveau Cellule
+- Chaque cellule de grille peut être assignée à un utilisateur spécifique
+- Les assignments sont stockés avec un champ `gridCellId` (ex: "A1", "B2")
+- Plusieurs utilisateurs peuvent être assignés à la même cellule (labels empilés verticalement)
+
+### Modes de Grille
+- **admin-select** : Mode admin pour sélectionner et assigner des cellules aux membres
+  - Cliquez sur une cellule pour la sélectionner
+  - Utilisez le popup pour choisir un membre et assigner
+  - Les labels des assignments s'affichent au centre de chaque cellule
+- **member-highlight** : Mode membre pour voir ses propres assignments
+  - Les cellules assignées à l'utilisateur courant sont surlignées
+  - Utile pour visualiser rapidement ses zones de responsabilité
+
+### Notifications
+- Snackbar notification quand un admin assigne une zone à un utilisateur
+- Message : "surnom vous a attribué une zone de recherche"
+- Mise à jour en temps réel via Socket.IO
+
+### Backend Changes
+- Modèle `ZoneAssignment` avec champ `gridCellId` optionnel
+- Route POST `/zones/:zoneId/assignments` accepte `gridCellId` dans le body
+- Mise à jour automatique des assignments existants quand `gridCellId` est fourni
+- Route GET `/missions/:missionId/zones` retourne `gridCellId` dans les assignments
+
+### Frontend Changes
+- Hook `useZoneAssignments` avec version counter pour forcer les re-renders
+- Labels positionnés au centre des cellules de grille (calcul basé sur bbox)
+- Offset vertical pour les labels multiples dans la même cellule
+- Toast notification directe après assignation (contournement Socket.IO si auth désactivée)
+
 ## Bonnes Pratiques pour les Développeurs
 
 ### Patterns à Respecter
