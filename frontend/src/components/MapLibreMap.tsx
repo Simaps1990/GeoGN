@@ -3788,7 +3788,8 @@ export default function MapLibreMap() {
 
     if (!map.getLayer('zones-assignments-labels')) {
       // Ajouter un carré SVG comme icône avant de créer la couche
-      const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="#ffffff"/></svg>`;
+      // Le fill="currentColor" permet à icon-color de colorer le carré
+      const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="currentColor"/></svg>`;
       const svgBase64 = btoa(svg);
       const imgUrl = `data:image/svg+xml;base64,${svgBase64}`;
 
@@ -8057,7 +8058,19 @@ export default function MapLibreMap() {
         gridViewMode={mode}
         gridViewToggle={() => toggle(isAdmin ? 'admin-select' : 'member-highlight')}
         gridViewResetBadge={resetBadge}
-        gridViewBadgeCount={mode === 'admin-select' ? selectedZoneIds.length : mode === 'member-highlight' ? highlightedZoneIds.length : 0}
+        gridViewBadgeCount={
+          mode === 'admin-select'
+            ? selectedZoneIds.length
+            : mode === 'member-highlight' && user
+              ? (() => {
+                  let count = 0;
+                  for (const assignments of assignmentsByZoneId.values()) {
+                    count += assignments.filter((a) => a.userId === user.id && a.gridCellId).length;
+                  }
+                  return count;
+                })()
+              : 0
+        }
       />
 
       {mode === 'admin-select' && selectedZoneIds.length > 0 ? (
