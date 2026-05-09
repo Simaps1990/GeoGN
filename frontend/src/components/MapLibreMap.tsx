@@ -3787,39 +3787,70 @@ export default function MapLibreMap() {
     }
 
     if (!map.getLayer('zones-assignments-labels')) {
-      // Ajouter un carré SVG comme icône avant de créer la couche
-      // Le fill="currentColor" permet à icon-color de colorer le carré
-      const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="currentColor"/></svg>`;
-      const svgBase64 = btoa(svg);
-      const imgUrl = `data:image/svg+xml;base64,${svgBase64}`;
+      // Image par défaut
+      const defaultSvg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="#3b82f6"/></svg>`;
+      const defaultSvgBase64 = btoa(defaultSvg);
+      const defaultImgUrl = `data:image/svg+xml;base64,${defaultSvgBase64}`;
 
-      const loadImage = () => {
-        const img = new Image();
-        img.onload = () => {
-          if (!map.hasImage('square')) {
-            map.addImage('square', img);
-          }
-        };
-        img.src = imgUrl;
+      const defaultImg = new Image();
+      defaultImg.onload = () => {
+        if (!map.hasImage('square-default')) {
+          map.addImage('square-default', defaultImg);
+        }
       };
-      loadImage();
+      defaultImg.src = defaultImgUrl;
 
       map.addLayer({
         id: 'zones-assignments-labels',
         type: 'symbol',
         source: 'zones-assignments-labels',
         layout: {
-          'icon-image': 'square',
-          'icon-size': 0.5,
+          'icon-image': 'square-default',
+          'icon-size': 0.7,
           'icon-anchor': 'center',
           'icon-allow-overlap': true,
           visibility: 'none',
         },
-        paint: {
-          'icon-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
-        },
       });
     }
+
+    // Charger dynamiquement les images pour chaque couleur de membre
+    useEffect(() => {
+      const map = mapInstanceRef.current;
+      if (!map) return;
+
+      const colors = Object.values(memberColors);
+      const uniqueColors = [...new Set(colors)];
+
+      for (const color of uniqueColors) {
+        const imageName = `square-${color}`;
+        if (map.hasImage(imageName)) continue;
+
+        const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="${color}"/></svg>`;
+        const svgBase64 = btoa(svg);
+        const imgUrl = `data:image/svg+xml;base64,${svgBase64}`;
+
+        const img = new Image();
+        img.onload = () => {
+          if (!map.hasImage(imageName)) {
+            map.addImage(imageName, img);
+          }
+        };
+        img.src = imgUrl;
+      }
+
+      // Mettre à jour l'expression match
+      const matchExpression: any[] = ['match', ['get', 'memberColor']];
+      for (const color of uniqueColors) {
+        matchExpression.push(color, `square-${color}`);
+      }
+      matchExpression.push('square-default');
+
+      const layer = map.getLayer('zones-assignments-labels');
+      if (layer) {
+        map.setLayoutProperty('zones-assignments-labels', 'icon-image', matchExpression as any);
+      }
+    }, [memberColors, mapReady]);
 
     if (!map.getSource('vehicle-track-reached')) {
       const fromAnyState = (() => {
