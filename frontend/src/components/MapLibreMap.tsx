@@ -3794,7 +3794,7 @@ export default function MapLibreMap() {
         paint: {
           'fill-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
           'fill-opacity': 1,
-          'fill-outline-color': 'rgba(0, 0, 0, 0.15)',
+          'fill-outline-color': 'rgba(0, 0, 0, 0.5)',
         },
         layout: {
           visibility: 'none',
