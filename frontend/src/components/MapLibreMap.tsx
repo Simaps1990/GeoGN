@@ -1547,7 +1547,7 @@ export default function MapLibreMap() {
   const { user } = useAuth();
   const { selectedMissionId } = useMission();
   const { mode, selectedZoneIds, highlightedZoneIds, toggle, toggleSelection, resetBadge } = useGridView();
-  const { assignmentsByZoneId, refetch: refetchAssignments, assignmentsVersion } = useZoneAssignments(selectedMissionId);
+  const { assignmentsByZoneId, refetch: refetchAssignments } = useZoneAssignments(selectedMissionId);
   const [zoneAssignmentMembers, setZoneAssignmentMembers] = useState<ApiMissionMember[]>([]);
   const [zoneAssignmentSelectedMemberId, setZoneAssignmentSelectedMemberId] = useState('');
 
@@ -1560,22 +1560,22 @@ export default function MapLibreMap() {
 
   const selectedGridCellAssignments = useMemo(() => {
     return selectedZoneIds.flatMap((selectionId) => {
-      if (!selectionId.includes(':grid:')) return [];
       const zoneId = selectionId.split(':')[0];
-      const gridCellId = selectionId.split(':').slice(2).join(':');
+      const isGrid = selectionId.includes(':grid:');
+      const gridCellId = isGrid ? selectionId.split(':').slice(2).join(':') : undefined;
       const assignments = assignmentsByZoneId.get(zoneId) ?? [];
       return assignments
-        .filter((assignment) => assignment.gridCellId === gridCellId)
-        .map((assignment) => ({
+        .filter(a => isGrid ? a.gridCellId === gridCellId : !a.gridCellId)
+        .map(a => ({
           selectionId,
           zoneId,
-          gridCellId,
-          userId: assignment.userId,
-          name: buildUserDisplayName(assignment.userId),
-          color: memberColors[assignment.userId] ?? '#3b82f6',
+          gridCellId: a.gridCellId,
+          userId: a.userId,
+          name: buildUserDisplayName(a.userId),
+          color: memberColors[a.userId] ?? '#3b82f6',
         }));
     });
-  }, [selectedZoneIds, assignmentsByZoneId, assignmentsVersion, memberColors, memberNames, user?.id, user?.displayName]);
+  }, [selectedZoneIds, assignmentsByZoneId, memberColors, memberNames, user?.id, user?.displayName]);
 
   useEffect(() => {
     if (!selectedMissionId) {
@@ -7734,7 +7734,7 @@ export default function MapLibreMap() {
     if (labelsLayer) {
       map.setLayoutProperty('zones-assignments-labels', 'visibility', mode !== 'off' ? 'visible' : 'none');
     }
-  }, [zones, selectedZoneIds, highlightedZoneIds, assignmentsByZoneId, assignmentsVersion, memberColors, mode, mapReady]);
+  }, [zones, selectedZoneIds, highlightedZoneIds, assignmentsByZoneId, memberColors, mode, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -8023,7 +8023,7 @@ export default function MapLibreMap() {
         isMapRotated={isMapRotated}
         resetNorth={resetNorth}
         gridViewMode={mode}
-        gridViewToggle={toggle}
+        gridViewToggle={() => toggle(isAdmin ? 'admin-select' : 'member-highlight')}
         gridViewResetBadge={resetBadge}
         gridViewBadgeCount={mode === 'admin-select' ? selectedZoneIds.length : mode === 'member-highlight' ? highlightedZoneIds.length : 0}
       />
@@ -8127,20 +8127,27 @@ export default function MapLibreMap() {
               type="button"
               disabled={!zoneAssignmentSelectedMemberId}
               onClick={async () => {
-                if (!selectedMissionId || !zoneAssignmentSelectedMemberId) return;
-                const firstSelectionId = selectedZoneIds[0];
-                const zoneId = firstSelectionId.split(':')[0];
-                const gridCellId = firstSelectionId.includes(':grid:')
-                  ? firstSelectionId.split(':').slice(2).join(':')
-                  : undefined;
+                if (!selectedMissionId || !zoneAssignmentSelectedMemberId || selectedZoneIds.length === 0) return;
+                // Grouper par zoneId, déduire gridCellId de chaque selectionId
+                const byZone = new Map<string, (string | undefined)[]>();
+                for (const sid of selectedZoneIds) {
+                  const zoneId = sid.split(':')[0];
+                  const cell = sid.includes(':grid:') ? sid.split(':').slice(2).join(':') : undefined;
+                  const arr = byZone.get(zoneId) ?? [];
+                  arr.push(cell);
+                  byZone.set(zoneId, arr);
+                }
                 try {
-                  await assignZoneToUsers(zoneId, [zoneAssignmentSelectedMemberId], gridCellId);
+                  await Promise.all(
+                    Array.from(byZone.entries()).flatMap(([zoneId, cells]) =>
+                      cells.map((cell) => assignZoneToUsers(zoneId, [zoneAssignmentSelectedMemberId], cell))
+                    )
+                  );
                   setZoneAssignmentSelectedMemberId('');
-                  const assigneeName = zoneAssignmentMembers.find((m) => m.user?.id === zoneAssignmentSelectedMemberId)?.user?.displayName ?? 'ce membre';
-                  setActivityToast(`Zone attribuée à ${assigneeName}`);
-                  // Clear selection after assignment
+                  const assigneeName = zoneAssignmentMembers.find(m => m.user?.id === zoneAssignmentSelectedMemberId)?.user?.displayName ?? 'ce membre';
+                  setActivityToast(`${selectedZoneIds.length} carré(s) attribué(s) à ${assigneeName}`);
                   for (const id of selectedZoneIds) toggleSelection(id);
-                  await refetchAssignments();
+                  // Pas de refetchAssignments ici : zone:assignments:changed met à jour le state via socket
                 } catch (e: any) {
                   console.error('Assignment failed:', e);
                   alert(`Erreur d'assignation: ${e?.message || 'Erreur inconnue'}`);

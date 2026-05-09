@@ -444,24 +444,26 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               </button>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() => {
-                gridViewToggle();
-                gridViewResetBadge();
-              }}
-              className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
-                gridViewMode !== 'off' ? 'ring-blue-500/25' : 'ring-black/10'
-              }`}
-              title={gridViewMode === 'off' ? 'Activer le mode grille' : gridViewMode === 'admin-select' ? 'Désactiver le mode sélection' : 'Désactiver le mode mise en évidence'}
-            >
-              <Grid3x3 className={gridViewMode !== 'off' ? 'text-blue-600' : 'text-gray-600'} size={20} />
-              {gridViewBadgeCount > 0 ? (
-                <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
-                  {gridViewBadgeCount}
-                </span>
-              ) : null}
-            </button>
+            {role !== 'viewer' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  gridViewToggle();
+                  gridViewResetBadge();
+                }}
+                className={`relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ${
+                  gridViewMode !== 'off' ? 'ring-blue-500/25' : 'ring-black/10'
+                }`}
+                title={gridViewMode === 'off' ? 'Activer le mode grille' : gridViewMode === 'admin-select' ? 'Désactiver le mode sélection' : 'Désactiver le mode mise en évidence'}
+              >
+                <Grid3x3 className={gridViewMode !== 'off' ? 'text-blue-600' : 'text-gray-600'} size={20} />
+                {gridViewBadgeCount > 0 ? (
+                  <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+                    {gridViewBadgeCount}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

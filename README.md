@@ -103,7 +103,27 @@ Les admins peuvent inviter directement quelqu'un via un token (comme un lien mag
 - `declined` : Invitation refusée
 - `revoked` : Invitation annulée par l'admin
 
-### 5. Demandes de Join (Join Requests)
+### 5. Zones et Grilles
+Les zones sont des zones géographiques (cercles ou polygones) que les admins peuvent dessiner sur la carte. Elles peuvent être assignées à des membres.
+
+**Types de zones :**
+- **Cercle** : Défini par un centre et un rayon (en mètres)
+- **Polygone** : Défini par un contour géométrique
+
+**Grilles (Grid Cells) :**
+- Une zone peut avoir une grille optionnelle (lignes x colonnes)
+- Chaque cellule est identifiée par un code (ex: "A1", "B2", "C15")
+- Les admins peuvent assigner des membres à des cellules spécifiques
+- Un membre peut être assigné à plusieurs cellules de la même zone
+- Sans grille : un membre est assigné à la zone entière
+- Avec grille : un membre est assigné à une ou plusieurs cellules
+
+**Mode Grille (Frontend) :**
+- **admin-select** : Admin peut sélectionner des cellules pour les assigner à des membres
+- **member-highlight** : Les membres voient leurs cellules assignées surlignées en couleur
+- **off** : Mode normal, pas de grille visible
+
+### 6. Demandes de Join (Join Requests)
 Les utilisateurs peuvent demander à rejoindre une mission eux-mêmes. Les admins doivent accepter ou refuser.
 
 **États :**
@@ -189,6 +209,36 @@ Socket.IO utilise des "rooms" pour envoyer des messages à des groupes spécifiq
 - Envoyé à : Tous les membres connectés
 - Pourquoi : Pour rediriger les utilisateurs vers la liste des missions
 
+**`zone:created`** - "Une nouvelle zone a été créée"
+- Quand : Quand un admin crée une zone
+- Payload : `{ missionId, zone: {...}, createdByDisplayName }`
+- Envoyé à : Tous les membres de la mission
+- Pourquoi : Pour afficher la nouvelle zone en temps réel
+
+**`zone:updated`** - "Une zone a été modifiée"
+- Quand : Quand un admin modifie une zone
+- Payload : `{ missionId, zone: {...} }`
+- Envoyé à : Tous les membres de la mission
+- Pourquoi : Pour mettre à jour la zone en temps réel
+
+**`zone:deleted`** - "Une zone a été supprimée"
+- Quand : Quand un admin supprime une zone
+- Payload : `{ missionId, zoneId }`
+- Envoyé à : Tous les membres de la mission
+- Pourquoi : Pour retirer la zone de la carte
+
+**`zone:assignments:changed`** - "Les assignations d'une zone ont changé"
+- Quand : Quand un admin assigne/déassigne un membre à une zone ou cellule
+- Payload : `{ missionId, zoneId, assignments: [...] }`
+- Envoyé à : Tous les membres de la mission
+- Pourquoi : Pour mettre à jour les assignations en temps réel (surlignage des cellules)
+
+**`zone:assigned:you`** - "Tu as été assigné à une zone"
+- Quand : Quand un admin t'assigne à une zone
+- Payload : `{ missionId, zoneId, zoneName, assignedByUserName }`
+- Envoyé à : L'utilisateur assigné (via room `user:{userId}`)
+- Pourquoi : Pour afficher une notification personnalisée
+
 ## Le Cache Socket (Optimisation)
 
 ### Pourquoi ?
@@ -204,7 +254,7 @@ cached: {
 }
 ```
 
-**Durée de vie du cache :** 30 secondes
+**Durée de vie du cache :** 5 secondes (réduit pour plus de réactivité)
 
 ### Quand est-il peuplé ?
 - Quand un socket fait `mission:join` (après vérification membership)
@@ -215,7 +265,7 @@ cached: {
 ### Quand est-il invalidé (remis à zéro) ?
 - Quand un admin change le rôle ou la couleur d'un membre
 - Quand un admin supprime un membre (kick)
-- Après 30 secondes (TTL automatique)
+- Après 5 secondes (TTL automatique)
 
 ## Flux Complet de Géolocalisation
 
@@ -350,6 +400,11 @@ cached: {
 
 ### Côté Frontend
 
+**Mémoïsation React**
+- Utilisation de `useCallback` et `useMemo` pour éviter les re-renders inutiles
+- Handlers de contextes (AuthContext, GridViewContext) mémoïsés
+- Réduit la charge CPU et améliore la réactivité de l'interface
+
 **Debounce LocalStorage**
 - Persistance debouncée à 1500ms
 - Évite les blocages du thread principal pendant le tracking
@@ -376,11 +431,19 @@ cached: {
 - Keycloak/OIDC pour l'authentification des utilisateurs
 - JWT tokens avec refresh automatique
 - Middleware `requireAuth(req)` sur toutes les routes protégées
+- **Rotation de session OIDC** : après callback, le sessionId est réinitialisé pour éviter le vol de session
+- **Expiration des sessions** : les sessions BFF expirent après 8h et sont purgées automatiquement
+- **Vérification email_verified** : si un utilisateur Keycloak a un email non vérifié, il ne peut pas être lié à un compte local existant (409)
 
 ### Authorization
 - Vérification du membership pour CHAQUE opération
 - Rôles : admin, member, viewer
 - Seuls les admins peuvent gérer les membres
+
+### CORS (Cross-Origin Resource Sharing)
+- Whitelist d'origines autorisées (FRONTEND_BASE_URL + localhost:5173 en dev)
+- Bloque les requêtes depuis des origines non autorisées
+- S'applique à l'API REST et à Socket.IO
 
 ### Validation
 - Validation des coordonnées lat/lng dans les handlers socket

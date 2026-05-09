@@ -22,7 +22,18 @@ if (!mongoUri) {
 }
 
 const app = Fastify({ logger: true });
-await app.register(cors, { origin: true, credentials: true });
+
+const allowedOrigins = [
+  process.env.FRONTEND_BASE_URL,
+  process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : null,
+].filter((x): x is string => !!x);
+await app.register(cors, {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // requêtes server-to-server / curl
+    cb(null, allowedOrigins.includes(origin));
+  },
+  credentials: true,
+});
 
 // OIDC / Keycloak BFF SSO (cookies + server-side tokens)
 if (process.env.OIDC_ISSUER_URL) {

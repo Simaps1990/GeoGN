@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getSocket } from '../lib/socket';
 import { listZones, type ApiZoneAssignment } from '../lib/api';
@@ -8,7 +8,6 @@ export interface UseZoneAssignmentsResult {
   myAssignedZoneIds: string[];
   refetch: () => Promise<void>;
   loading: boolean;
-  assignmentsVersion: number;
 }
 
 export function useZoneAssignments(missionId: string | null): UseZoneAssignmentsResult {
@@ -16,7 +15,6 @@ export function useZoneAssignments(missionId: string | null): UseZoneAssignments
   const [assignmentsByZoneId, setAssignmentsByZoneId] = useState<Map<string, ApiZoneAssignment[]>>(
     new Map()
   );
-  const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const cancelledRef = useRef(false);
 
@@ -42,7 +40,6 @@ export function useZoneAssignments(missionId: string | null): UseZoneAssignments
       }
 
       setAssignmentsByZoneId(newMap);
-      setVersion((v) => v + 1);
     } catch (e) {
       if (!cancelledRef.current) {
         console.error('Failed to refetch zone assignments', e);
@@ -83,13 +80,6 @@ export function useZoneAssignments(missionId: string | null): UseZoneAssignments
       });
     };
 
-    const onAssignedToYou = (msg: any) => {
-      if (!msg || msg.missionId !== missionId) return;
-      if (!msg.zoneId) return;
-
-      void refetch();
-    };
-
     const onZonesRefetch = (msg: any) => {
       if (!msg || msg.missionId !== missionId) return;
       void refetch();
@@ -105,27 +95,27 @@ export function useZoneAssignments(missionId: string | null): UseZoneAssignments
     };
 
     socket.on('zone:assignments:changed', onAssignmentsChanged);
-    socket.on('zone:assigned:you', onAssignedToYou);
     socket.on('mission:zones-refetch', onZonesRefetch);
     socket.on('zone:deleted', onZoneDeleted);
 
     return () => {
       socket.off('zone:assignments:changed', onAssignmentsChanged);
-      socket.off('zone:assigned:you', onAssignedToYou);
       socket.off('mission:zones-refetch', onZonesRefetch);
       socket.off('zone:deleted', onZoneDeleted);
     };
   }, [missionId, refetch]);
 
-  const myAssignedZoneIds = Array.from(assignmentsByZoneId.entries())
-    .filter(([, assignments]) => assignments.some((a) => a.userId === user?.id))
-    .map(([zoneId]) => zoneId);
+  const myAssignedZoneIds = useMemo(
+    () => Array.from(assignmentsByZoneId.entries())
+      .filter(([, as]) => as.some(a => a.userId === user?.id))
+      .map(([zid]) => zid),
+    [assignmentsByZoneId, user?.id]
+  );
 
   return {
     assignmentsByZoneId,
     myAssignedZoneIds,
     refetch,
     loading,
-    assignmentsVersion: version,
   };
 }

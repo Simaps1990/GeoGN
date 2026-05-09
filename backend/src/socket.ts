@@ -107,9 +107,16 @@ async function requireMissionMember(userId: string, missionId: string) {
 }
 
 export function setupSocket(app: FastifyInstance) {
+  const allowedOrigins = [
+    process.env.FRONTEND_BASE_URL,
+    process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : null,
+  ].filter((x): x is string => !!x);
   const io = new Server(app.server, {
     cors: {
-      origin: true,
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true); // requêtes server-to-server / curl
+        cb(null, allowedOrigins.includes(origin));
+      },
       credentials: true,
     },
   });
@@ -272,12 +279,13 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        // Use cache if available and recent (< 30 seconds)
+        // Use cache if available and recent (< 5 seconds)
+        // TODO: invalidation explicite sur retrait membre via event mission:member:invalidate
         const cached = (socket as any as AuthedSocket).data.cached;
         let memberColor: string;
         let retentionSeconds: number;
 
-        if (cached && Date.now() - cached.checkedAt < 30_000) {
+        if (cached && Date.now() - cached.checkedAt < 5_000) {
           memberColor = cached.memberColor;
           retentionSeconds = cached.retentionSeconds;
         } else {
@@ -369,12 +377,13 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
-        // Use cache if available and recent (< 30 seconds)
+        // Use cache if available and recent (< 5 seconds)
+        // TODO: invalidation explicite sur retrait membre via event mission:member:invalidate
         const cached = (socket as any as AuthedSocket).data.cached;
         let memberColor: string;
         let retentionSeconds: number;
 
-        if (cached && Date.now() - cached.checkedAt < 30_000) {
+        if (cached && Date.now() - cached.checkedAt < 5_000) {
           memberColor = cached.memberColor;
           retentionSeconds = cached.retentionSeconds;
         } else {

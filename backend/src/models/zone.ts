@@ -112,5 +112,6 @@ const ZoneSchema = new Schema<ZoneDoc>(
 ZoneSchema.index({ polygon: '2dsphere' });
 ZoneSchema.index({ 'sectors.geometry': '2dsphere' });
 ZoneSchema.index({ missionId: 1, 'assignments.userId': 1 });
+ZoneSchema.index({ _id: 1, 'assignments.userId': 1, 'assignments.gridCellId': 1 });
 
 export const ZoneModel = mongoose.model<ZoneDoc>('Zone', ZoneSchema);

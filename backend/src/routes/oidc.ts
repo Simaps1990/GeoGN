@@ -19,15 +19,30 @@ interface OidcSessionData {
   state?: string;
   tokens?: TokenSet;
   user?: any;
+  expiresAt?: number;
 }
 
 const sessionStore = new Map<string, OidcSessionData>();
+
+// Purge entries expirées toutes les 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, data] of sessionStore.entries()) {
+    if (data.expiresAt && data.expiresAt < now) {
+      sessionStore.delete(key);
+    }
+  }
+}, 10 * 60 * 1000);
 
 export function getBffUserFromRequest(req: FastifyRequest): any | null {
   const sessionId = ((req as any).cookies as any)?.bff_session as string | undefined;
   if (!sessionId) return null;
   const session = sessionStore.get(sessionId);
   if (!session || !session.user) return null;
+  if (session.expiresAt && session.expiresAt < Date.now()) {
+    sessionStore.delete(sessionId);
+    return null;
+  }
   return session.user;
 }
 
@@ -157,10 +172,20 @@ export async function oidcPlugin(app: FastifyInstance) {
 
     const userinfo = await client.userinfo(tokenSet.access_token!);
 
-    sessionStore.set(sessionId, {
-      ...session,
+    const newSessionId = crypto.randomUUID();
+    sessionStore.delete(sessionId);
+    sessionStore.set(newSessionId, {
       tokens: tokenSet,
       user: userinfo,
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+    });
+    const isProd = process.env.NODE_ENV === 'production';
+    (reply as any).setCookie('bff_session', newSessionId, {
+      httpOnly: true,
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
+      path: '/',
+      maxAge: 8 * 60 * 60,
     });
 
     const frontendBaseUrl = process.env.FRONTEND_BASE_URL ?? '/';

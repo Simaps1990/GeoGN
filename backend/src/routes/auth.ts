@@ -91,12 +91,18 @@ export async function authRoutes(app: FastifyInstance) {
 			return reply.code(400).send({ error: 'OIDC_USER_INCOMPLETE' });
 		}
 
+		const emailVerified = bffUser.email_verified === true;
+		const existing = email ? await UserModel.findOne({ email }).lean() : null;
+		if (existing && !emailVerified) {
+			return reply.code(409).send({ error: 'EMAIL_NOT_VERIFIED_LINK_REFUSED' });
+		}
+
 		// On essaie de retrouver un utilisateur existant par email si possible, sinon par un appUserId dérivé de sub.
 		const appUserIdFromSub = sub ? `oidc:${sub}` : undefined;
 		const query: any[] = [];
 		if (email) query.push({ email });
 		if (appUserIdFromSub) query.push({ appUserId: appUserIdFromSub });
-		let user = await UserModel.findOne(query.length ? { $or: query } : {}).exec();
+		let user = existing ?? await UserModel.findOne(query.length ? { $or: query } : {}).exec();
 
 		if (!user) {
 			// Crée un utilisateur "virtuel" avec un mot de passe aléatoire (jamais utilisé côté login).

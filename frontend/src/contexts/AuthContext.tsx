@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type { ApiUser } from '../lib/api';
 import { clearTokens, getApiBaseUrl, login, me, register, setTokens } from '../lib/api';
 
@@ -132,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     const u = await login(email, password);
     clearCachedMissionState();
     try {
@@ -142,9 +142,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     setUser(u);
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = useCallback(async (email: string, password: string, displayName: string) => {
     const u = await register(email, password, displayName);
     clearCachedMissionState();
     try {
@@ -154,9 +154,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     setUser(u);
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     // 1) Nettoyage local (JWT + état mission)
     clearTokens();
     clearCachedMissionState();
@@ -179,9 +179,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     window.location.href = '/login';
-  };
+  }, []);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (localStorage.getItem(EXPLICIT_LOGOUT_KEY) === 'true') {
       clearTokens();
       clearCachedMissionState();
@@ -219,10 +219,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       throw e;
     }
-  };
+  }, [user?.id]);
+
+  const value = useMemo(
+    () => ({ user, loading, signIn, signUp, signOut, refreshUser }),
+    [user, loading, signIn, signUp, signOut, refreshUser]
+  );
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, refreshUser }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

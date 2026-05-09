@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useMemo } from 'react';
 import { useMission } from './MissionContext';
 
 export type GridViewMode = 'off' | 'admin-select' | 'member-highlight';
@@ -6,25 +6,20 @@ export type GridViewMode = 'off' | 'admin-select' | 'member-highlight';
 export interface GridViewContextValue {
   mode: GridViewMode;
   selectedZoneIds: string[];
-  pendingAssignmentBadge: number;
   highlightedZoneIds: string[];
 
-  toggle(): void;
+  toggle(targetMode?: 'admin-select' | 'member-highlight'): void;
   addToSelection(zoneId: string): void;
   removeFromSelection(zoneId: string): void;
   toggleSelection(zoneId: string): void;
   clearSelection(): void;
 
-  incrementBadge(): void;
   resetBadge(): void;
-
-  setHighlightedZoneIds(ids: string[]): void;
 }
 
 type GridViewState = {
   mode: GridViewMode;
   selectedZoneIds: string[];
-  pendingAssignmentBadge: number;
   highlightedZoneIds: string[];
 };
 
@@ -34,7 +29,6 @@ type GridViewAction =
   | { type: 'REMOVE_FROM_SELECTION'; zoneId: string }
   | { type: 'TOGGLE_SELECTION'; zoneId: string }
   | { type: 'CLEAR_SELECTION' }
-  | { type: 'INCREMENT_BADGE' }
   | { type: 'RESET_BADGE' }
   | { type: 'SET_HIGHLIGHTED_ZONE_IDS'; ids: string[] }
   | { type: 'RESET' };
@@ -42,7 +36,7 @@ type GridViewAction =
 function gridViewReducer(state: GridViewState, action: GridViewAction): GridViewState {
   switch (action.type) {
     case 'TOGGLE_MODE':
-      return { ...state, mode: action.targetMode, selectedZoneIds: [], pendingAssignmentBadge: 0, highlightedZoneIds: [] };
+      return { ...state, mode: action.targetMode, selectedZoneIds: [], highlightedZoneIds: [] };
     case 'ADD_TO_SELECTION':
       if (state.selectedZoneIds.includes(action.zoneId)) return state;
       return { ...state, selectedZoneIds: [...state.selectedZoneIds, action.zoneId] };
@@ -55,14 +49,12 @@ function gridViewReducer(state: GridViewState, action: GridViewAction): GridView
       return { ...state, selectedZoneIds: [...state.selectedZoneIds, action.zoneId] };
     case 'CLEAR_SELECTION':
       return { ...state, selectedZoneIds: [] };
-    case 'INCREMENT_BADGE':
-      return { ...state, pendingAssignmentBadge: state.pendingAssignmentBadge + 1 };
     case 'RESET_BADGE':
-      return { ...state, pendingAssignmentBadge: 0 };
+      return state;
     case 'SET_HIGHLIGHTED_ZONE_IDS':
       return { ...state, highlightedZoneIds: action.ids };
     case 'RESET':
-      return { mode: 'off', selectedZoneIds: [], pendingAssignmentBadge: 0, highlightedZoneIds: [] };
+      return { mode: 'off', selectedZoneIds: [], highlightedZoneIds: [] };
     default:
       return state;
   }
@@ -76,7 +68,6 @@ export function GridViewProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(gridViewReducer, {
     mode: 'off',
     selectedZoneIds: [],
-    pendingAssignmentBadge: 0,
     highlightedZoneIds: [],
   });
 
@@ -85,57 +76,46 @@ export function GridViewProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'RESET' });
   }, [selectedMissionId]);
 
-  const toggle = () => {
-    if (state.mode !== 'off') {
-      dispatch({ type: 'TOGGLE_MODE', targetMode: 'off' });
-      return;
-    }
+  const toggle = useCallback((targetMode: 'admin-select' | 'member-highlight' = 'admin-select') => {
+    dispatch({ type: 'TOGGLE_MODE', targetMode: state.mode === 'off' ? targetMode : 'off' });
+  }, [state.mode]);
 
-    dispatch({ type: 'TOGGLE_MODE', targetMode: 'admin-select' });
-  };
-
-  const addToSelection = (zoneId: string) => {
+  const addToSelection = useCallback((zoneId: string) => {
     dispatch({ type: 'ADD_TO_SELECTION', zoneId });
-  };
+  }, []);
 
-  const removeFromSelection = (zoneId: string) => {
+  const removeFromSelection = useCallback((zoneId: string) => {
     dispatch({ type: 'REMOVE_FROM_SELECTION', zoneId });
-  };
+  }, []);
 
-  const toggleSelection = (zoneId: string) => {
+  const toggleSelection = useCallback((zoneId: string) => {
     dispatch({ type: 'TOGGLE_SELECTION', zoneId });
-  };
+  }, []);
 
-  const clearSelection = () => {
+  const clearSelection = useCallback(() => {
     dispatch({ type: 'CLEAR_SELECTION' });
-  };
+  }, []);
 
-  const incrementBadge = () => {
-    dispatch({ type: 'INCREMENT_BADGE' });
-  };
-
-  const resetBadge = () => {
+  const resetBadge = useCallback(() => {
     dispatch({ type: 'RESET_BADGE' });
-  };
+  }, []);
 
-  const setHighlightedZoneIds = (ids: string[]) => {
+  const setHighlightedZoneIds = useCallback((ids: string[]) => {
     dispatch({ type: 'SET_HIGHLIGHTED_ZONE_IDS', ids });
-  };
+  }, []);
 
-  const value: GridViewContextValue = {
+  const value = useMemo(() => ({
     mode: state.mode,
     selectedZoneIds: state.selectedZoneIds,
-    pendingAssignmentBadge: state.pendingAssignmentBadge,
     highlightedZoneIds: state.highlightedZoneIds,
     toggle,
     addToSelection,
     removeFromSelection,
     toggleSelection,
     clearSelection,
-    incrementBadge,
     resetBadge,
     setHighlightedZoneIds,
-  };
+  }), [state.mode, state.selectedZoneIds, state.highlightedZoneIds, toggle, addToSelection, removeFromSelection, toggleSelection, clearSelection, resetBadge, setHighlightedZoneIds]);
 
   return <GridViewContext.Provider value={value}>{children}</GridViewContext.Provider>;
 }

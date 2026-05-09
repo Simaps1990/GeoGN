@@ -358,63 +358,41 @@ export async function zonesRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'NO_VALID_MEMBERS' });
       }
 
-      const alreadyAssignedUserIds = new Set((zone.assignments ?? []).map((a: any) => a.userId.toString()));
-      const newlyAssignedUserIds = filteredUserIds.filter((uid) => !alreadyAssignedUserIds.has(uid));
-      const alreadyAssignedButNeedUpdate = gridCellId
-        ? (zone.assignments ?? []).filter((a: any) => alreadyAssignedUserIds.has(a.userId.toString()) && !a.gridCellId)
-        : [];
-
-      // Add new assignments
-      if (newlyAssignedUserIds.length > 0) {
-        const now = new Date();
-        const newEntries = newlyAssignedUserIds.map((uid) => ({
-          userId: new mongoose.Types.ObjectId(uid),
-          assignedAt: now,
-          assignedByUserId: new mongoose.Types.ObjectId(req.userId),
-          ...(gridCellId ? { gridCellId } : {}),
-        }));
-        await ZoneModel.updateOne(
-          { _id: zoneId },
-          { $push: { assignments: { $each: newEntries } } }
-        );
+      // Validation gridCellId
+      if (gridCellId !== undefined) {
+        if (typeof gridCellId !== 'string' || !/^[A-Z]\d+$/.test(gridCellId)) {
+          return reply.code(400).send({ error: 'INVALID_GRID_CELL_ID' });
+        }
+        if (!zone.grid?.rows || !zone.grid?.cols) {
+          return reply.code(400).send({ error: 'ZONE_HAS_NO_GRID' });
+        }
+        const m = gridCellId.match(/^([A-Z])(\d+)$/)!;
+        const col = m[1].charCodeAt(0) - 65;
+        const row = parseInt(m[2], 10) - 1;
+        if (col < 0 || col >= zone.grid.cols || row < 0 || row >= zone.grid.rows) {
+          return reply.code(400).send({ error: 'GRID_CELL_OUT_OF_BOUNDS' });
+        }
       }
 
-      // Update existing assignments to add gridCellId
-      if (alreadyAssignedButNeedUpdate.length > 0) {
-        for (const assignment of alreadyAssignedButNeedUpdate) {
-          await ZoneModel.updateOne(
-            { _id: zoneId, 'assignments.userId': assignment.userId },
-            { $set: { 'assignments.$.gridCellId': gridCellId } }
-          );
-        }
+      // Pour chaque user, push atomique conditionné à l'absence du couple (userId, gridCellId)
+      const newlyAssignedUserIds: string[] = [];
+      for (const uid of filteredUserIds) {
+        const matchClause = gridCellId
+          ? { userId: new mongoose.Types.ObjectId(uid), gridCellId }
+          : { userId: new mongoose.Types.ObjectId(uid), gridCellId: { $exists: false } };
+        const res = await ZoneModel.updateOne(
+          { _id: zoneId, assignments: { $not: { $elemMatch: matchClause } } },
+          { $push: { assignments: { userId: new mongoose.Types.ObjectId(uid), assignedAt: new Date(),
+            assignedByUserId: new mongoose.Types.ObjectId(req.userId), ...(gridCellId ? { gridCellId } : {}) } } }
+        );
+        if (res.modifiedCount === 1) newlyAssignedUserIds.push(uid);
       }
 
       const updated = await ZoneModel.findById(zoneId).lean();
 
       const assigner = await UserModel.findById(req.userId).select({ displayName: 1 }).lean();
 
-      // Notify users who were assigned (including those whose assignments were updated with gridCellId)
-      const allNotifiedUserIds = [...newlyAssignedUserIds, ...alreadyAssignedButNeedUpdate.map((a) => a.userId.toString())];
-      for (const uid of allNotifiedUserIds) {
-        app.io?.to(`user:${uid}`).emit('zone:assigned:you', {
-          missionId: zone.missionId.toString(),
-          zoneId: zone._id.toString(),
-          zoneName: zone.title,
-          assignedByUserName: assigner?.displayName ?? null,
-        });
-      }
-
-      app.io?.to(`mission:${zone.missionId}`).emit('zone:assignments:changed', {
-        missionId: zone.missionId.toString(),
-        zoneId: zone._id.toString(),
-        assignments: (updated!.assignments ?? []).map((a: any) => ({
-          userId: a.userId.toString(),
-          assignedAt: a.assignedAt.toISOString(),
-          assignedByUserId: a.assignedByUserId.toString(),
-          gridCellId: a.gridCellId ?? null,
-        })),
-      });
-
+      // Notify newly assigned users
       for (const uid of newlyAssignedUserIds) {
         app.io?.to(`user:${uid}`).emit('zone:assigned:you', {
           missionId: zone.missionId.toString(),
@@ -424,9 +402,22 @@ export async function zonesRoutes(app: FastifyInstance) {
         });
       }
 
+      const assignmentsDto = (updated!.assignments ?? []).map((a: any) => ({
+        userId: a.userId.toString(),
+        assignedAt: a.assignedAt.toISOString(),
+        assignedByUserId: a.assignedByUserId.toString(),
+        gridCellId: a.gridCellId ?? null,
+      }));
+
+      app.io?.to(`mission:${zone.missionId}`).emit('zone:assignments:changed', {
+        missionId: zone.missionId.toString(),
+        zoneId: zone._id.toString(),
+        assignments: assignmentsDto,
+      });
+
       return reply.send({
         ok: true,
-        assignments: updated!.assignments,
+        assignments: assignmentsDto,
         newlyAssignedCount: newlyAssignedUserIds.length,
       });
     }
@@ -457,25 +448,34 @@ export async function zonesRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      await ZoneModel.updateOne(
+      if (zone.grid?.rows && zone.grid?.cols && !gridCellId) {
+        return reply.code(400).send({ error: 'GRID_CELL_ID_REQUIRED' });
+      }
+      if (!zone.grid && gridCellId) {
+        return reply.code(400).send({ error: 'ZONE_HAS_NO_GRID' });
+      }
+
+      const pullRes = await ZoneModel.updateOne(
         { _id: zoneId },
         { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId), ...(gridCellId ? { gridCellId } : {}) } } }
       );
 
       const updated = await ZoneModel.findById(zoneId).lean();
 
+      const assignmentsDto = (updated!.assignments ?? []).map((a: any) => ({
+        userId: a.userId.toString(),
+        assignedAt: a.assignedAt.toISOString(),
+        assignedByUserId: a.assignedByUserId.toString(),
+        gridCellId: a.gridCellId ?? null,
+      }));
+
       app.io?.to(`mission:${zone.missionId}`).emit('zone:assignments:changed', {
         missionId: zone.missionId.toString(),
         zoneId: zone._id.toString(),
-        assignments: (updated!.assignments ?? []).map((a: any) => ({
-          userId: a.userId.toString(),
-          assignedAt: a.assignedAt.toISOString(),
-          assignedByUserId: a.assignedByUserId.toString(),
-          gridCellId: a.gridCellId ?? null,
-        })),
+        assignments: assignmentsDto,
       });
 
-      return reply.send({ ok: true, assignments: updated!.assignments });
+      return reply.send({ ok: true, removedCount: pullRes.modifiedCount, assignments: assignmentsDto });
     }
   );
 }
