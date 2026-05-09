@@ -3787,70 +3787,19 @@ export default function MapLibreMap() {
     }
 
     if (!map.getLayer('zones-assignments-labels')) {
-      // Image par défaut
-      const defaultSvg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="#3b82f6"/></svg>`;
-      const defaultSvgBase64 = btoa(defaultSvg);
-      const defaultImgUrl = `data:image/svg+xml;base64,${defaultSvgBase64}`;
-
-      const defaultImg = new Image();
-      defaultImg.onload = () => {
-        if (!map.hasImage('square-default')) {
-          map.addImage('square-default', defaultImg);
-        }
-      };
-      defaultImg.src = defaultImgUrl;
-
       map.addLayer({
         id: 'zones-assignments-labels',
-        type: 'symbol',
+        type: 'fill',
         source: 'zones-assignments-labels',
+        paint: {
+          'fill-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
+          'fill-opacity': 1,
+        },
         layout: {
-          'icon-image': 'square-default',
-          'icon-size': 0.7,
-          'icon-anchor': 'center',
-          'icon-allow-overlap': true,
           visibility: 'none',
         },
       });
     }
-
-    // Charger dynamiquement les images pour chaque couleur de membre
-    useEffect(() => {
-      const map = mapInstanceRef.current;
-      if (!map) return;
-
-      const colors = Object.values(memberColors);
-      const uniqueColors = [...new Set(colors)];
-
-      for (const color of uniqueColors) {
-        const imageName = `square-${color}`;
-        if (map.hasImage(imageName)) continue;
-
-        const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="${color}"/></svg>`;
-        const svgBase64 = btoa(svg);
-        const imgUrl = `data:image/svg+xml;base64,${svgBase64}`;
-
-        const img = new Image();
-        img.onload = () => {
-          if (!map.hasImage(imageName)) {
-            map.addImage(imageName, img);
-          }
-        };
-        img.src = imgUrl;
-      }
-
-      // Mettre à jour l'expression match
-      const matchExpression: any[] = ['match', ['get', 'memberColor']];
-      for (const color of uniqueColors) {
-        matchExpression.push(color, `square-${color}`);
-      }
-      matchExpression.push('square-default');
-
-      const layer = map.getLayer('zones-assignments-labels');
-      if (layer) {
-        map.setLayoutProperty('zones-assignments-labels', 'icon-image', matchExpression as any);
-      }
-    }, [memberColors, mapReady]);
 
     if (!map.getSource('vehicle-track-reached')) {
       const fromAnyState = (() => {
@@ -7748,13 +7697,30 @@ export default function MapLibreMap() {
                   const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
                   const row = parseInt(match[2], 10) - 1;
                   if (col >= 0 && col < cols && row >= 0 && row < rows) {
-                    const labelLng = bbox.minLng + (col + 0.85) * dx;
-                    const labelLat = bbox.minLat + (row + 0.85) * dy;
-                    const offsetLng = i * dx * 0.14;
+                    const squareSizeLng = dx * 0.08;
+                    const squareSizeLat = dy * 0.08;
+                    const gapLng = dx * 0.045;
+                    const baseLng = bbox.minLng + (col + 0.78) * dx;
+                    const baseLat = bbox.minLat + (row + 0.82) * dy;
+                    const squareLng = baseLng - i * (squareSizeLng + gapLng);
+                    const squareLat = baseLat;
+                    const minSquareLng = squareLng - squareSizeLng / 2;
+                    const maxSquareLng = squareLng + squareSizeLng / 2;
+                    const minSquareLat = squareLat - squareSizeLat / 2;
+                    const maxSquareLat = squareLat + squareSizeLat / 2;
                     labelsFeatures.push({
                       type: 'Feature',
                       properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
-                      geometry: { type: 'Point', coordinates: [labelLng - offsetLng, labelLat] },
+                      geometry: {
+                        type: 'Polygon',
+                        coordinates: [[
+                          [minSquareLng, minSquareLat],
+                          [maxSquareLng, minSquareLat],
+                          [maxSquareLng, maxSquareLat],
+                          [minSquareLng, maxSquareLat],
+                          [minSquareLng, minSquareLat],
+                        ]],
+                      },
                     });
                   }
                 }
@@ -7768,11 +7734,23 @@ export default function MapLibreMap() {
                 : null;
 
               if (center) {
-                const offsetLat = i * 0.0002; // Small offset in degrees
+                const size = 0.00008;
+                const gap = 0.00005;
+                const squareLng = center.lng - i * (size + gap);
+                const squareLat = center.lat;
                 labelsFeatures.push({
                   type: 'Feature',
                   properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
-                  geometry: { type: 'Point', coordinates: [center.lng, center.lat - offsetLat] },
+                  geometry: {
+                    type: 'Polygon',
+                    coordinates: [[
+                      [squareLng - size / 2, squareLat - size / 2],
+                      [squareLng + size / 2, squareLat - size / 2],
+                      [squareLng + size / 2, squareLat + size / 2],
+                      [squareLng - size / 2, squareLat + size / 2],
+                      [squareLng - size / 2, squareLat - size / 2],
+                    ]],
+                  },
                 });
               }
             }
