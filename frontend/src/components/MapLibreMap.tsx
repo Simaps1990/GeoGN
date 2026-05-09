@@ -3794,6 +3794,7 @@ export default function MapLibreMap() {
         paint: {
           'fill-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
           'fill-opacity': 1,
+          'fill-outline-color': 'rgba(0, 0, 0, 0.15)',
         },
         layout: {
           visibility: 'none',
@@ -7699,9 +7700,9 @@ export default function MapLibreMap() {
                   if (col >= 0 && col < cols && row >= 0 && row < rows) {
                     const squareSizeLng = dx * 0.08;
                     const squareSizeLat = dy * 0.08;
-                    const gapLng = dx * 0.045;
-                    const baseLng = bbox.minLng + (col + 0.78) * dx;
-                    const baseLat = bbox.minLat + (row + 0.82) * dy;
+                    const gapLng = dx * 0.035;
+                    const baseLng = bbox.minLng + (col + 0.85) * dx;
+                    const baseLat = bbox.minLat + (row + 0.85) * dy;
                     const squareLng = baseLng - i * (squareSizeLng + gapLng);
                     const squareLat = baseLat;
                     const minSquareLng = squareLng - squareSizeLng / 2;
@@ -7735,7 +7736,7 @@ export default function MapLibreMap() {
 
               if (center) {
                 const size = 0.00008;
-                const gap = 0.00005;
+                const gap = 0.00004;
                 const squareLng = center.lng - i * (size + gap);
                 const squareLat = center.lat;
                 labelsFeatures.push({
