@@ -1769,6 +1769,21 @@ export default function MapLibreMap() {
   const [settingsNotification, setSettingsNotification] = useState(false);
   const lastNotifiedPersonCaseIdRef = useRef<string | null>(null);
 
+  // Notification settings quand il y a des assignations de zones/cellules
+  useEffect(() => {
+    if (!selectedMissionId) return;
+    let hasAssignments = false;
+    for (const assignments of assignmentsByZoneId.values()) {
+      if (assignments.length > 0) {
+        hasAssignments = true;
+        break;
+      }
+    }
+    if (hasAssignments) {
+      setSettingsNotification(true);
+    }
+  }, [assignmentsByZoneId, selectedMissionId, setSettingsNotification]);
+
   function dismissedPersonCaseStorageKey(missionId: string) {
     return `dismissed_person_case_${missionId}`;
   }
@@ -3772,18 +3787,35 @@ export default function MapLibreMap() {
     }
 
     if (!map.getLayer('zones-assignments-labels')) {
+      // Ajouter un carré SVG comme icône avant de créer la couche
+      const svg = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="#ffffff"/></svg>`;
+      const svgBase64 = btoa(svg);
+      const imgUrl = `data:image/svg+xml;base64,${svgBase64}`;
+
+      const loadImage = () => {
+        const img = new Image();
+        img.onload = () => {
+          if (!map.hasImage('square')) {
+            map.addImage('square', img);
+          }
+        };
+        img.src = imgUrl;
+      };
+      loadImage();
+
       map.addLayer({
         id: 'zones-assignments-labels',
-        type: 'circle',
+        type: 'symbol',
         source: 'zones-assignments-labels',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
         layout: {
+          'icon-image': 'square',
+          'icon-size': 0.5,
+          'icon-anchor': 'center',
+          'icon-allow-overlap': true,
           visibility: 'none',
+        },
+        paint: {
+          'icon-color': ['coalesce', ['get', 'memberColor'], '#3b82f6'],
         },
       });
     }
