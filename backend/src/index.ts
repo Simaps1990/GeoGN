@@ -30,18 +30,23 @@ const allowedOrigins = [
   process.env.NODE_ENV !== 'production' ? 'http://localhost:5174' : null,
   process.env.NODE_ENV !== 'production' ? 'http://127.0.0.1:5174' : null,
 ].filter((x): x is string => !!x);
+const isAllowedOrigin = (origin: string) => {
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const { hostname } = new URL(origin);
+    if (hostname.endsWith('.netlify.app')) return true;
+    if (process.env.NODE_ENV !== 'production' && (hostname === 'localhost' || hostname === '127.0.0.1')) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+};
 await app.register(cors, {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // requêtes server-to-server / curl
-    try {
-      const { hostname } = new URL(origin);
-      if (process.env.NODE_ENV !== 'production' && (hostname === 'localhost' || hostname === '127.0.0.1')) {
-        return cb(null, true);
-      }
-    } catch {
-      // ignore invalid origin
-    }
-    return cb(null, allowedOrigins.includes(origin));
+    return cb(null, isAllowedOrigin(origin));
   },
   credentials: true,
 });
