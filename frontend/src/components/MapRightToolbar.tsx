@@ -57,10 +57,6 @@ type MapRightToolbarProps = {
 
   projectionNotification: boolean;
   personCase: ApiPersonCase | null;
-  userId: string | null;
-  selectedMissionId: string | null;
-  setDismissedPersonCaseId: (missionId: string, personCaseId: string) => void;
-  setProjectionNotification: (v: boolean) => void;
   setNoProjectionToast: (v: boolean) => void;
   setPersonEdit: (v: boolean) => void;
   setPersonPanelCollapsed: (v: boolean) => void;
@@ -119,10 +115,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   timerModalOpen,
   projectionNotification,
   personCase,
-  userId,
-  selectedMissionId,
-  setDismissedPersonCaseId,
-  setProjectionNotification,
   setNoProjectionToast,
   setPersonEdit,
   setPersonPanelCollapsed,
@@ -314,11 +306,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                 setActionError(null);
 
                 setSettingsMenuOpen((v) => !v);
-                // Ouverture du menu = on considère la notification comme vue
                 setSettingsNotification(false);
-                if (selectedMissionId && personCase) {
-                  setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                }
               }}
               className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
                 settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
@@ -382,11 +370,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               type="button"
               onClick={() => {
                 const map = mapInstance;
-
-                setProjectionNotification(false);
-                if (selectedMissionId && personCase && !(userId && personCase.createdBy === userId)) {
-                  setDismissedPersonCaseId(selectedMissionId, personCase.id);
-                }
 
                 if (!personCase) {
                   if (!isAdmin) {

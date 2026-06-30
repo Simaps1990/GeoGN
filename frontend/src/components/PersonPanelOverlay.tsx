@@ -414,7 +414,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       el.focus();
                     }
                   }}
-                  className="cursor-pointer"
+                  className="cursor-pointer min-w-0"
                 >
                   <div className="text-sm font-semibold text-gray-800">Date / heure</div>
                   <input

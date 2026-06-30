@@ -1503,7 +1503,7 @@ export default function MapLibreMap() {
     }
 
     src.setData({ type: 'FeatureCollection', features });
-  }, [mapReady, personCase, estimation]);
+  }, [mapReady, personCase, estimation, styleVersion]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1791,7 +1791,6 @@ export default function MapLibreMap() {
   // Notifications projection (pour utilisateurs / visualisateurs)
   const [projectionNotification, setProjectionNotification] = useState(false);
   const [settingsNotification, setSettingsNotification] = useState(false);
-  const lastNotifiedPersonCaseIdRef = useRef<string | null>(null);
 
   // Notification settings quand il y a des assignations de zones/cellules
   useEffect(() => {
@@ -1807,28 +1806,6 @@ export default function MapLibreMap() {
       setSettingsNotification(true);
     }
   }, [assignmentsByZoneId, selectedMissionId, setSettingsNotification]);
-
-  function dismissedPersonCaseStorageKey(missionId: string) {
-    return `dismissed_person_case_${missionId}`;
-  }
-
-  function getDismissedPersonCaseId(missionId: string): string | null {
-    try {
-      if (typeof window === 'undefined') return null;
-      return window.localStorage.getItem(dismissedPersonCaseStorageKey(missionId));
-    } catch {
-      return null;
-    }
-  }
-
-  function setDismissedPersonCaseId(missionId: string, caseId: string) {
-    try {
-      if (typeof window === 'undefined') return;
-      window.localStorage.setItem(dismissedPersonCaseStorageKey(missionId), caseId);
-    } catch {
-      // ignore
-    }
-  }
 
   const mobilityLabel = (m: ApiPersonCase['mobility']) => {
     switch (m) {
@@ -1867,32 +1844,11 @@ export default function MapLibreMap() {
     return 'Inconnu';
   };
 
-  // Lorsqu'une fiche apparaît pour la mission, déclencher une notification pour les non-admin
+  // Notification paw dynamique — visible quand la fiche existe et le panneau est fermé,
+  // cohérent avec la logique grid (contenu caché → notification, contenu visible → pas de notification).
   useEffect(() => {
-    if (!personCase) {
-      lastNotifiedPersonCaseIdRef.current = null;
-      setProjectionNotification(false);
-      return;
-    }
-
-    if (user?.id && personCase.createdBy === user.id) {
-      lastNotifiedPersonCaseIdRef.current = personCase.id;
-      setProjectionNotification(false);
-      return;
-    }
-
-    if (selectedMissionId) {
-      const dismissed = getDismissedPersonCaseId(selectedMissionId);
-      if (dismissed === personCase.id) return;
-    }
-
-    if (lastNotifiedPersonCaseIdRef.current === personCase.id) return;
-    lastNotifiedPersonCaseIdRef.current = personCase.id;
-    setProjectionNotification(true);
-    // Toujours signaler aussi sur l'icône paramètres, quel que soit le rôle,
-    // pour révéler plus facilement l'icône paw depuis le menu.
-    setSettingsNotification(true);
-  }, [personCase, isAdmin, selectedMissionId, user?.id]);
+    setProjectionNotification(!!personCase && !personPanelOpen);
+  }, [personCase, personPanelOpen]);
 
   // Précharger la fiche personne pour tous les rôles afin que les non-admin puissent voir le suivi actif
   // (pastilles + ouverture Paw + heatmap) sans devoir ouvrir le panneau.
@@ -8081,10 +8037,6 @@ export default function MapLibreMap() {
         timerModalOpen={timerModalOpen}
         projectionNotification={projectionNotification}
         personCase={personCase}
-        userId={user?.id ?? null}
-        selectedMissionId={selectedMissionId ?? null}
-        setDismissedPersonCaseId={setDismissedPersonCaseId}
-        setProjectionNotification={setProjectionNotification}
         setNoProjectionToast={setNoProjectionToast}
         setPersonEdit={setPersonEdit}
         setPersonPanelCollapsed={setPersonPanelCollapsed}

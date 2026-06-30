@@ -1,634 +1,603 @@
-# GeoGN - Guide du Développeur
+# GeoGN — Guide du Développeur
 
 ## Qu'est-ce que GeoGN ?
 
-GeoGN est une application web de géolocalisation collaborative. Imaginez une application où des équipes (secours, chantiers, patrouilles...) peuvent voir en temps réel où se trouvent leurs membres sur une carte interactive, avec l'historique de leurs déplacements (traces GPS).
+GeoGN est une application web de coordination opérationnelle géolocalisée. Des équipes (secours, patrouilles, opérations de terrain...) peuvent :
 
-**En pratique :**
-- Les membres d'une mission partagent leurs positions GPS
-- Chaque membre a une couleur de trace unique sur la carte
-- Les admins peuvent gérer qui participe (invitations, demandes de join)
-- Les positions sont mises à jour en temps réel via WebSocket
-- Les traces GPS sont conservées pendant une durée configurable
+- Voir en temps réel les positions GPS de chaque membre sur une carte interactive
+- Tracer l'historique des déplacements de chaque participant
+- Créer et gérer des **zones** géographiques avec un système de **grilles** et d'assignations
+- Ouvrir une **piste** (fiche personne ou piste véhicule) pour modéliser la zone de recherche probable
+- Poser des **POI** (points d'intérêt) sur la carte
+- Gérer les **contacts** de mission
+- Recevoir des notifications en temps réel via WebSocket
+
+**Déploiement actuel :**
+- Backend → **Render** (Node.js/Fastify)
+- Frontend → **Netlify** (React/Vite)
+- Base de données → **MongoDB** (cloud, hors Render)
+
+---
 
 ## Architecture du Projet
 
-GeoGN est un **monorepo** (un seul dépôt git avec backend et frontend) :
+GeoGN est un **monorepo** (backend + frontend dans le même dépôt git) :
 
 ```
 GeoGN/
-├── backend/          # Serveur API + WebSocket
+├── backend/
 │   ├── src/
-│   │   ├── models/   # Définitions des données MongoDB
-│   │   ├── routes/   # Routes API REST
-│   │   ├── plugins/  # Plugins Fastify (authentification, etc.)
-│   │   └── socket.ts # Serveur WebSocket (Socket.IO)
+│   │   ├── models/       # Schémas Mongoose (MongoDB)
+│   │   ├── routes/       # Routes API REST (Fastify)
+│   │   ├── plugins/      # Auth JWT, CORS, cookies
+│   │   ├── corsOrigins.ts# Règles CORS partagées HTTP + WebSocket
+│   │   ├── db.ts         # Connexion MongoDB
+│   │   ├── socket.ts     # Serveur WebSocket (Socket.IO)
+│   │   └── index.ts      # Point d'entrée Fastify
+│   ├── .env              # Variables d'environnement (ne pas committer)
 │   └── package.json
-├── frontend/         # Application web React
+├── frontend/
 │   ├── src/
-│   │   ├── components/  # Composants réutilisables (carte, formulaires...)
-│   │   ├── pages/       # Pages de l'application (missions, map, contacts...)
-│   │   ├── contexts/    # Contextes React (auth, mission...)
-│   │   ├── hooks/       # Hooks personnalisés (géolocalisation...)
-│   │   └── lib/         # Utilitaires (socket, API...)
+│   │   ├── components/   # Composants réutilisables
+│   │   │   ├── MapLibreMap.tsx       # Composant carte principal (>8000 lignes)
+│   │   │   ├── MapRightToolbar.tsx   # Barre d'outils droite (grid, paw, settings...)
+│   │   │   ├── PersonPanelOverlay.tsx# Panneau piste / fiche personne
+│   │   │   └── ConfirmDialog.tsx     # Dialog de confirmation (portal React)
+│   │   ├── pages/        # Pages de l'app (routes React Router)
+│   │   │   ├── MissionMapPage.tsx    # Page carte mission
+│   │   │   ├── MissionContactsPage.tsx
+│   │   │   ├── MissionZonesPage.tsx
+│   │   │   ├── MissionPoisPage.tsx
+│   │   │   └── ...
+│   │   ├── contexts/     # Contextes React (auth, mission...)
+│   │   ├── hooks/        # Hooks personnalisés (géolocalisation...)
+│   │   └── lib/          # Utilitaires (socket, API, helpers...)
 │   └── package.json
-└── docker-compose.yml  # Configuration Docker (MongoDB)
+├── docker-compose.yml    # MongoDB locale pour développement
+└── README.md
 ```
 
-## Technologies Utilisées
+---
 
-### Côté Backend (Serveur)
-- **Fastify** : Framework web rapide pour l'API REST
-- **MongoDB** : Base de données NoSQL pour stocker les positions et missions
-- **Mongoose** : ODM pour interagir avec MongoDB
-- **Socket.IO** : WebSocket pour les mises à jour en temps réel
-- **Keycloak/OIDC** : Authentification des utilisateurs
-- **TypeScript** : JavaScript avec types pour plus de sécurité
+## Technologies
 
-### Côté Frontend (Application Web)
-- **React 18** : Framework JavaScript pour l'interface
-- **React Router v6** : Gestion de la navigation
-- **MapLibreGL** : Bibliothèque de cartes interactive (alternative open-source à Mapbox)
-- **Socket.IO-client** : Client WebSocket pour les mises à jour temps réel
-- **Vite** : Outil de build ultra-rapide pour le développement
-- **TypeScript** : JavaScript avec types
+### Backend
+| Technologie | Usage |
+|---|---|
+| **Fastify 4** | Framework HTTP REST |
+| **Socket.IO** | WebSocket temps réel |
+| **MongoDB + Mongoose** | Base de données NoSQL |
+| **TypeScript** | Typage statique |
+| **tsx watch** | Dev server avec hot-reload |
+| **bcryptjs** | Hash des mots de passe |
+| **JWT (jsonwebtoken)** | Auth sans session serveur |
+| **Keycloak/OIDC** | Auth SSO (suspendu, prêt à réactiver) |
 
-## Concepts Clés à Comprendre
+### Frontend
+| Technologie | Usage |
+|---|---|
+| **React 18** | Framework UI |
+| **React Router v6** | Navigation SPA |
+| **MapLibreGL** | Carte interactive (alternative open-source Mapbox) |
+| **Tailwind CSS 3** | Style utilitaire |
+| **Socket.IO-client** | Client WebSocket |
+| **Vite** | Build tool et dev server |
+| **TypeScript** | Typage statique |
+| **Lucide React** | Icônes |
 
-### 1. Missions
-Une mission est comme un "groupe" ou un "projet". Par exemple : "Patrouille Zone Nord", "Chantier Site A", "Opération Secours".
+---
 
-**Ce qu'elle contient :**
-- Un nom (ex: "Patrouille Zone Nord")
-- Un état : `draft` (brouillon), `active` (en cours), `closed` (terminée)
-- Un style de carte (fond de carte MapLibre)
-- Une durée de rétention des traces (combien de temps on garde les traces GPS)
+## Authentification
 
-### 2. Membres d'une Mission
-Les membres sont les utilisateurs qui participent à une mission.
+### Situation actuelle : JWT natif
 
-**Rôles :**
-- **admin** : Peut tout gérer (ajouter/supprimer membres, changer les rôles, accepter les demandes)
-- **member** : Peut voir les positions et traces des autres
-- **viewer** : Lecture seule (ne peut pas modifier)
+Keycloak/OIDC est **suspendu** (routes `oidc.ts` conservées mais désactivées). L'application utilise son propre système JWT :
 
-**Chaque membre a :**
-- Une couleur de trace unique (ex: rouge, bleu, vert...)
-- Un état actif/inactif
-- Une date de rejoindre
-- Une date de suppression (soft-delete = on ne supprime vraiment jamais, on marque juste "supprimé")
+- `POST /auth/login` → vérifie email/password, retourne access + refresh token
+- `POST /auth/refresh` → échange le refresh token contre un nouveau access token
+- `POST /auth/logout` → invalide la session
 
-### 3. Positions GPS
-Il y a **deux types** de stockage des positions :
-
-**PositionCurrent (position courante)**
-- C'est la position actuelle de chaque membre
-- Un seul point par membre (le plus récent)
-- Contient : longitude, latitude, vitesse, direction, précision, timestamp
-- Exemple : "Jean est actuellement à [lat, lng]"
-
-**Trace (historique des positions)**
-- C'est l'historique complet pour dessiner la trace sur la carte
-- Un point par position reçue (avec throttle)
-- Contient : longitude, latitude, couleur, timestamp, date d'expiration
-- Exemple : "Jean a passé par [lat1, lng1] → [lat2, lng2] → ..."
-- **Important** : Les traces ont une date d'expiration (TTL) - MongoDB les supprime automatiquement après cette date
-
-### 4. Invitations
-Les admins peuvent inviter directement quelqu'un via un token (comme un lien magique).
-
-**États :**
-- `pending` : Invitation envoyée, pas encore répondue
-- `accepted` : Invitation acceptée
-- `declined` : Invitation refusée
-- `revoked` : Invitation annulée par l'admin
-
-### 5. Zones et Grilles
-Les zones sont des zones géographiques (cercles ou polygones) que les admins peuvent dessiner sur la carte. Elles peuvent être assignées à des membres.
-
-**Types de zones :**
-- **Cercle** : Défini par un centre et un rayon (en mètres)
-- **Polygone** : Défini par un contour géométrique
-
-**Grilles (Grid Cells) :**
-- Une zone peut avoir une grille optionnelle (lignes x colonnes)
-- Chaque cellule est identifiée par un code (ex: "A1", "B2", "C15")
-- Les admins peuvent assigner des membres à des cellules spécifiques
-- Un membre peut être assigné à plusieurs cellules de la même zone
-- Sans grille : un membre est assigné à la zone entière
-- Avec grille : un membre est assigné à une ou plusieurs cellules
-
-**Mode Grille (Frontend) :**
-- **admin-select** : Admin peut sélectionner des cellules pour les assigner à des membres
-- **member-highlight** : Les membres voient leurs cellules assignées surlignées en couleur
-- **off** : Mode normal, pas de grille visible
-
-### 6. Demandes de Join (Join Requests)
-Les utilisateurs peuvent demander à rejoindre une mission eux-mêmes. Les admins doivent accepter ou refuser.
-
-**États :**
-- `pending` : En attente de réponse admin
-- `accepted` : Acceptée par un admin
-- `declined` : Refusée par un admin
-
-## Comment Fonctionne le Temps Réel (WebSocket)
-
-### Les "Rooms" Socket.IO
-Socket.IO utilise des "rooms" pour envoyer des messages à des groupes spécifiques :
-
-- **`mission:{missionId}`** : Tous les membres connectés d'une mission reçoivent les messages
-  - Exemple : `mission:12345` = tous les membres de la mission 12345
-- **`user:{userId}`** : Un utilisateur spécifique pour les notifications personnelles
-  - Exemple : `user:67890` = notifications pour l'utilisateur 67890
-
-### Messages Client → Serveur
-
-**`mission:join`** - "Je rejoins cette mission"
-- Quand : Au chargement d'une page de mission
-- Payload : `{ missionId, retentionSeconds? }`
-- Ce que fait le serveur : Vérifie que tu es membre, t'ajoute à la room, t'envoie les positions actuelles
-- Pourquoi : Pour recevoir les mises à jour en temps réel
-
-**`position:update`** - "Voici ma position GPS"
-- Quand : Chaque seconde (environ) quand le GPS bouge
-- Payload : `{ lng, lat, speed?, heading?, accuracy?, t }`
-- Ce que fait le serveur : Sauvegarde la position, envoie à tout le monde
-- **Important** : Throttle = 1 point toutes les 2 secondes en base de données pour ne pas la surcharger
-
-**`position:bulk`** - "Voici toutes mes positions accumulées pendant que j'étais déconnecté"
-- Quand : Quand le socket se reconnecte après une déconnexion
-- Payload : `{ points: [...] }` (max 200 points)
-- Ce que fait le serveur : Sauvegarde TOUTES les positions (sans throttle), envoie à tout le monde
-- Pourquoi : Pour ne pas perdre de données quand tu étais offline
-
-### Messages Serveur → Client
-
-**`mission:joined`** - "Tu as bien rejoint la mission"
-- Confirmation que le `mission:join` a réussi
-
-**`mission:snapshot`** - "Voici toutes les positions et traces actuelles"
-- Quand : Après un `mission:join` ou demande explicite
-- Payload : `{ positions: [...], traces: {...} }`
-- Pourquoi : Pour restaurer l'état de la carte sans attendre les positions une par une
-
-**`position:update`** - "Voici la position de quelqu'un"
-- Quand : Quand un membre envoie sa position
-- Broadcast : À toute la room mission
-- Pourquoi : Pour mettre à jour la carte en temps réel
-
-**`position:bulk`** - "Voici les positions offline de quelqu'un"
-- Quand : Quand quelqu'un se reconnecte
-- Broadcast : À toute la room mission
-- Pourquoi : Pour rattraper les positions manquantes
-
-**`position:clear`** - "Nettoie les positions de ce membre"
-- Quand : Quand un membre est supprimé d'une mission
-- Payload : `{ missionId, userId }`
-- Pourquoi : Pour retirer les positions/traces de la carte
-
-**`member:updated`** - "Les infos d'un membre ont changé"
-- Quand : Quand un admin change le rôle ou la couleur d'un membre
-- Payload : `{ missionId, member: {...} }`
-- Pourquoi : Pour mettre à jour l'affichage (couleur de trace, badge rôle...)
-
-**`join-request:created`** - "Quelqu'un a demandé à rejoindre"
-- Quand : Quand un utilisateur fait une demande de join
-- Payload : `{ missionId, request: {...} }`
-- Envoyé à : Tous les admins de la mission (via room `user:{adminId}`)
-- Pourquoi : Pour que les admins voient la demande en temps réel sans refresh
-
-**`join-request:resolved`** - "Une demande a été acceptée ou refusée"
-- Quand : Quand un admin accepte ou refuse une demande
-- Payload : `{ missionId, request: {...} }`
-- Envoyé à : L'auteur de la demande + tous les admins
-- Pourquoi : Pour mettre à jour les listes en temps réel
-
-**`mission:deleted`** - "Cette mission a été supprimée"
-- Quand : Quand un admin supprime une mission
-- Payload : `{ missionId }`
-- Envoyé à : Tous les membres connectés
-- Pourquoi : Pour rediriger les utilisateurs vers la liste des missions
-
-**`zone:created`** - "Une nouvelle zone a été créée"
-- Quand : Quand un admin crée une zone
-- Payload : `{ missionId, zone: {...}, createdByDisplayName }`
-- Envoyé à : Tous les membres de la mission
-- Pourquoi : Pour afficher la nouvelle zone en temps réel
-
-**`zone:updated`** - "Une zone a été modifiée"
-- Quand : Quand un admin modifie une zone
-- Payload : `{ missionId, zone: {...} }`
-- Envoyé à : Tous les membres de la mission
-- Pourquoi : Pour mettre à jour la zone en temps réel
-
-**`zone:deleted`** - "Une zone a été supprimée"
-- Quand : Quand un admin supprime une zone
-- Payload : `{ missionId, zoneId }`
-- Envoyé à : Tous les membres de la mission
-- Pourquoi : Pour retirer la zone de la carte
-
-**`zone:assignments:changed`** - "Les assignations d'une zone ont changé"
-- Quand : Quand un admin assigne/déassigne un membre à une zone ou cellule
-- Payload : `{ missionId, zoneId, assignments: [...] }`
-- Envoyé à : Tous les membres de la mission
-- Pourquoi : Pour mettre à jour les assignations en temps réel (surlignage des cellules)
-
-**`zone:assigned:you`** - "Tu as été assigné à une zone"
-- Quand : Quand un admin t'assigne à une zone
-- Payload : `{ missionId, zoneId, zoneName, assignedByUserName }`
-- Envoyé à : L'utilisateur assigné (via room `user:{userId}`)
-- Pourquoi : Pour afficher une notification personnalisée
-
-## Le Cache Socket (Optimisation)
-
-### Pourquoi ?
-Chaque fois qu'un membre envoie sa position, le serveur doit vérifier s'il est bien membre de la mission. Sans cache, ça ferait une requête MongoDB à chaque position (plusieurs par seconde par membre). Avec cache, on évite ces requêtes.
-
-### Comment ça marche ?
-Le serveur stocke dans la mémoire du socket :
+Chaque route protégée appelle en premier :
 ```typescript
-cached: {
-  memberColor: string;         // La couleur de trace du membre
-  retentionSeconds: number;    // La durée de rétention des traces
-  checkedAt: number;          // Quand on a vérifié la dernière fois
+try {
+  requireAuth(req); // plugins/auth.ts — vérifie le JWT, injecte req.userId
+} catch (e: any) {
+  return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
 }
 ```
 
-**Durée de vie du cache :** 5 secondes (réduit pour plus de réactivité)
+`requireAuth` est **indépendant de Keycloak** — toutes les 42+ routes l'appellent directement dans leur handler.
 
-### Quand est-il peuplé ?
-- Quand un socket fait `mission:join` (après vérification membership)
+### Réactivation de Keycloak
 
-### Quand est-il utilisé ?
-- Dans `position:update` pour éviter de refaire la query MongoDB
+Quand Keycloak sera réactivé, modifier `plugins/auth.ts` pour valider les tokens OIDC au lieu des JWT natifs. Toutes les routes sont déjà prêtes, aucun changement dans les handlers.
 
-### Quand est-il invalidé (remis à zéro) ?
-- Quand un admin change le rôle ou la couleur d'un membre
-- Quand un admin supprime un membre (kick)
-- Après 5 secondes (TTL automatique)
+---
 
-## Flux Complet de Géolocalisation
+## Concepts Clés
 
-### Côté Client (Application Web)
+### Missions
+Groupe de travail central de l'application.
 
-**Sur les pages annexes (zones, POIs, contacts) - PAS la carte**
-- Le hook `useMissionGeolocation` gère le GPS
-- Il est DÉSACTIVÉ quand on est sur la carte (MapLibreMap gère son propre GPS)
-- Il envoie `position:update` en temps réel
-- Si le socket est déconnecté, il empile les positions dans localStorage
-- À la reconnexion, il flush tout via `position:bulk`
+**États :** `draft` → `active` → `closed`
 
-**Sur la carte (MapLibreMap)**
-- MapLibreMap gère son propre watcher GPS (plus complexe)
-- Il envoie `position:update` en temps réel
-- Il gère les snapshots (restauration de l'état)
-- Il fait un merge intelligent : traces locales + snapshot = meilleure résolution
+**Contient :** nom, état, style de carte MapLibre, durée de rétention des traces GPS, timer optionnel.
 
-### Côté Serveur
+### Membres d'une Mission
+**Rôles :**
+- `admin` : gestion complète (membres, zones, assignations, piste personne...)
+- `member` : participation, peut envoyer sa position
+- `viewer` : lecture seule
 
-**Traitement d'une position individuelle (`position:update`)**
-1. Vérifie que lat/lng sont valides
-2. Vérifie que l'expéditeur est membre de la mission (avec cache si disponible)
-3. Met à jour `PositionCurrent` (la position courante du membre)
-4. Throttle l'insertion en `Trace` (1 point toutes les 2 secondes)
-5. Broadcast la position à toute la room mission
+Soft-delete via `removedAt` — un membre retiré n'est jamais vraiment supprimé.
 
-**Traitement d'un flush offline (`position:bulk`)**
-1. Vérifie lat/lng pour chaque point
-2. Vérifie membership (avec cache)
-3. **SANS throttle** : insère TOUS les points en `Trace` (pour fidélité)
-4. Met à jour `PositionCurrent` avec le dernier point
-5. Broadcast tous les points à toute la room mission
+### GPS et Traces
 
-**Envoi d'un snapshot (`emitMissionSnapshot`)**
-1. Récupère toutes les `PositionCurrent` de la mission
-2. Récupère toutes les `Trace` dans la fenêtre de rétention
-3. Groupe par userId
-4. Envoie `mission:snapshot` au socket demandeur
+**Deux types de stockage :**
+- `PositionCurrent` : position actuelle de chaque membre (1 doc par membre, mis à jour en place)
+- `Trace` : historique complet pour dessiner les lignes sur la carte — TTL automatique via `expiresAt`
+- `Position` : archive longue durée (TTL 90 jours via index MongoDB)
 
-## Gestion des Déconnexions/Reconnexions
+**Throttle :** 1 point Trace toutes les 2 secondes en temps réel. Exception : `position:bulk` (offline flush) est sans throttle pour préserver la fidélité.
 
-### Côté Frontend
+### Zones et Grilles
 
-**Socket.ts (gestionnaire de connexion WebSocket)**
-- Singleton : une seule connexion pour toute l'application
-- Reconnexion automatique si le token expire
-- Appelle `refreshTokens()` directement (pas d'appel API)
-- Options de reconnexion par défaut
+Les zones sont des polygones ou cercles dessinés sur la carte par les admins.
 
-**useMissionGeolocation (hook GPS)**
-- Au chargement : restaure les positions empilées dans localStorage
-- Persistance debouncée (2 secondes) pour ne pas bloquer l'application
-- À la reconnexion : flush automatique des positions accumulées
-- Quand l'app redevient active (focus/visibility) : envoie une position immédiate
+**Grilles :**
+- Une zone peut avoir une grille (lignes × colonnes)
+- Chaque cellule a un code (`A1`, `B2`, etc.)
+- Les admins assignent des membres à des cellules spécifiques
+- Sans grille : assignation à la zone entière
 
-**MapLibreMap (composant carte)**
-- Snapshot automatique à la reconnexion
-- Merge intelligent : traces locales + traces du snapshot
-- Persistance debouncée (1500ms) pour localStorage
-- Gère une queue offline `pendingBulkRef`
+**Modes d'affichage grille (frontend) :**
+- `off` : pas de grille visible
+- `admin-select` : admin sélectionne des cellules
+- `member-highlight` : membres voient leurs cellules surlignées
 
-### Côté Backend
+### POI (Points d'Intérêt)
+Points marqués sur la carte avec une icône, une couleur et une description. Soft-delete via `deletedAt`.
 
-**Socket.ts (serveur WebSocket)**
-- Crée automatiquement la room `user:{userId}` à la connexion
-- Peuple le cache socket lors de `mission:join`
-- TTL du cache : 30 secondes
+### Fiche Personne / Piste (PersonCase)
 
-## Notifications en Temps Réel
+Quand on cherche une personne disparue, on crée une **fiche personne** avec :
+- Dernière position connue (adresse ou POI)
+- Date/heure de dernière observation
+- Mobilité (à pied, vélo, voiture, etc.)
+- Âge, sexe, état de santé, maladies, blessures
+- Terrain, médicaments/substances
 
-### Cycle de Vie d'une Demande de Join
+Cette fiche alimente un **modèle probabiliste gaussien** qui dessine un disque rouge sur la carte (zone de recherche probable).
 
-**1. Création de la demande**
-- Utilisateur POST `/missions/:id/join-requests`
-- Serveur émet `join-request:created` aux admins (via room `user:{adminId}`)
-- Frontend MissionContactsPage écoute et met à jour l'UI en temps réel
-- Les admins voient immédiatement la nouvelle demande sans refresh
+**Un seul PersonCase par mission à la fois.**
 
-**2. Acceptation ou Refus**
-- Admin POST `/missions/:id/join-requests/:requestId/accept` ou `/decline`
-- Serveur émet `join-request:resolved` à l'auteur ET aux admins
-- Frontend met à jour les listes en temps réel
-- L'auteur voit son statut changer immédiatement
+### Piste Véhicule (VehicleTrack)
 
-**3. Auto-réparation (GET join-requests)**
-- Quand un admin liste les demandes (`GET /missions/:id/join-requests`)
-- Si une demande est `accepted` mais AUCUN `MissionMember` n'existe (crash accept), repasse en `pending`
-- Si un `MissionMember` existe avec `removedAt` (admin a viré le membre), NE répare PAS
-- Pourquoi ? Pour éviter que les membres virés fassent réapparaître leur demande
+Pour les mobilités motorisées (voiture, moto, etc.), une piste véhicule est créée en parallèle. Elle utilise un algorithme `road_graph` pour calculer la zone accessible depuis le point de départ. Résultat : un polygone rouge (isochrone) affiché sur la carte via la source MapLibre `vehicle-track-reached`.
 
-### Gestion des Membres
+### Contacts
+Liste de contacts liée à une mission (personnes à prévenir, équipes partenaires...). Stockée dans `Contact`.
 
-**Mise à jour (rôle, couleur)**
-- Admin PATCH `/missions/:id/members/:userId`
-- Serveur émet `member:updated` à toute la room mission
-- Invalide le cache socket du membre
-- Frontend met à jour en temps réel (nouvelle couleur de trace, nouveau rôle)
+---
 
-**Suppression (kick)**
-- Admin DELETE `/missions/:id/members/:userId`
-- Serveur émet `member:updated` ET `position:clear` à toute la room mission
-- Invalide le cache socket du membre
-- Frontend retire les positions/traces en temps réel
-- Le membre ne peut plus envoyer de positions (vérification membership)
+## Système de Notifications
 
-### Suppression d'une Mission
+### Logique générale
 
-**Cascade DELETE**
-- Admin DELETE `/missions/:id`
-- Serveur émet `mission:deleted` AVANT la suppression (pour prévenir les clients)
-- Supprime en cascade 11 collections liées :
-  - MissionMember, MissionInvite, MissionJoinRequest
-  - Zone, Position, PositionCurrent
-  - Trace, Poi, PersonCase
-  - VehicleTrack, HuntIsochrone
-- Frontend MissionLayout écoute l'événement et redirige vers `/`
+Toutes les notifications suivent le même principe : **l'icône affiche un indicateur quand son contenu est caché**.
 
-## Optimisations de Performance
+### Bouton Paw (piste personne)
 
-### Côté Backend
+- **Point rouge sur l'icône Paw** = `projectionNotification` = `!!personCase && !personPanelOpen`
+  - Piste active ET panneau paw **fermé** → notification visible
+  - Panneau paw **ouvert** (tu vois le disque) → notification disparaît
+  - Piste supprimée → notification disparaît
 
-**Cache Socket**
-- Réduit les requêtes MongoDB dans `position:update`
-- TTL 30 secondes pour rester à jour
-- Invalidation automatique sur changements de rôle/couleur/kick
+### Bouton Grid (grille)
 
-**Throttle des positions**
-- En temps réel : 1 point toutes les 2 secondes en base de données
-- Réduit le volume de données stockées
-- **Exception** : `position:bulk` (offline) - SANS throttle pour fidélité
+- **Point rouge sur l'icône Grid** = `gridHasAssignments && gridViewMode === 'off'`
+  - Des cellules sont assignées ET le mode grille est **désactivé** → notification visible
+  - Mode grille **actif** (tu vois la grille) → notification disparaît
 
-### Côté Frontend
+### Bouton Paramètres (settings)
 
-**Mémoïsation React**
-- Utilisation de `useCallback` et `useMemo` pour éviter les re-renders inutiles
-- Handlers de contextes (AuthContext, GridViewContext) mémoïsés
-- Réduit la charge CPU et améliore la réactivité de l'interface
+- **Badge numérique** sur l'icône Settings :
 
-**Debounce LocalStorage**
-- Persistance debouncée à 1500ms
-- Évite les blocages du thread principal pendant le tracking
-- Appliqué à `tracePoints` (traces locales) et `otherTracesRef` (traces des autres)
+```typescript
+const count =
+  (projectionNotification ? 1 : 0) +
+  (gridHasAssignments && gridViewMode === 'off' ? 1 : 0);
+```
 
-**Merge Snapshot/Live**
-- Merge intelligent : traces du snapshot + traces reçues en live
-- Conservation de la résolution locale (1Hz vs 0.5Hz serveur)
-- Récupération des points anciens du snapshot si pertinents
+| Situation | Badge |
+|---|---|
+| Aucune piste, pas de grille | rien |
+| Piste active (panneau fermé), pas de grille | **1** |
+| Pas de piste, grille avec assignations (grid off) | **1** |
+| Piste active (panneau fermé) + grille avec assignations (grid off) | **2** |
+| Panneau paw ouvert + grille off avec assignations | **1** (paw visible = pas compté) |
 
-**Ignore Echo Bulk**
-- Les echos de `position:bulk` pour soi-même sont ignorés
-- Évite les doublons dans la trace personnelle
-- Les `position:update` restent appliqués (cohérence)
+Le badge est affiché en dehors du conteneur `overflow-hidden` (z-index absolu) pour ne pas être tronqué.
 
-**Single mission:join**
-- Hook `useMissionGeolocation` désactivé sur la carte
-- Évite le double `mission:join` et double snapshot
-- MapLibreMap gère le socket quand on est sur la carte
+---
+
+## WebSocket — Événements Temps Réel
+
+### Rooms Socket.IO
+
+- `mission:{missionId}` → tous les membres connectés d'une mission
+- `user:{userId}` → notifications personnelles
+
+### Client → Serveur
+
+| Événement | Description |
+|---|---|
+| `mission:join` | Rejoindre une mission (vérifie membership, envoie snapshot) |
+| `position:update` | Envoyer sa position GPS en temps réel |
+| `position:bulk` | Flush des positions accumulées offline |
+
+### Serveur → Client
+
+| Événement | Description |
+|---|---|
+| `mission:joined` | Confirmation de join |
+| `mission:snapshot` | Toutes les positions + traces actuelles |
+| `position:update` | Position d'un membre (broadcast room) |
+| `position:bulk` | Positions offline d'un membre (broadcast room) |
+| `position:clear` | Retirer les positions d'un membre (kick) |
+| `member:updated` | Changement rôle/couleur d'un membre |
+| `join-request:created` | Nouvelle demande de join (→ admins) |
+| `join-request:resolved` | Demande acceptée/refusée |
+| `mission:deleted` | Mission supprimée (redirect clients) |
+| `zone:created` | Nouvelle zone |
+| `zone:updated` | Zone modifiée |
+| `zone:deleted` | Zone supprimée |
+| `zone:assignments:changed` | Assignations mises à jour |
+| `zone:assigned:you` | Tu as été assigné à une zone (→ toi seulement) |
+| `poi:created` | Nouveau POI |
+| `poi:updated` | POI modifié |
+| `poi:deleted` | POI supprimé |
+| `person-case:created` | Fiche personne créée |
+| `person-case:updated` | Fiche personne modifiée |
+| `person-case:deleted` | Fiche personne supprimée |
+| `vehicle-track:created` | Piste véhicule créée |
+| `vehicle-track:updated` | Piste véhicule mise à jour (isochrone calculé) |
+
+### Cache Socket
+
+Pour éviter une requête MongoDB à chaque `position:update`, le serveur cache en mémoire socket :
+```typescript
+{ memberColor, retentionSeconds, checkedAt }
+```
+TTL : 30 secondes. Invalidé sur kick/changement rôle ou couleur.
+
+---
+
+## Base de Données (MongoDB)
+
+### Collections et Modèles
+
+| Collection | Fichier | Description |
+|---|---|---|
+| `missions` | `mission.ts` | Missions (nom, état, config) |
+| `missionMembers` | `missionMember.ts` | Membres avec soft-delete (`removedAt`) |
+| `missionInvites` | `missionInvite.ts` | Invitations tokenisées |
+| `missionJoinRequests` | `missionJoinRequest.ts` | Demandes de join |
+| `positionCurrents` | `positionCurrent.ts` | Position GPS courante (1 par membre) |
+| `traces` | `trace.ts` | Historique GPS avec TTL (`expiresAt`) |
+| `positions` | `position.ts` | Archive GPS — TTL 90 jours |
+| `zones` | `zone.ts` | Zones géographiques + grilles |
+| `pois` | `poi.ts` | POI avec soft-delete (`deletedAt`) |
+| `personCases` | `personCase.ts` | Fiche personne (1 par mission) |
+| `vehicleTracks` | `vehicleTrack.ts` | Pistes véhicule |
+| `huntIsochrones` | `huntIsochrone.ts` | Isochrones calculés — TTL 30 jours |
+| `contacts` | `contact.ts` | Contacts de mission |
+| `users` | `user.ts` | Comptes utilisateurs |
+
+### Indexes Importants
+
+```typescript
+// PositionCurrent — unique par membre
+{ missionId: 1, userId: 1 } (unique)
+
+// Trace — requêtes rapides par mission/user
+{ missionId: 1, userId: 1, createdAt: -1 }
+{ expiresAt: 1 } // TTL
+
+// Position — archive avec TTL 90 jours
+{ createdAt: 1 } // TTL, expireAfterSeconds: 7_776_000
+
+// HuntIsochrone — TTL 30 jours
+{ ts: 1 } // TTL, expireAfterSeconds: 2_592_000
+
+// POI
+{ deletedAt: 1 }
+{ missionId: 1, deletedAt: 1 }
+```
+
+Les TTL MongoDB sont des index en arrière-plan — ils purgent automatiquement sans impacter les performances.
+
+### Options Mongoose (db.ts)
+
+```typescript
+await mongoose.connect(mongoUri, {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 10000,
+});
+```
+
+---
+
+## CORS
+
+Les règles CORS sont centralisées dans `backend/src/corsOrigins.ts` et utilisées à la fois par Fastify (HTTP) et Socket.IO (WebSocket) :
+
+```typescript
+export function isAllowedOrigin(origin: string): boolean {
+  // FRONTEND_BASE_URL exact match
+  // *.netlify.app
+  // localhost / 127.0.0.1 en développement
+}
+```
+
+Un seul endroit à modifier si les origines autorisées changent.
+
+---
 
 ## Sécurité
 
-### Authentification
-- Keycloak/OIDC pour l'authentification des utilisateurs
-- JWT tokens avec refresh automatique
-- Middleware `requireAuth(req)` sur toutes les routes protégées
-- **Rotation de session OIDC** : après callback, le sessionId est réinitialisé pour éviter le vol de session
-- **Expiration des sessions** : les sessions BFF expirent après 8h et sont purgées automatiquement
-- **Vérification email_verified** : si un utilisateur Keycloak a un email non vérifié, il ne peut pas être lié à un compte local existant (409)
+### Points appliqués
 
-### Authorization
-- Vérification du membership pour CHAQUE opération
-- Rôles : admin, member, viewer
-- Seuls les admins peuvent gérer les membres
+- **JWT secrets** : générés cryptographiquement (32 bytes base64), configurés dans Render dashboard
+- **CORS partagé** : `corsOrigins.ts` unique pour HTTP et WebSocket — pas de désynchronisation possible
+- **Auth sur toutes les routes** : `requireAuth(req)` appelé dans chaque handler (42+ routes vérifiées)
+- **Validation des entrées** : coordonnées lat/lng validées, énumérations MongoDB strictes
+- **Soft-delete** : les membres supprimés restent en base avec `removedAt` — traçabilité complète
+- **Pas de token en query string** : le token WebSocket vient uniquement du header `Authorization` ou `socket.handshake.auth.token`
+- **Logs d'erreurs** : tous les blocs catch socket logguent via `console.error` avec contexte
 
-### CORS (Cross-Origin Resource Sharing)
-- Whitelist d'origines autorisées (FRONTEND_BASE_URL + localhost:5173 en dev)
-- Bloque les requêtes depuis des origines non autorisées
-- S'applique à l'API REST et à Socket.IO
+### Keycloak (suspendu)
 
-### Validation
-- Validation des coordonnées lat/lng dans les handlers socket
-- Filtre sur `removedAt: null` pour ne considérer que les membres actifs
-- Auto-réparation des demandes "accepted" sans membre correspondant
+Les routes OIDC (`/auth/login/oidc`, `/auth/callback`, etc.) sont présentes dans `routes/oidc.ts` mais non enregistrées. Quand Keycloak sera réactivé, il suffit de les réenregistrer dans `index.ts` et d'adapter `plugins/auth.ts`.
 
-## Guide de Développement Rapide
+---
+
+## Variables d'Environnement
+
+### Backend (`.env` ou Render dashboard)
+
+| Variable | Description |
+|---|---|
+| `MONGO_URI` | URI de connexion MongoDB |
+| `JWT_ACCESS_SECRET` | Secret pour signer les access tokens JWT |
+| `JWT_REFRESH_SECRET` | Secret pour signer les refresh tokens JWT |
+| `BFF_SESSION_SECRET` | Secret pour les cookies de session BFF |
+| `PORT` | Port d'écoute (défaut : 4000) |
+| `FRONTEND_BASE_URL` | URL du frontend (ex: `https://app.netlify.app`) |
+| `BACKEND_BASE_URL` | URL du backend (ex: `https://api.onrender.com`) |
+| `OIDC_ISSUER_URL` | URL du realm Keycloak (suspendu) |
+| `OIDC_CLIENT_ID` | Client ID Keycloak (suspendu) |
+| `OIDC_CLIENT_SECRET` | Client secret Keycloak (suspendu) |
+
+### Frontend (`.env` Vite ou Netlify dashboard)
+
+| Variable | Description |
+|---|---|
+| `VITE_API_BASE_URL` | URL de l'API backend |
+| `VITE_SOCKET_URL` | URL du serveur WebSocket (souvent identique) |
+
+---
+
+## Déploiement
+
+### Backend (Render)
+
+1. Build : `npm run build` → compile TypeScript dans `dist/`
+2. Start : `node ./dist/index.js`
+3. Variables d'environnement configurées dans le dashboard Render
+4. **Important** : Render endort le service après inactivité (plan gratuit) — le premier appel après inactivité peut être lent
+
+### Frontend (Netlify)
+
+1. Build : `npm run build` → génère `dist/`
+2. Publier le dossier `dist/`
+3. `netlify.toml` configure les redirections SPA (`/* → /index.html`)
+
+### Rotation des secrets
+
+Si les secrets JWT sont compromis, les changer dans Render dashboard. Tous les tokens existants seront immédiatement invalidés (les utilisateurs doivent se reconnecter).
+
+---
+
+## Développement Local
+
+### Prérequis
+- Node.js 18+
+- MongoDB local ou cloud
 
 ### Backend
 
 ```bash
 cd backend
-npm install              # Installer les dépendances
-npm run dev             # Lancer en mode développement
-npm run build           # Compiler TypeScript
+npm install
+cp .env.example .env  # Remplir les variables
+npm run dev           # Lance avec tsx watch (hot-reload)
 ```
 
 ### Frontend
 
 ```bash
 cd frontend
-npm install              # Installer les dépendances
-npm run dev             # Lancer en mode développement (Vite)
-npm run build           # Build pour production
-npm run typecheck       # Vérifier les types TypeScript
+npm install
+npm run dev           # Lance Vite dev server (http://localhost:5173)
+npm run typecheck     # Vérification TypeScript
+npm run build         # Build production
 ```
 
-### Docker (MongoDB locale)
+### MongoDB locale
 
 ```bash
-docker-compose up       # Lancer backend + MongoDB
+docker-compose up -d  # Lance MongoDB sur port 27017
 ```
 
-## Structure de la Base de Données
+---
 
-### Collections Principales
+## Patterns de Code
 
-**Mission**
-- Stocke les missions (nom, état, style de carte...)
+### Patterns Backend à respecter
 
-**MissionMember**
-- Stocke les membres des missions
-- Soft-delete via `removedAt` (on ne supprime vraiment jamais)
-- Contient : rôle, couleur, état actif, dates
-
-**MissionInvite**
-- Stocke les invitations tokenisées
-- Permet d'ajouter directement un membre via un lien
-
-**MissionJoinRequest**
-- Stocke les demandes de join en attente
-- Contient : état, demandeur, date de création
-
-**PositionCurrent**
-- Position courante de chaque membre
-- Un seul point par membre (le plus récent)
-- Contient : coordonnées, vitesse, direction, précision
-
-**Trace**
-- Historique des positions pour le tracé
-- Plusieurs points par membre
-- TTL automatique via `expiresAt` (MongoDB supprime automatiquement après expiration)
-
-### Indexes Importants
-
-- `PositionCurrent` : `{ missionId: 1, userId: 1 }` (unique - un seul point par membre)
-- `Trace` : `{ missionId: 1, userId: 1, createdAt: -1 }` (pour les requêtes par mission/user)
-- `Trace` : `{ expiresAt: 1 }` (TTL - suppression automatique)
-
-## Déploiement
-
-### Backend
-- Build TypeScript → dossier `dist/`
-- Node.js avec modules ESM
-- Variables d'environnement requises :
-  - `MONGODB_URI` : URL de connexion MongoDB
-  - `KEYCLOAK_URL` : URL du serveur Keycloak
-  - `KEYCLOAK_REALM` : Realm Keycloak
-  - `KEYCLOAK_CLIENT_ID` : ID client Keycloak
-
-### Frontend
-- Build Vite → dossier `dist/`
-- Fichiers statiques (HTML, CSS, JS)
-- Peut être servi par Nginx, Apache, Netlify...
-- Variable d'environnement requise :
-  - `VITE_API_BASE_URL` : URL de l'API backend
-
-## Maintenance et Monitoring
-
-### Logs
-- **Backend** : Pino logger avec rotation automatique des fichiers
-- **Frontend** : Console du navigateur (DevTools)
-
-### Points de Monitoring
-- Nombre de connexions Socket.IO actives
-- Performance localStorage (debounce, taille des données)
-- Efficacité du cache socket (hit rate)
-- Volume des requêtes `position:update` vs `position:bulk`
-
-## Bonnes Pratiques pour les Développeurs
-
-### Patterns à Respecter
-
-**Routes Fastify (Backend)**
+**Auth en premier dans chaque route :**
 ```typescript
-try {
-  requireAuth(req);  // Vérifie l'authentification
-} catch (e: any) {
-  return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+async handler(req, reply) {
+  try {
+    requireAuth(req);
+  } catch (e: any) {
+    return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+  }
+  // ... logique
 }
 ```
 
-
-**Lectures MongoDB (Backend)**
-- Toujours utiliser `.lean()` pour éviter les surcharges Mongoose
+**Toujours `.lean()` pour les lectures :**
 ```typescript
-const member = await MissionMemberModel.findOne({ ... }).lean();
+const member = await MissionMemberModel.findOne({ missionId, userId }).lean();
 ```
 
-**Émissions Socket (Backend)**
-- Utiliser `app.io?.to(...).emit(...)` avec optional chaining
+**Émissions Socket avec optional chaining :**
 ```typescript
-app.io?.to(`mission:${missionId}`).emit('event', payload);
+app.io?.to(`mission:${missionId}`).emit('zone:updated', { missionId, zone });
 ```
 
-**Logs (Backend)**
-- Utiliser `req.log` (pas `console.log`)
+**Soft-delete — ne jamais supprimer physiquement un membre :**
 ```typescript
-req.log.info('User joined mission', { missionId, userId });
+await MissionMemberModel.updateOne({ _id: member._id }, { $set: { removedAt: new Date() } });
 ```
 
-**Mises à jour d'état React (Frontend)**
-- Utiliser les updates fonctionnels pour éviter les race conditions
+### Patterns Frontend à respecter
+
+**MapLibreMap.tsx** est le composant central de la carte (~8000+ lignes). Il gère :
+- La carte MapLibre et tous ses layers
+- Le GPS local et la géolocalisation
+- Le WebSocket de la mission (socket.ts)
+- Les états : zones, grilles, pistes, POIs, personCase, notifications
+
+**Keep-alive des pages** : les pages sont cachées avec `className="hidden"` au lieu d'être unmountées. MapLibreMap reste toujours monté — les performances carte sont préservées lors de la navigation.
+
+**Refs pour les closures MapLibre** : les valeurs React utilisées dans les callbacks MapLibre (`onLoad`, `onStyleData`, etc.) doivent être dans des refs, pas des state closures :
 ```typescript
-setTracePoints((prev) => [...prev, newPoint]);  // ✅ Correct
-setTracePoints([...tracePoints, newPoint]);      // ❌ Risque de race condition
+showActiveVehicleTrackRef.current = showActiveVehicleTrack;
+// Utilisé dans onStyleData au lieu de la variable state
 ```
 
-### Contraintes Absolues
+**Notifications dynamiques (pattern grid/paw) :**
+```typescript
+// Notification visible quand le contenu est CACHÉ, disparaît quand visible
+projectionNotification = !!personCase && !personPanelOpen   // paw
+gridNotification = gridHasAssignments && gridViewMode === 'off' // grid
+```
 
-⚠️ **NE JAMAIS modifier :**
-- Les schémas Mongoose (`backend/src/models/*.ts`)
-- Le code Keycloak/OIDC
-- La connexion MongoDB
+**Updates React fonctionnels pour éviter les race conditions :**
+```typescript
+setTracePoints((prev) => [...prev, newPoint]);  // ✅
+setTracePoints([...tracePoints, newPoint]);      // ❌
+```
 
-⚠️ **Éviter :**
-- Ajouter de nouvelles dépendances externes
-- Refactor massif sans justification
-- Modifications non chirurgicales
+---
 
-## Troubleshooting (Problèmes Courants)
+## Structure des Routes API
 
-### Problème : Les positions ne s'affichent pas en temps réel
-**Vérifier :**
-1. Socket.IO est-il connecté ? (onglet Network/WS du navigateur)
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/auth/login` | Connexion JWT |
+| `POST` | `/auth/refresh` | Rafraîchir le token |
+| `POST` | `/auth/logout` | Déconnexion |
+| `GET` | `/missions` | Liste des missions |
+| `POST` | `/missions` | Créer une mission |
+| `GET` | `/missions/:id` | Détail d'une mission |
+| `PATCH` | `/missions/:id` | Modifier une mission |
+| `DELETE` | `/missions/:id` | Supprimer une mission (cascade) |
+| `GET` | `/missions/:id/members` | Liste des membres |
+| `PATCH` | `/missions/:id/members/:userId` | Modifier un membre |
+| `DELETE` | `/missions/:id/members/:userId` | Retirer un membre (ou soi-même) |
+| `GET` | `/missions/:id/join-requests` | Demandes de join |
+| `POST` | `/missions/:id/join-requests` | Demander à rejoindre |
+| `POST` | `/missions/:id/join-requests/:reqId/accept` | Accepter |
+| `POST` | `/missions/:id/join-requests/:reqId/decline` | Refuser |
+| `GET` | `/missions/:id/zones` | Zones |
+| `POST` | `/missions/:id/zones` | Créer une zone |
+| `PATCH` | `/missions/:id/zones/:zoneId` | Modifier une zone |
+| `DELETE` | `/missions/:id/zones/:zoneId` | Supprimer une zone |
+| `POST` | `/missions/:id/zones/:zoneId/assignments` | Assigner un membre |
+| `GET` | `/missions/:id/pois` | POIs |
+| `POST` | `/missions/:id/pois` | Créer un POI |
+| `PATCH` | `/missions/:id/pois/:poiId` | Modifier un POI |
+| `DELETE` | `/missions/:id/pois/:poiId` | Supprimer un POI (soft) |
+| `GET` | `/missions/:id/person-case` | Fiche personne |
+| `PUT` | `/missions/:id/person-case` | Créer/mettre à jour la fiche |
+| `DELETE` | `/missions/:id/person-case` | Supprimer la fiche |
+| `GET` | `/missions/:id/vehicle-tracks` | Pistes véhicule |
+| `POST` | `/missions/:id/vehicle-tracks` | Créer une piste |
+| `GET` | `/missions/:id/vehicle-tracks/:id/state` | État d'une piste |
+| `GET` | `/missions/:id/contacts` | Contacts |
+| `POST` | `/missions/:id/contacts` | Créer un contact |
+| `PATCH` | `/missions/:id/contacts/:id` | Modifier un contact |
+| `DELETE` | `/missions/:id/contacts/:id` | Supprimer un contact |
+| `POST` | `/missions/:id/invites` | Créer une invitation |
+| `GET` | `/invites/:token` | Détail d'une invitation |
+| `POST` | `/invites/:token/accept` | Accepter une invitation |
+
+### Cas particulier : quitter une mission
+
+Un non-admin peut quitter une mission via `DELETE /missions/:id/members/:userId` (avec son propre userId). La logique `isSelfLeave` distingue :
+- **Soi-même** : toujours autorisé sauf si dernier admin avec d'autres membres
+- **Autre membre** : réservé aux admins
+
+---
+
+## Troubleshooting
+
+### Positions GPS ne s'affichent pas
+
+1. Vérifier la connexion WebSocket (onglet Network → WS du navigateur)
 2. L'utilisateur est-il bien membre de la mission ?
-3. Le cache socket est-il invalide ? (attendre 30s ou changer rôle/couleur)
+3. Le cache socket est-il invalidé ? (attendre 30s ou forcer un rechargement)
 
-### Problème : Les traces GPS sont doublées
-**Cause probable :** Echo de `position:bulk` non ignoré
-**Solution :** Vérifier que `applyRemotePosition` a bien le paramètre `opts?.fromBulk`
+### Disque probabiliste (piste à pieds) absent sur la carte
 
-### Problème : Les traces ont une mauvaise résolution après reconnexion
-**Cause probable :** Snapshot écrase les traces locales
-**Solution :** Vérifier que le merge snapshot/live est actif dans `onSnapshot`
+Le disque de probabilité n'est visible que quand le **panneau paw est ouvert**. Si le panneau est fermé, la notification rouge apparaît sur l'icône paw. Cliquer sur paw ouvre le panneau et affiche le disque.
 
-### Problème : Un membre viré continue d'envoyer des positions
-**Cause probable :** Cache socket non invalidé
-**Solution :** Vérifier que l'invalidation est bien appelée dans la route DELETE members
+### Badge settings reste à 0 même avec une piste et une grille actives
 
-### Problème : Les demandes de join réapparaissent après un kick
-**Cause probable :** Auto-réparation incorrecte dans GET join-requests
-**Solution :** Vérifier que le filtre `removedAt: null` a été retiré du findOne
+Vérifier les deux conditions simultanément :
+- `personCase` doit exister ET le panneau paw doit être fermé
+- `gridHasAssignments` doit être true ET `gridViewMode` doit être `'off'`
 
-## Ressources Utiles
+Si le panneau paw est ouvert OU si le mode grille est actif, la contribution correspondante est 0.
 
-- **Documentation Socket.IO** : https://socket.io/docs/
-- **Documentation Fastify** : https://www.fastify.io/docs/latest/
-- **Documentation Mongoose** : https://mongoosejs.com/docs/
-- **Documentation MapLibreGL** : https://maplibre.org/maplibre-gl-js-docs/
-- **Documentation React** : https://react.dev/
+### Piste véhicule (polygone rouge) disparaît après changement de fond de carte
 
-## Support
+Géré par l'événement `styledata` de MapLibre qui re-injecte les données via `vehicleTrackGeojsonByIdRef`. Si cela persiste, vérifier que `styleVersion` est bien dans les deps des effects de rendu.
 
-Pour toute question technique ou problème, consulter ce README d'abord. Si le problème persiste, contacter l'équipe de développement avec :
-- La version du code
-- Les logs d'erreur (backend et frontend)
-- Les étapes pour reproduire le problème
+### Membre viré continue d'envoyer des positions
+
+Vérifier que le cache socket est bien invalidé après un kick. Le cache a un TTL de 30 secondes — au pire, les positions passent pendant 30s avant que le membership soit re-vérifié.
+
+### Un admin ne peut pas quitter une mission
+
+Protection : le **dernier admin** ne peut pas partir s'il reste d'autres membres. Il faut d'abord promouvoir un autre membre en admin, ou supprimer tous les membres.
+
+### Demandes de join réapparaissent après un kick
+
+Vérifier la logique d'auto-réparation dans `GET /join-requests` : elle ne doit pas réparer si `MissionMember.removedAt` est non-null.
+
+---
+
+## Bonnes Pratiques
+
+- **Ne pas modifier les schémas Mongoose sans réfléchir aux migrations** — les documents existants en base ne seront pas mis à jour automatiquement
+- **Chaque nouveauté dans le schéma doit être `required: false`** pour rester compatible avec les documents existants
+- **Les TTL indexes MongoDB** s'appliquent en arrière-plan sans bloquer la prod — safe à ajouter sur un système live
+- **Pas de `console.log` dans les handlers socket** — utiliser `console.error` uniquement pour les erreurs
+- **ConfirmDialog** utilise un `React.createPortal` vers `document.body` — nécessaire pour échapper aux conteneurs avec `overflow-hidden`
+- **Les couleurs de carte** (palettes zones, contacts, POIs) ne contiennent pas le teal `#14b8a6` — retiré pour lisibilité sur fond de carte
