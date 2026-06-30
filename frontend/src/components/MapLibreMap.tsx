@@ -1524,7 +1524,6 @@ export default function MapLibreMap() {
       '#fde047',
       '#84cc16',
       '#10b981',
-      '#14b8a6',
       '#3b82f6',
       '#6366f1',
       '#1e3a8a',
@@ -8118,6 +8117,12 @@ export default function MapLibreMap() {
                 })()
               : 0
         }
+        gridHasAssignments={(() => {
+          for (const assignments of assignmentsByZoneId.values()) {
+            if (assignments.some((a) => a.gridCellId)) return true;
+          }
+          return false;
+        })()}
       />
 
       {mode === 'admin-select' && selectedZoneIds.length > 0 ? (

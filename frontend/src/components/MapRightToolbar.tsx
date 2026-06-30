@@ -85,6 +85,7 @@ type MapRightToolbarProps = {
   gridViewToggle: () => void;
   gridViewResetBadge: () => void;
   gridViewBadgeCount: number;
+  gridHasAssignments: boolean;
 };
 
 export const MapRightToolbar = memo(function MapRightToolbar({
@@ -142,6 +143,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   gridViewToggle,
   gridViewResetBadge,
   gridViewBadgeCount,
+  gridHasAssignments,
 }: MapRightToolbarProps) {
   return (
     <div
@@ -321,9 +323,16 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               }
               size={20}
             />
-            {settingsNotification ? (
-              <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
-            ) : null}
+            {(() => {
+              const count =
+                (projectionNotification ? 1 : 0) +
+                (gridHasAssignments && gridViewMode === 'off' ? 1 : 0);
+              return count > 0 ? (
+                <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white">
+                  {count}
+                </span>
+              ) : null;
+            })()}
           </button>
 
           <div
@@ -461,7 +470,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
                     {gridViewBadgeCount}
                   </span>
-                ) : settingsNotification ? (
+                ) : gridHasAssignments && gridViewMode === 'off' ? (
                   <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
                 ) : null}
               </button>

@@ -51,7 +51,6 @@ export default function MissionContactsPage() {
       '#fde047',
       '#84cc16',
       '#10b981',
-      '#14b8a6',
       '#3b82f6',
       '#6366f1',
       '#1e3a8a',

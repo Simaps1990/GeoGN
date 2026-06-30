@@ -129,12 +129,12 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
     );
   }
 
-  function InfoBox({ factorKey }: { factorKey: string }) {
+  function InfoBox({ factorKey, align = 'left' }: { factorKey: string; align?: 'left' | 'right' }) {
     if (activeInfo !== factorKey) return null;
     const d = FACTOR_DESCRIPTIONS[factorKey];
     if (!d) return null;
     return (
-      <div className="absolute left-0 top-6 z-50 w-72 rounded-xl border bg-white shadow-xl p-3">
+      <div className={`absolute top-6 z-50 w-64 rounded-xl border bg-white shadow-xl p-3 ${align === 'right' ? 'right-0' : 'left-0'}`}>
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <div className="text-xs font-semibold text-blue-700">{d.label}</div>
           <button
@@ -319,7 +319,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
             </div>
           ) : canEditPerson ? (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-3">
                 <div className="relative">
                   <div className="text-sm font-semibold text-gray-800">Dernière position connue</div>
                   <input
@@ -414,7 +414,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       el.focus();
                     }
                   }}
-                  className="min-w-0 cursor-pointer"
+                  className="cursor-pointer"
                 >
                   <div className="text-sm font-semibold text-gray-800">Date / heure</div>
                   <input
@@ -475,7 +475,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       <div className="flex items-center text-sm font-semibold text-gray-800">
                         Sexe<InfoBtn factorKey="sex" />
                       </div>
-                      <InfoBox factorKey="sex" />
+                      <InfoBox factorKey="sex" align="right" />
                       <select
                         value={personDraft.sex}
                         onChange={(e) => setPersonDraft((p: any) => ({ ...p, sex: e.target.value as any }))}
@@ -490,7 +490,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       <div className="flex items-center text-sm font-semibold text-gray-800">
                         État<InfoBtn factorKey="healthStatus" />
                       </div>
-                      <InfoBox factorKey="healthStatus" />
+                      <InfoBox factorKey="healthStatus" align="right" />
                       <select
                         value={personDraft.healthStatus}
                         onChange={(e) => setPersonDraft((p: any) => ({ ...p, healthStatus: e.target.value as any }))}

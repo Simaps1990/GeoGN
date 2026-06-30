@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type ConfirmVariant = 'danger' | 'primary';
 
@@ -27,8 +28,8 @@ function ConfirmDialog(props: {
       ? 'inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50'
       : 'inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50';
 
-  return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="text-base font-bold text-gray-900">{options.title}</div>
         {options.message ? <div className="mt-2 text-sm text-gray-700">{options.message}</div> : null}
@@ -45,7 +46,8 @@ function ConfirmDialog(props: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
