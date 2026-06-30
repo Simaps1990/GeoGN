@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { Server } from 'socket.io';
 import mongoose from 'mongoose';
 import { verifyAccessToken } from './auth/jwt.js';
+import { isAllowedOrigin } from './corsOrigins.js';
 import { MissionMemberModel } from './models/missionMember.js';
 import { MissionModel } from './models/mission.js';
 import { PositionModel } from './models/position.js';
@@ -107,15 +108,11 @@ async function requireMissionMember(userId: string, missionId: string) {
 }
 
 export function setupSocket(app: FastifyInstance) {
-  const allowedOrigins = [
-    process.env.FRONTEND_BASE_URL,
-    process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : null,
-  ].filter((x): x is string => !!x);
   const io = new Server(app.server, {
     cors: {
       origin: (origin, cb) => {
         if (!origin) return cb(null, true); // requêtes server-to-server / curl
-        cb(null, allowedOrigins.includes(origin));
+        cb(null, isAllowedOrigin(origin));
       },
       credentials: true,
     },
@@ -124,7 +121,7 @@ export function setupSocket(app: FastifyInstance) {
   io.use((socket, next) => {
     const authHeader = socket.handshake.headers.authorization;
     const tokenFromHeader = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
-    const token = tokenFromHeader ?? (socket.handshake.auth as any)?.token ?? (socket.handshake.query as any)?.token;
+    const token = tokenFromHeader ?? (socket.handshake.auth as any)?.token;
 
     if (!token || typeof token !== 'string') {
       return next(new Error('UNAUTHORIZED'));
@@ -198,7 +195,8 @@ export function setupSocket(app: FastifyInstance) {
           // Envoyer un snapshot pour que les clients qui reviennent sur la carte
           // voient immédiatement les positions + traces récentes.
           await emitMissionSnapshot(socket, missionId, requested);
-        } catch {
+        } catch (e) {
+          console.error('[socket] mission:join failed:', e);
           ack?.({ ok: false, error: 'JOIN_FAILED' });
         }
       }
@@ -232,7 +230,8 @@ export function setupSocket(app: FastifyInstance) {
         const requestedRetentionSeconds = (socket as any as AuthedSocket).data.requestedRetentionSeconds;
         await emitMissionSnapshot(socket, missionId, requestedRetentionSeconds);
         ack?.({ ok: true });
-      } catch {
+      } catch (e) {
+        console.error('[socket] mission:snapshot:request failed:', e);
         ack?.({ ok: false, error: 'SNAPSHOT_FAILED' });
       }
     });
@@ -253,7 +252,8 @@ export function setupSocket(app: FastifyInstance) {
 
         io.to(`mission:${missionId}`).emit('position:clear', { missionId, userId });
         ack?.({ ok: true });
-      } catch {
+      } catch (e) {
+        console.error('[socket] position:clear failed:', e);
         ack?.({ ok: false, error: 'POSITION_CLEAR_FAILED' });
       }
     });
@@ -364,7 +364,8 @@ export function setupSocket(app: FastifyInstance) {
 
         io.to(`mission:${missionId}`).emit('position:update', msg);
         ack?.({ ok: true });
-      } catch {
+      } catch (e) {
+        console.error('[socket] position:update failed:', e);
         ack?.({ ok: false, error: 'POSITION_UPDATE_FAILED' });
       }
     });
@@ -530,7 +531,8 @@ export function setupSocket(app: FastifyInstance) {
         }
 
         ack?.({ ok: true, inserted: traceDocs.length });
-      } catch {
+      } catch (e) {
+        console.error('[socket] position:bulk failed:', e);
         ack?.({ ok: false, error: 'POSITION_BULK_FAILED' });
       }
     });

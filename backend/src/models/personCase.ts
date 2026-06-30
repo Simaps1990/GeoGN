@@ -5,6 +5,9 @@ export type PersonCaseMobility = 'none' | 'bike' | 'scooter' | 'motorcycle' | 'c
 export type PersonCaseSex = 'unknown' | 'female' | 'male';
 export type PersonCaseHealthStatus = 'stable' | 'fragile' | 'critique';
 
+export type PersonCaseTerrain = 'route' | 'foret' | 'montagne' | 'marais';
+export type PersonCaseMedication = 'anxiolytique' | 'opioid' | 'alcool';
+
 export type PersonCaseBodyPart =
   | 'head'
   | 'face'
@@ -50,6 +53,8 @@ export interface PersonCaseDoc {
   injuries?: { id: string; locations?: PersonCaseBodyPart[] }[];
   diseasesFreeText?: string;
   injuriesFreeText?: string;
+  terrain?: PersonCaseTerrain;
+  medications?: PersonCaseMedication[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,6 +104,8 @@ const PersonCaseSchema = new Schema<PersonCaseDoc>(
     },
     diseasesFreeText: { type: String, required: false, default: '' },
     injuriesFreeText: { type: String, required: false, default: '' },
+    terrain: { type: String, required: false, enum: ['route', 'foret', 'montagne', 'marais'] },
+    medications: { type: [String], required: false, default: [] },
     createdAt: { type: Date, required: true, default: () => new Date() },
     updatedAt: { type: Date, required: true, default: () => new Date() },
   },

@@ -26,5 +26,7 @@ const HuntIsochroneSchema = new Schema<HuntIsochroneDoc>(
 
 HuntIsochroneSchema.index({ trackId: 1, ts: -1 });
 HuntIsochroneSchema.index({ missionId: 1, ts: -1 });
+// TTL 30 jours — les isochrones sont des calculs temporaires, inutiles après la mission
+HuntIsochroneSchema.index({ ts: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
 export const HuntIsochroneModel = mongoose.model<HuntIsochroneDoc>('HuntIsochrone', HuntIsochroneSchema);

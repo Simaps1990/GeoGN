@@ -296,44 +296,46 @@ export const MapRightToolbar = memo(function MapRightToolbar({
         }`}
       >
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setActionError(null);
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setActionError(null);
 
-              setSettingsMenuOpen((v) => !v);
-              // Ouverture du menu = on considère la notification comme vue
-              setSettingsNotification(false);
-              if (selectedMissionId && personCase) {
-                setDismissedPersonCaseId(selectedMissionId, personCase.id);
-              }
-            }}
-            className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-              settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
-                ? 'ring-1 ring-inset ring-blue-500/25'
-                : ''
-            }`}
-            title="Settings"
-          >
-            <Settings
-              className={
+                setSettingsMenuOpen((v) => !v);
+                // Ouverture du menu = on considère la notification comme vue
+                setSettingsNotification(false);
+                if (selectedMissionId && personCase) {
+                  setDismissedPersonCaseId(selectedMissionId, personCase.id);
+                }
+              }}
+              className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
                 settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
-                  ? 'mx-auto text-blue-600'
-                  : 'mx-auto text-gray-600'
-              }
-              size={20}
-            />
+                  ? 'ring-1 ring-inset ring-blue-500/25'
+                  : ''
+              }`}
+              title="Settings"
+            >
+              <Settings
+                className={
+                  settingsMenuOpen || scaleEnabled || labelsEnabled || camerasEnabled || personPanelOpen || timerModalOpen
+                    ? 'mx-auto text-blue-600'
+                    : 'mx-auto text-gray-600'
+                }
+                size={20}
+              />
+            </button>
             {(() => {
               const count =
                 (projectionNotification ? 1 : 0) +
                 (gridHasAssignments && gridViewMode === 'off' ? 1 : 0);
               return count > 0 ? (
-                <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white">
+                <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white pointer-events-none">
                   {count}
                 </span>
               ) : null;
             })()}
-          </button>
+          </div>
 
           <div
             className={`flex flex-col gap-2 transition-all duration-200 ${

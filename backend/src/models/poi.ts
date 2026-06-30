@@ -46,5 +46,7 @@ const PoiSchema = new Schema<PoiDoc>(
 );
 
 PoiSchema.index({ loc: '2dsphere' });
+PoiSchema.index({ deletedAt: 1 });
+PoiSchema.index({ missionId: 1, deletedAt: 1 });
 
 export const PoiModel = mongoose.model<PoiDoc>('Poi', PoiSchema);

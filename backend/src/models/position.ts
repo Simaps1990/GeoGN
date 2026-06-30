@@ -39,5 +39,7 @@ const PositionSchema = new Schema<PositionDoc>(
 
 PositionSchema.index({ loc: '2dsphere' });
 PositionSchema.index({ missionId: 1, userId: 1, createdAt: 1 });
+// TTL 90 jours — MongoDB purge automatiquement les documents en arrière-plan
+PositionSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 90 });
 
 export const PositionModel = mongoose.model<PositionDoc>('Position', PositionSchema);
