@@ -177,6 +177,8 @@ export type ApiPersonCase = {
   injuries: { id: string; locations: string[] }[];
   diseasesFreeText: string;
   injuriesFreeText: string;
+  terrain?: string | null;
+  medications?: string[];
   createdAt: string;
   updatedAt: string;
 };

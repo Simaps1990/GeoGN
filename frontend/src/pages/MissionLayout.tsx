@@ -33,13 +33,6 @@ export default function MissionLayout() {
   const visitedRef = useRef<Set<MissionPageKey>>(new Set());
   visitedRef.current.add(activeKey);
 
-  const enterKeyRef = useRef<Record<MissionPageKey, number>>({ map: 0, zones: 0, pois: 0, contacts: 0 });
-  const prevKeyRef = useRef<MissionPageKey>(activeKey);
-  if (prevKeyRef.current !== activeKey) {
-    enterKeyRef.current[activeKey] = (enterKeyRef.current[activeKey] ?? 0) + 1;
-    prevKeyRef.current = activeKey;
-  }
-
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [location.pathname]);
@@ -87,30 +80,24 @@ export default function MissionLayout() {
           </div>
         )}
         {visitedRef.current.has('zones') && (
-          <div className={activeKey === 'zones' ? '' : 'hidden'}>
-            <div key={`zones-${enterKeyRef.current.zones}`} className="animate-page-enter">
-              <Suspense fallback={null}>
-                <MissionZonesPage />
-              </Suspense>
-            </div>
+          <div className={activeKey === 'zones' ? 'animate-page-enter' : 'hidden'}>
+            <Suspense fallback={null}>
+              <MissionZonesPage />
+            </Suspense>
           </div>
         )}
         {visitedRef.current.has('pois') && (
-          <div className={activeKey === 'pois' ? '' : 'hidden'}>
-            <div key={`pois-${enterKeyRef.current.pois}`} className="animate-page-enter">
-              <Suspense fallback={null}>
-                <MissionPoisPage />
-              </Suspense>
-            </div>
+          <div className={activeKey === 'pois' ? 'animate-page-enter' : 'hidden'}>
+            <Suspense fallback={null}>
+              <MissionPoisPage />
+            </Suspense>
           </div>
         )}
         {visitedRef.current.has('contacts') && (
-          <div className={activeKey === 'contacts' ? '' : 'hidden'}>
-            <div key={`contacts-${enterKeyRef.current.contacts}`} className="animate-page-enter">
-              <Suspense fallback={null}>
-                <MissionContactsPage />
-              </Suspense>
-            </div>
+          <div className={activeKey === 'contacts' ? 'animate-page-enter' : 'hidden'}>
+            <Suspense fallback={null}>
+              <MissionContactsPage />
+            </Suspense>
           </div>
         )}
       </div>

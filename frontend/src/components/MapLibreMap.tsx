@@ -78,16 +78,20 @@ import {
   DiseaseId,
   InjuryId,
   SimpleWeather,
+  TerrainType,
   clamp,
   cleanDiseases,
   cleanInjuries,
   computeAgeFactor,
   computeDiseaseFactor,
   computeEffectiveWalkingKmh,
+  computeFatigueFactor,
   computeHealthStatusFactor,
   computeIsNight,
   computeLocomotorInjuryFactor,
+  computeMedicationFactor,
   computeNightFactor,
+  computeTerrainFactor,
   computeWeatherFactor,
   isLocomotorLocation,
 } from '../lib/estimationWalking';
@@ -697,6 +701,8 @@ export default function MapLibreMap() {
     diseasesFreeText: string;
     injuries: { id: string; locations: string[] }[];
     injuriesFreeText: string;
+    terrain: TerrainType;
+    medications: string[];
   }>({
     lastKnownQuery: '',
     lastKnownType: 'address',
@@ -712,6 +718,8 @@ export default function MapLibreMap() {
     diseasesFreeText: '',
     injuries: [],
     injuriesFreeText: '',
+    terrain: 'route',
+    medications: [],
   });
 
   const [diseasesOpen, setDiseasesOpen] = useState(false);
@@ -727,7 +735,8 @@ export default function MapLibreMap() {
         'insuffisance_respiratoire',
         'insuffisance_renale',
         'grossesse',
-        'autre',
+        'handicap_moteur',
+        'alzheimer',
       ] as DiseaseId[],
     []
   );
@@ -1175,7 +1184,9 @@ export default function MapLibreMap() {
       personCase.diseases,
       personCase.injuries,
       weather as SimpleWeather | null,
-      personCase.lastKnown.when
+      personCase.lastKnown.when,
+      (personCase.terrain as TerrainType) ?? null,
+      personCase.medications ?? [],
     );
 
     const ageFactor = computeAgeFactor(personCase.age);
@@ -1186,10 +1197,16 @@ export default function MapLibreMap() {
     const diseaseFactor = computeDiseaseFactor(personCase.diseases, weather as SimpleWeather | null);
     const weatherFactor = computeWeatherFactor(weather as SimpleWeather | null, isNight, hasDeshydratation);
     const nightFactor = computeNightFactor(isNight, weather as SimpleWeather | null, hasLocomotor);
-    const terrainFactor = 1;
+    const terrainFactor = computeTerrainFactor((personCase.terrain as TerrainType) ?? null);
+    const medicationFactor = computeMedicationFactor(personCase.medications ?? []);
+    const hoursSinceForFatigue = personCase.lastKnown.when
+      ? (Date.now() - new Date(personCase.lastKnown.when).getTime()) / 3_600_000
+      : null;
+    const fatigueFactor = personCase.mobility === 'none' ? computeFatigueFactor(hoursSinceForFatigue) : 1;
 
     const rawKmh = (() => {
       if (personCase.mobility === 'none') {
+        // walkingKmh already includes terrain, medications, fatigue
         if (walkingKmh !== null) return walkingKmh;
         const base = 4.5;
         return (
@@ -1200,7 +1217,9 @@ export default function MapLibreMap() {
           diseaseFactor *
           weatherFactor *
           nightFactor *
-          terrainFactor
+          terrainFactor *
+          medicationFactor *
+          fatigueFactor
         );
       }
 
@@ -1211,7 +1230,8 @@ export default function MapLibreMap() {
         diseaseFactor *
         weatherFactor *
         nightFactor *
-        terrainFactor
+        terrainFactor *
+        medicationFactor
       );
     })();
 
@@ -1500,14 +1520,23 @@ export default function MapLibreMap() {
     () => [
       '#ef4444',
       '#f97316',
+      '#f59e0b',
       '#fde047',
+      '#10b981',
       '#4ade80',
       '#596643',
+      '#14b8a6',
       '#60a5fa',
+      '#6366f1',
       '#1e3a8a',
       '#a855f7',
       '#ec4899',
+      '#9f1239',
+      '#dc6b4a',
       '#6b3f35',
+      '#166534',
+      '#0f766e',
+      '#0891b2',
       '#a19579',
       '#000000',
       '#ffffff',

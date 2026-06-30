@@ -6,7 +6,12 @@ export type DiseaseId =
   | 'insuffisance_respiratoire'
   | 'insuffisance_renale'
   | 'grossesse'
-  | 'handicap_moteur';
+  | 'handicap_moteur'
+  | 'alzheimer';
+
+export type TerrainType = 'route' | 'foret' | 'montagne' | 'marais';
+
+export type MedicationType = 'anxiolytique' | 'opioid' | 'alcool';
 
 export type InjuryId =
   | 'fracture'
@@ -46,7 +51,63 @@ export interface SimpleWeather {
   temperatureC?: number | null;
   windSpeedKmh?: number | null;
   precipitationMm?: number | null;
+  snowy?: boolean | null;
+  icy?: boolean | null;
+  foggy?: boolean | null;
 }
+
+export const FACTOR_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+  age: {
+    label: 'Âge',
+    description:
+      "L'âge influence la vitesse de marche naturelle. Un adulte actif (20-39 ans) marche à ~4,5 km/h. Un enfant de moins de 6 ans ou une personne de 80 ans et plus marche significativement moins vite.",
+  },
+  sex: {
+    label: 'Sexe',
+    description:
+      "Le sexe est enregistré pour le dossier mais n'influence pas directement le calcul de vitesse dans ce modèle.",
+  },
+  healthStatus: {
+    label: 'État de santé',
+    description:
+      "L'état général de la personne. « Fragile » réduit la vitesse de 15% (personne affaiblie, épuisée). « Critique » la réduit de 30% (personne en très mauvais état physique ou psychologique).",
+  },
+  diseases: {
+    label: 'Maladies connues',
+    description:
+      "Certaines pathologies ralentissent le déplacement. Parkinson ou un handicap moteur peuvent réduire la vitesse jusqu'à 40%. Alzheimer : en plus d'un ralentissement (-25%), la personne tend à longer des limites (murs, chemins, cours d'eau) et à tourner en rond plutôt qu'à s'éloigner en ligne droite.",
+  },
+  injuries: {
+    label: 'Blessures',
+    description:
+      "Les blessures aux jambes, pieds et bassin ralentissent directement la marche. Une fracture réduit la vitesse à ~40% du normal. Une plaie en zone locomotrice à ~93%. Les blessures aux bras, à la tête ou au torse n'affectent pas la locomotion directement.",
+  },
+  weather: {
+    label: 'Météo',
+    description:
+      "La météo au dernier point connu. Froid + pluie + vent la nuit réduit la vitesse à 60%. La neige réduit à 55%, le verglas à 35%. La chaleur forte avec déshydratation réduit à 60%. Le brouillard ajoute une réduction de 30% par manque de visibilité.",
+  },
+  terrain: {
+    label: 'Terrain',
+    description:
+      "Le type de terrain change radicalement la vitesse effective. En forêt dense ou en relief accidenté, la vitesse réelle est réduite de 30%. En montagne ou terrain très dense, de 50%. Dans les marais ou zones inondées, la progression est réduite à 35% de la vitesse normale.",
+  },
+  night: {
+    label: 'Nuit',
+    description:
+      "Calculée automatiquement selon l'heure du dernier point connu (varie selon la saison). La nuit réduit la vitesse de 15 à 25%, davantage si la personne est blessée aux jambes ou par mauvais temps.",
+  },
+  fatigue: {
+    label: 'Fatigue cumulée',
+    description:
+      "Calculée automatiquement selon le temps écoulé depuis la disparition. Après 4h de marche estimée, le rythme ralentit de 20%. Après 8h, de 35%. La fatigue ne s'applique qu'à la marche à pied.",
+  },
+  medications: {
+    label: 'Médicaments / substances',
+    description:
+      "Les anxiolytiques (Lexomil, Xanax…) réduisent la vitesse de 30%, les opioïdes (morphine, codéine…) de 45%, l'alcool de 35%. Ces substances altèrent la coordination, les réflexes et le jugement, et peuvent modifier le comportement de déplacement.",
+  },
+};
 
 export function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
@@ -74,7 +135,7 @@ export function computeIsNight(lastKnownWhen: string | null): boolean {
 export function computeAgeFactor(age: number | null): number {
   if (age == null || !Number.isFinite(age)) return 1;
   const table = [
-    { min: 0, max: 5, factor: 0.45 },
+    { min: 0, max: 5, factor: 0.6 },
     { min: 6, max: 12, factor: 0.7 },
     { min: 13, max: 15, factor: 0.85 },
     { min: 16, max: 19, factor: 0.95 },
@@ -117,6 +178,7 @@ export function cleanDiseases(diseases: string[] | null | undefined): DiseaseId[
     'insuffisance_renale',
     'grossesse',
     'handicap_moteur',
+    'alzheimer',
   ];
   if (!Array.isArray(diseases)) return [];
   return diseases.filter((id): id is DiseaseId => allowed.includes(id as DiseaseId));
@@ -178,7 +240,7 @@ export function computeLocomotorInjuryFactor(
         factors.push(0.4);
         break;
       case 'plaie':
-        factors.push(0.8);
+        factors.push(0.93);
         break;
       default:
         break;
@@ -209,6 +271,7 @@ export function computeDiseaseFactor(diseases: string[] | null | undefined, weat
     insuffisance_renale: 0.9,
     grossesse: 0.9,
     handicap_moteur: 0.6,
+    alzheimer: 0.75,
   };
 
   const factors: number[] = [];
@@ -238,29 +301,34 @@ export function computeWeatherFactor(
   hasDeshydratation: boolean
 ): number {
   if (!weather) return 1;
+
+  // Verglas et neige priment sur toute autre condition thermique
+  if (weather.icy) return clamp(0.35 * (weather.foggy ? 0.7 : 1), 0.2, 1);
+  if (weather.snowy) return clamp(0.55 * (weather.foggy ? 0.7 : 1), 0.2, 1);
+
   const t = weather.temperatureC;
   const w = weather.windSpeedKmh;
   const r = weather.precipitationMm;
 
-  if (typeof t !== 'number') return 1;
+  let factor = 1;
 
-  if (t <= 10) {
-    const rain = typeof r === 'number' && r > 0;
-    const windy = typeof w === 'number' && w >= 25;
-    if (!rain && !windy) return 1;
-    if ((rain && !windy) || (!rain && windy)) return 0.9;
-    if (rain && windy && !isNight) return 0.75;
-    if (rain && windy && isNight) return 0.6;
-    return 0.9;
+  if (typeof t === 'number') {
+    if (t <= 10) {
+      const rain = typeof r === 'number' && r > 0;
+      const windy = typeof w === 'number' && w >= 25;
+      if (rain && windy && isNight) factor = 0.6;
+      else if (rain && windy) factor = 0.75;
+      else if (rain || windy) factor = 0.9;
+    } else if (t >= 32) {
+      factor = hasDeshydratation ? 0.6 : 0.88;
+    }
+    // 26-32°C sans déshydratation : facteur 1.0 (corrigé depuis 0.9)
   }
 
-  if (t >= 26) {
-    if (t < 32) return 0.9;
-    if (t >= 32 && hasDeshydratation) return 0.6;
-    return 0.75;
-  }
+  // Brouillard : réduction de visibilité supplémentaire
+  if (weather.foggy) factor *= 0.7;
 
-  return 1;
+  return clamp(factor, 0.2, 1);
 }
 
 export function computeNightFactor(
@@ -275,6 +343,46 @@ export function computeNightFactor(
   return f;
 }
 
+export function computeTerrainFactor(terrain: TerrainType | null | undefined): number {
+  switch (terrain) {
+    case 'route':
+    case null:
+    case undefined:
+      return 1.0;
+    case 'foret':
+      return 0.7;
+    case 'montagne':
+      return 0.5;
+    case 'marais':
+      return 0.35;
+    default:
+      return 1.0;
+  }
+}
+
+export function computeFatigueFactor(elapsedHours: number | null | undefined): number {
+  if (elapsedHours == null || !Number.isFinite(elapsedHours) || elapsedHours < 4) return 1;
+  if (elapsedHours < 8) return 0.8;
+  return 0.65;
+}
+
+export function computeMedicationFactor(medications: string[] | null | undefined): number {
+  if (!Array.isArray(medications) || medications.length === 0) return 1;
+
+  const factors: Record<MedicationType, number> = {
+    anxiolytique: 0.7,
+    opioid: 0.55,
+    alcool: 0.65,
+  };
+
+  const vals = medications
+    .filter((m): m is MedicationType => m in factors)
+    .map((m) => factors[m]);
+
+  if (!vals.length) return 1;
+  return Math.min(...vals);
+}
+
 export function computeEffectiveWalkingKmh(
   mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car',
   age: number | null,
@@ -282,7 +390,9 @@ export function computeEffectiveWalkingKmh(
   diseases: string[] | null | undefined,
   injuries: PersonInjury[] | null | undefined,
   weather: SimpleWeather | null,
-  lastKnownWhen: string | null
+  lastKnownWhen: string | null,
+  terrain?: TerrainType | null,
+  medications?: string[] | null,
 ): number | null {
   if (mobility !== 'none') return null;
 
@@ -300,6 +410,13 @@ export function computeEffectiveWalkingKmh(
 
   const weatherFactor = computeWeatherFactor(weather, isNight, hasDeshydratation);
   const nightFactor = computeNightFactor(isNight, weather, hasLocomotorInjury);
+  const terrainFactor = computeTerrainFactor(terrain ?? null);
+  const medicationFactor = computeMedicationFactor(medications ?? []);
+
+  const elapsedHours = lastKnownWhen
+    ? (Date.now() - new Date(lastKnownWhen).getTime()) / 3_600_000
+    : null;
+  const fatigueFactor = computeFatigueFactor(elapsedHours);
 
   const raw =
     baseWalkingKmh *
@@ -308,7 +425,10 @@ export function computeEffectiveWalkingKmh(
     locomotorFactor *
     diseaseFactor *
     weatherFactor *
-    nightFactor;
+    nightFactor *
+    terrainFactor *
+    medicationFactor *
+    fatigueFactor;
 
   return clamp(raw, 0.2, 6.5);
 }

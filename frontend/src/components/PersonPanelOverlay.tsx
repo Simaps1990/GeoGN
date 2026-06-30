@@ -1,6 +1,7 @@
-import { memo } from 'react';
-import { AlertTriangle, ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { memo, useState } from 'react';
+import { AlertTriangle, ChevronDown, Info, Pencil, Trash2 } from 'lucide-react';
 import type { ApiPersonCase } from '../lib/api';
+import { FACTOR_DESCRIPTIONS } from '../lib/estimationWalking';
 
 type PersonPanelOverlayProps = {
   open: boolean;
@@ -109,6 +110,36 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
   setVehicleTrackGeojsonById,
   setPersonLoading,
 }: PersonPanelOverlayProps) {
+  const [activeInfo, setActiveInfo] = useState<string | null>(null);
+
+  function InfoBtn({ factorKey }: { factorKey: string }) {
+    const isActive = activeInfo === factorKey;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setActiveInfo(isActive ? null : factorKey);
+        }}
+        className="ml-1 inline-flex items-center text-blue-400 hover:text-blue-600"
+        title={FACTOR_DESCRIPTIONS[factorKey]?.label}
+      >
+        <Info size={13} />
+      </button>
+    );
+  }
+
+  function InfoBox({ factorKey }: { factorKey: string }) {
+    if (activeInfo !== factorKey) return null;
+    const d = FACTOR_DESCRIPTIONS[factorKey];
+    if (!d) return null;
+    return (
+      <div className="mt-1 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800 leading-relaxed">
+        {d.description}
+      </div>
+    );
+  }
+
   if (!open) return null;
 
   return (
@@ -417,7 +448,10 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 <>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <div className="text-xs font-semibold text-gray-700">Âge</div>
+                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                        Âge<InfoBtn factorKey="age" />
+                      </div>
+                      <InfoBox factorKey="age" />
                       <input
                         type="number"
                         min={0}
@@ -428,7 +462,10 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       />
                     </div>
                     <div>
-                      <div className="text-xs font-semibold text-gray-700">Sexe</div>
+                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                        Sexe<InfoBtn factorKey="sex" />
+                      </div>
+                      <InfoBox factorKey="sex" />
                       <select
                         value={personDraft.sex}
                         onChange={(e) => setPersonDraft((p: any) => ({ ...p, sex: e.target.value as any }))}
@@ -440,7 +477,10 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       </select>
                     </div>
                     <div>
-                      <div className="text-xs font-semibold text-gray-700">État</div>
+                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                        État<InfoBtn factorKey="healthStatus" />
+                      </div>
+                      <InfoBox factorKey="healthStatus" />
                       <select
                         value={personDraft.healthStatus}
                         onChange={(e) => setPersonDraft((p: any) => ({ ...p, healthStatus: e.target.value as any }))}
@@ -453,6 +493,23 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     </div>
                   </div>
 
+                  <div>
+                    <div className="flex items-center text-xs font-semibold text-gray-700">
+                      Terrain<InfoBtn factorKey="terrain" />
+                    </div>
+                    <InfoBox factorKey="terrain" />
+                    <select
+                      value={personDraft.terrain ?? 'route'}
+                      onChange={(e) => setPersonDraft((p: any) => ({ ...p, terrain: e.target.value }))}
+                      className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
+                    >
+                      <option value="route">Route / terrain plat</option>
+                      <option value="foret">Forêt / relief accidenté (-30%)</option>
+                      <option value="montagne">Montagne / terrain dense (-50%)</option>
+                      <option value="marais">Marais / zone inondée (-65%)</option>
+                    </select>
+                  </div>
+
                   <div className="flex flex-col gap-3 md:flex-row md:items-start">
                     <div className="rounded-2xl border p-3 md:flex-1">
                       <button
@@ -460,9 +517,12 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         className="flex w-full items-center justify-between text-left"
                         onClick={() => setDiseasesOpen((v: boolean) => !v)}
                       >
-                        <div className="text-xs font-semibold text-gray-700">Maladies connues</div>
+                        <div className="flex items-center text-xs font-semibold text-gray-700">
+                          Maladies connues<InfoBtn factorKey="diseases" />
+                        </div>
                         <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
                       </button>
+                      <InfoBox factorKey="diseases" />
                       {diseasesOpen ? (
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           {diseaseOptions.map((id: any) => {
@@ -497,9 +557,12 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         className="flex w-full items-center justify-between text-left"
                         onClick={() => setInjuriesOpen((v: boolean) => !v)}
                       >
-                        <div className="text-xs font-semibold text-gray-700">Blessures</div>
+                        <div className="flex items-center text-xs font-semibold text-gray-700">
+                          Blessures<InfoBtn factorKey="injuries" />
+                        </div>
                         <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
                       </button>
+                      <InfoBox factorKey="injuries" />
                       {injuriesOpen ? (
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           {injuryOptions.map((injuryId: any) => {
@@ -536,6 +599,39 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       ) : null}
                     </div>
                   </div>
+
+                  <div className="rounded-2xl border p-3">
+                    <div className="flex items-center text-xs font-semibold text-gray-700">
+                      Médicaments / substances<InfoBtn factorKey="medications" />
+                    </div>
+                    <InfoBox factorKey="medications" />
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'anxiolytique', label: 'Anxiolytiques' },
+                        { id: 'opioid', label: 'Opioïdes' },
+                        { id: 'alcool', label: 'Alcool' },
+                      ].map(({ id, label }) => {
+                        const checked = (personDraft.medications ?? []).includes(id);
+                        return (
+                          <div key={id} className="rounded-2xl border p-2">
+                            <label className="flex items-center gap-2 text-sm text-gray-800">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? Array.from(new Set([...(personDraft.medications ?? []), id]))
+                                    : (personDraft.medications ?? []).filter((x: string) => x !== id);
+                                  setPersonDraft((p: any) => ({ ...p, medications: next }));
+                                }}
+                              />
+                              <span className="font-normal">{label}</span>
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </>
               ) : null}
 
@@ -567,6 +663,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                           locations: x.locations,
                         })),
                         injuriesFreeText: personCase.injuriesFreeText ?? '',
+                        terrain: (personCase as any).terrain ?? 'route',
+                        medications: (personCase as any).medications ?? [],
                       });
                     } else {
                       setPersonPanelOpen(false);
@@ -638,6 +736,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         injuries: cleanInjuries(personDraft.injuries) as any,
                         diseasesFreeText: personDraft.diseasesFreeText,
                         injuriesFreeText: personDraft.injuriesFreeText,
+                        terrain: personDraft.terrain ?? 'route',
+                        medications: personDraft.medications ?? [],
                       };
 
                       const saved = await upsertPersonCase(selectedMissionId, payload);

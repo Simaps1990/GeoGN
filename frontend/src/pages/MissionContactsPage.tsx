@@ -47,14 +47,23 @@ export default function MissionContactsPage() {
       // Même palette que les POI, mais sans le blanc (#ffffff) pour les utilisateurs
       '#ef4444',
       '#f97316',
+      '#f59e0b',
       '#fde047',
+      '#10b981',
       '#4ade80',
       '#596643',
+      '#14b8a6',
       '#60a5fa',
+      '#6366f1',
       '#1e3a8a',
       '#a855f7',
       '#ec4899',
+      '#9f1239',
+      '#dc6b4a',
       '#6b3f35',
+      '#166534',
+      '#0f766e',
+      '#0891b2',
       '#a19579',
       '#000000',
     ],
@@ -803,8 +812,8 @@ export default function MissionContactsPage() {
       </div>
 
       {acceptingRequest ? (
-        <div className="fixed inset-0 z-[2000] flex items-end justify-center bg-black/40 p-4 sm:items-center">
-          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="text-base font-semibold text-gray-900">Choisir un rôle</div>
             <div className="mt-1 text-sm text-gray-600">
               Pour {acceptingRequest.requestedBy?.displayName ?? 'cet utilisateur'}
@@ -848,8 +857,8 @@ export default function MissionContactsPage() {
       ) : null}
 
       {editingMember && mission?.membership?.role === 'admin' ? (
-        <div className="fixed inset-0 z-[2000] flex items-end justify-center bg-black/40 p-4 sm:items-center">
-          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="text-base font-semibold text-gray-900">Modifier le membre</div>
             <div className="mt-1 text-sm text-gray-600">{editingMember.user?.displayName ?? 'Membre'}</div>
 

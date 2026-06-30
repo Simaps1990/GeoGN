@@ -423,7 +423,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               title="Activité"
             >
               <PawPrint className={personPanelOpen && personCase ? 'text-blue-600' : 'text-gray-600'} size={20} />
-              {projectionNotification && !(userId && personCase?.createdBy === userId) ? (
+              {projectionNotification ? (
                 <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
               ) : null}
             </button>
