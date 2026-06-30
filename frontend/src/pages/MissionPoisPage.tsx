@@ -14,6 +14,7 @@ import {
   HelpCircle,
   House,
   Map as MapIcon,
+  MapPin,
   Mic,
   Navigation2,
   PawPrint,
@@ -32,6 +33,9 @@ import {
 } from 'lucide-react';
 import { deletePoi, getMission, listMissionMembers, listPois, updatePoi, type ApiMission, type ApiMissionMember, type ApiPoi } from '../lib/api';
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 
 export default function MissionPoisPage() {
   const { missionId } = useParams();
@@ -227,11 +231,11 @@ export default function MissionPoisPage() {
   return (
     <div className="p-4 pb-24">
       {dialog}
-      <h1 className="text-xl font-bold text-gray-900">Gestion des Points d'Interet</h1>
+      <PageHeading title="Points d'intérêt" />
       {loading ? (
-        <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
+        <div className="mt-3"><SkeletonCard count={3} /></div>
       ) : pois.length === 0 ? (
-        <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Aucun POI.</div>
+        <div className="mt-3"><EmptyState icon={MapPin} title="Aucun point d'intérêt" subtitle="Ajoute un POI depuis la carte." /></div>
       ) : (
         <div className="mt-3 grid gap-2">
           {pois.map((p) => (
@@ -255,7 +259,7 @@ export default function MissionPoisPage() {
                           key={c}
                           type="button"
                           onClick={() => setEditDraft({ ...editDraft, color: c })}
-                          className={`h-7 w-7 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''}`}
+                          className={`h-7 w-7 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''} active:scale-[0.97] transition-transform duration-100`}
                           style={{
                             backgroundColor: c,
                             backgroundImage:
@@ -278,7 +282,7 @@ export default function MissionPoisPage() {
                           onClick={() => setEditDraft({ ...editDraft, icon: id })}
                           className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border ${
                             editDraft.icon === id ? 'ring-2 ring-blue-500' : ''
-                          }`}
+                          } active:scale-[0.97] transition-transform duration-100`}
                           style={{
                             backgroundColor: editDraft.color || '#ffffff',
                             backgroundImage:
@@ -346,7 +350,7 @@ export default function MissionPoisPage() {
                           setBusyId(null);
                         }
                       }}
-                      className="h-10 flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       Enregistrer
                     </button>
@@ -358,7 +362,7 @@ export default function MissionPoisPage() {
                         setEditDraft(null);
                         setEditError(null);
                       }}
-                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       Annuler
                     </button>
@@ -406,7 +410,7 @@ export default function MissionPoisPage() {
                           onClick={() => {
                             setNavPickerPoi(p);
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title="Naviguer vers le point"
                         >
                           <Navigation2 size={18} />
@@ -422,7 +426,7 @@ export default function MissionPoisPage() {
                             );
                             navigate(`/mission/${missionId}/map`);
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title="Afficher sur la carte"
                         >
                           <MapIcon size={18} />
@@ -444,7 +448,7 @@ export default function MissionPoisPage() {
                                 comment: p.comment,
                               });
                             }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                             title="Éditer le POI"
                           >
                             <Pencil size={18} />
@@ -476,7 +480,7 @@ export default function MissionPoisPage() {
                                 setBusyId(null);
                               }
                             }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                             title="Supprimer le POI"
                           >
                             <Trash2 size={18} />
@@ -513,7 +517,7 @@ export default function MissionPoisPage() {
                   window.open(waze, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                 title="Waze"
               >
                 <img src="/icon/waze.png" alt="Waze" className="h-12 w-12 object-contain" />
@@ -526,7 +530,7 @@ export default function MissionPoisPage() {
                   window.open(gmaps, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                 title="Google Maps"
               >
                 <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
@@ -539,7 +543,7 @@ export default function MissionPoisPage() {
                   window.open(apple, '_blank');
                   setNavPickerPoi(null);
                 }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                 title="Plans (Apple)"
               >
                 <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Plus, RefreshCcw } from 'lucide-react';
+import { ArrowRight, Plus, RefreshCcw, Radar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createMission, listMissions, sendMissionInvite, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 
 function formatDate(v: string) {
   const d = new Date(v);
@@ -83,17 +86,19 @@ export default function MissionsPage() {
 
   return (
     <div className="p-4 pb-24">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Missions</h1>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50"
-        >
-          <RefreshCcw size={16} />
-          Actualiser
-        </button>
-      </div>
+      <PageHeading
+        title="Missions"
+        action={
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm text-gray-800 shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
+          >
+            <RefreshCcw size={16} />
+            Actualiser
+          </button>
+        }
+      />
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-gray-900">Créer une mission</div>
@@ -108,7 +113,7 @@ export default function MissionsPage() {
             type="button"
             disabled={submitting || !title.trim()}
             onClick={() => void onCreate()}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Plus size={16} />
             Créer
@@ -119,11 +124,9 @@ export default function MissionsPage() {
 
       <div className="mt-4">
         {loading ? (
-          <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
+          <SkeletonCard count={3} />
         ) : sorted.length === 0 ? (
-          <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">
-            Aucune mission pour le moment.
-          </div>
+          <EmptyState icon={Radar} title="Aucune mission" subtitle="Crée une mission ci-dessus pour commencer." />
         ) : (
           <div className="grid gap-3">
             {sorted.map((m) => (
@@ -149,7 +152,7 @@ export default function MissionsPage() {
                     <button
                       type="button"
                       onClick={() => onOpenMission(m.id)}
-                      className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow"
+                      className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow active:scale-[0.97] transition-transform duration-100"
                     >
                       Ouvrir
                       <ArrowRight size={16} />
@@ -173,7 +176,7 @@ export default function MissionsPage() {
                         type="button"
                         disabled={inviteBusyMissionId === m.id || !(inviteAppUserIdByMission[m.id] ?? '').trim()}
                         onClick={() => void onSendInvite(m.id)}
-                        className="inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-50"
+                        className="inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                       >
                         Inviter
                       </button>

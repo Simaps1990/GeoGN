@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Target } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { clearMissionTraces, createMission, deleteMission, getMission, listMissions, requestMissionJoin, updateMission, type ApiMission } from '../lib/api';
 import { useMission } from '../contexts/MissionContext';
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 
 export default function CurrentMissionPage() {
   const navigate = useNavigate();
@@ -187,9 +190,7 @@ export default function CurrentMissionPage() {
   return (
     <div className="p-4 pb-24">
       {dialog}
-      <div className="flex items-center justify-center">
-        <h1 className="text-xl font-bold text-gray-900">GeoGN</h1>
-      </div>
+      <PageHeading title="GeoGN" subtitle="Géolocalisation opérationnelle" />
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-gray-900">Rejoindre une mission</div>
@@ -205,7 +206,7 @@ export default function CurrentMissionPage() {
             type="button"
             disabled={joinSubmitting || !joinMissionId.trim()}
             onClick={() => void onRequestJoin()}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             Envoyer la demande
           </button>
@@ -227,7 +228,7 @@ export default function CurrentMissionPage() {
             type="button"
             disabled={creatingMission || !newMissionTitle.trim()}
             onClick={() => void onCreateMission()}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             Créer
           </button>
@@ -241,9 +242,11 @@ export default function CurrentMissionPage() {
           {missions.length === 1 ? 'Mission en cours' : 'Missions en cours'}
         </div>
         {missionsLoading ? (
-          <div className="mt-2 text-sm text-gray-600">Chargement…</div>
+          <div className="mt-2"><SkeletonCard count={2} /></div>
         ) : missions.length === 0 ? (
-          <div className="mt-2 text-sm text-gray-600">Aucune mission.</div>
+          <div className="mt-2">
+            <EmptyState icon={Target} title="Aucune mission" subtitle="Crée ou rejoins une mission pour commencer." />
+          </div>
         ) : (
           <div className="mt-3 grid gap-2">
             {missions.map((m) => (
@@ -293,7 +296,7 @@ export default function CurrentMissionPage() {
                           // Faire descendre la vue vers la section Réglages
                           window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 active:scale-[0.97] transition-transform duration-100"
                         title="Éditer la mission"
                       >
                         <Pencil size={16} />
@@ -304,7 +307,7 @@ export default function CurrentMissionPage() {
                           e.stopPropagation();
                           void onDeleteMission(m.id);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-red-600 hover:bg-red-50"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-red-600 hover:bg-red-50 active:scale-[0.97] transition-transform duration-100"
                         title="Supprimer la mission"
                       >
                         <Trash2 size={16} />
@@ -334,7 +337,7 @@ export default function CurrentMissionPage() {
             <button
               type="button"
               onClick={() => void onClearTraces()}
-              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-red-500 text-sm font-semibold text-red-600 hover:bg-red-50"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-red-500 text-sm font-semibold text-red-600 hover:bg-red-50 active:scale-[0.97] transition-transform duration-100"
             >
               Purger l'historique des points de la mission
             </button>
@@ -342,7 +345,7 @@ export default function CurrentMissionPage() {
               type="button"
               disabled={savingSettings}
               onClick={() => void onSaveSettings()}
-              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
             >
               Valider
             </button>

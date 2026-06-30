@@ -3156,6 +3156,18 @@ export default function MapLibreMap() {
     }
   }, [mapReady, baseStyleIndex]);
 
+  useEffect(() => {
+    const onMapVisible = () => {
+      if (mapReady && mapInstanceRef.current) {
+        mapInstanceRef.current.resize();
+      }
+    };
+    window.addEventListener('geogn:map:visible', onMapVisible);
+    return () => {
+      window.removeEventListener('geogn:map:visible', onMapVisible);
+    };
+  }, [mapReady]);
+
   function centerOnMe() {
     const map = mapInstanceRef.current;
     if (!map) return;

@@ -461,6 +461,8 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                   <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
                     {gridViewBadgeCount}
                   </span>
+                ) : settingsNotification ? (
+                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
                 ) : null}
               </button>
             ) : null}

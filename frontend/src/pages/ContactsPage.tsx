@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Users } from 'lucide-react';
 import { addContact, deleteContact, listContacts, type ApiContact } from '../lib/api';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<ApiContact[]>([]);
@@ -70,9 +73,7 @@ export default function ContactsPage() {
 
   return (
     <div className="p-4 pb-24">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Mon équipe</h1>
-      </div>
+      <PageHeading title="Mon équipe" />
 
       <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-gray-900">Ajouter un contact</div>
@@ -87,7 +88,7 @@ export default function ContactsPage() {
             type="button"
             disabled={submitting || !appUserId.trim()}
             onClick={() => void onAdd()}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Plus size={16} />
             Ajouter
@@ -106,9 +107,9 @@ export default function ContactsPage() {
           />
         </div>
         {loading ? (
-          <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
+          <SkeletonCard count={4} />
         ) : sorted.length === 0 ? (
-          <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Aucun contact.</div>
+          <EmptyState icon={Users} title="Aucun contact" subtitle="Ajoute un contact via son identifiant GeoGN." />
         ) : (
           <div className="grid gap-3">
             {sorted.map((c) => (
@@ -127,7 +128,7 @@ export default function ContactsPage() {
                     type="button"
                     disabled={busyId === c.id}
                     onClick={() => void onDelete(c.id)}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                   >
                     <Trash2 size={16} />
                     Supprimer

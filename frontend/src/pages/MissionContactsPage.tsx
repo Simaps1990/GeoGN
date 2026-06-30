@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BookPlus, Check, ChevronDown, Copy, Eye, EyeOff, LogOut, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { BookPlus, BookUser, Check, ChevronDown, Copy, Eye, EyeOff, LogOut, MessageCircle, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMission } from '../contexts/MissionContext';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import {
   acceptMissionJoinRequestWithRole,
   addContact,
@@ -411,12 +414,12 @@ export default function MissionContactsPage() {
     <div className="p-4 pb-24">
       {dialog}
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-bold text-gray-900">Gestion de mon équipe</h1>
+        <PageHeading title="Équipe mission" />
         <button
           type="button"
           onClick={() => void refresh()}
           disabled={loading}
-          className="inline-flex h-9 items-center gap-2 rounded-xl border bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-xl border bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           title="Rafraîchir l'équipe"
         >
           <RefreshCw size={14} />
@@ -442,7 +445,7 @@ export default function MissionContactsPage() {
                       type="button"
                       disabled={busyKey === `accept:${r.id}`}
                       onClick={() => void onAcceptRequest(r.id)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-green-600 px-3 text-sm font-semibold text-white disabled:opacity-50"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-green-600 px-3 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       <Check size={16} />
                       Valider
@@ -451,7 +454,7 @@ export default function MissionContactsPage() {
                       type="button"
                       disabled={busyKey === `decline:${r.id}`}
                       onClick={() => void onDeclineRequest(r.id)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       <X size={16} />
                       Refuser
@@ -532,7 +535,7 @@ export default function MissionContactsPage() {
               <button
                 type="button"
                 onClick={() => setAddRole('viewer')}
-                className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
+                className={`h-11 rounded-xl border px-3 text-sm font-semibold active:scale-[0.97] transition-transform duration-100 ${
                   addRole === 'viewer' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
@@ -541,7 +544,7 @@ export default function MissionContactsPage() {
               <button
                 type="button"
                 onClick={() => setAddRole('member')}
-                className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
+                className={`h-11 rounded-xl border px-3 text-sm font-semibold active:scale-[0.97] transition-transform duration-100 ${
                   addRole === 'member' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
@@ -550,7 +553,7 @@ export default function MissionContactsPage() {
               <button
                 type="button"
                 onClick={() => setAddRole('admin')}
-                className={`h-11 rounded-xl border px-3 text-sm font-semibold ${
+                className={`h-11 rounded-xl border px-3 text-sm font-semibold active:scale-[0.97] transition-transform duration-100 ${
                   addRole === 'admin' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
@@ -579,7 +582,7 @@ export default function MissionContactsPage() {
                   setBusyKey(null);
                 }
               }}
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
             >
               Ajouter à la mission
             </button>
@@ -601,7 +604,7 @@ export default function MissionContactsPage() {
             onClick={() => {
               window.open(whatsappUrl, '_blank');
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Send size={18} />
             WhatsApp
@@ -612,7 +615,7 @@ export default function MissionContactsPage() {
             onClick={() => {
               window.location.href = smsUrl;
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <MessageCircle size={18} />
             SMS
@@ -629,7 +632,7 @@ export default function MissionContactsPage() {
                 // ignore
               }
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-900 disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-900 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Copy size={18} />
             {copied ? 'Copié' : 'Copier le code'}
@@ -641,9 +644,9 @@ export default function MissionContactsPage() {
         <div className="text-sm font-semibold text-gray-900">Membres actifs</div>
 
         {loading ? (
-          <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
+          <div className="mt-3"><SkeletonCard count={4} /></div>
         ) : sortedMembers.length === 0 ? (
-          <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Aucun membre.</div>
+          <div className="mt-3"><EmptyState icon={BookUser} title="Aucun membre" subtitle="Invite des membres depuis l'Accueil." /></div>
         ) : (
           <div className="mt-3 grid gap-3">
             {sortedMembers.map((m, index) => {
@@ -686,7 +689,7 @@ export default function MissionContactsPage() {
                               void onAddContactFromMember(m);
                             }
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title={"Ajouter à mes contacts 'Mon équipe'"}
                         >
                           <BookPlus size={16} />
@@ -702,7 +705,7 @@ export default function MissionContactsPage() {
                               if (!userId) return;
                               toggleHiddenMember(userId);
                             }}
-                            className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                               isHidden ? 'text-gray-500' : 'text-blue-700'
                             }`}
                             title={isHidden ? 'Afficher sur la carte' : 'Masquer sur la carte'}
@@ -718,7 +721,7 @@ export default function MissionContactsPage() {
                               setEditRole(m.role);
                               setEditColor(m.color);
                             }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                             title="Modifier"
                           >
                             <Pencil size={16} />
@@ -749,7 +752,7 @@ export default function MissionContactsPage() {
                                   setBusyKey(null);
                                 }
                               }}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                               title="Retirer"
                             >
                               <Trash2 size={16} />
@@ -784,7 +787,7 @@ export default function MissionContactsPage() {
                               setBusyKey(null);
                             }
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title="Quitter la mission"
                         >
                           <LogOut size={16} />
@@ -827,7 +830,7 @@ export default function MissionContactsPage() {
               <button
                 type="button"
                 onClick={() => setAcceptingRequest(null)}
-                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
               >
                 Annuler
               </button>
@@ -835,7 +838,7 @@ export default function MissionContactsPage() {
                 type="button"
                 disabled={busyKey === `accept:${acceptingRequest.id}`}
                 onClick={() => void submitAcceptRequest()}
-                className="h-11 flex-1 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="h-11 flex-1 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
               >
                 Confirmer
               </button>
@@ -908,7 +911,7 @@ export default function MissionContactsPage() {
               <button
                 type="button"
                 onClick={() => setEditingMember(null)}
-                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                className="h-11 flex-1 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
               >
                 Annuler
               </button>
@@ -916,7 +919,7 @@ export default function MissionContactsPage() {
                 type="button"
                 disabled={busyKey === `memberEdit:${editingMember.user?.id ?? ''}` || !editColor}
                 onClick={() => void submitMemberEdit()}
-                className="h-11 flex-1 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="h-11 flex-1 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
               >
                 Enregistrer
               </button>

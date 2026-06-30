@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CircleDot, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, RotateCw, Trash2 } from 'lucide-react';
+import { CircleDot, CircleDotDashed, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { PageHeading } from '../components/ui/PageHeading';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { EmptyState } from '../components/ui/EmptyState';
 
 export default function MissionZonesPage() {
   const { missionId } = useParams();
@@ -204,12 +207,14 @@ export default function MissionZonesPage() {
   return (
     <div className="p-4 pb-24">
       {dialog}
-      <h1 className="text-xl font-bold text-gray-900">Gestion des Zones</h1>
+      <PageHeading title="Zones" />
       {editError && !editingId ? <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{editError}</div> : null}
       {loading ? (
-        <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Chargement…</div>
+        <div className="mt-3"><SkeletonCard count={3} /></div>
       ) : zones.length === 0 ? (
-        <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600 shadow-sm">Aucune zone.</div>
+        <div className="mt-3">
+          <EmptyState icon={CircleDotDashed} title="Aucune zone" subtitle="Crée une zone depuis la carte." />
+        </div>
       ) : (
         <div className="mt-3 grid gap-2">
           {zones.map((z) => (
@@ -240,7 +245,7 @@ export default function MissionZonesPage() {
                           key={c}
                           type="button"
                           onClick={() => setEditDraft({ ...editDraft, color: c })}
-                          className={`h-9 w-9 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''}`}
+                          className={`h-9 w-9 rounded-xl border ${editDraft.color === c ? 'ring-2 ring-blue-500' : ''} active:scale-[0.97] transition-transform duration-100`}
                           style={{
                             backgroundColor: c,
                             backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06))',
@@ -297,7 +302,7 @@ export default function MissionZonesPage() {
                           setBusyId(null);
                         }
                       }}
-                      className="h-10 flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white shadow disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       Enregistrer
                     </button>
@@ -309,7 +314,7 @@ export default function MissionZonesPage() {
                         setEditDraft(null);
                         setEditError(null);
                       }}
-                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl border bg-white px-3 text-sm text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                     >
                       Annuler
                     </button>
@@ -355,7 +360,7 @@ export default function MissionZonesPage() {
                           if (!t) return;
                           setNavPickerTarget(t);
                         }}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                         title="Naviguer"
                       >
                         <Navigation2 size={18} />
@@ -388,7 +393,7 @@ export default function MissionZonesPage() {
                           );
                           navigate(`/mission/${missionId}/map`);
                         }}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                         title="Voir sur la carte"
                       >
                         <MapIcon size={18} />
@@ -410,7 +415,7 @@ export default function MissionZonesPage() {
                               color: z.color,
                             });
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title="Modifier"
                         >
                           <Pencil size={18} />
@@ -444,7 +449,7 @@ export default function MissionZonesPage() {
                               setBusyId(null);
                             }
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
                           title="Supprimer"
                         >
                           <Trash2 size={18} />
@@ -466,7 +471,7 @@ export default function MissionZonesPage() {
                           onClick={async () => {
                             await setZoneGrid(z.id, { rows: 2, cols: 2, orientation: z.grid?.orientation ?? 'vertical' } as any);
                           }}
-                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                             z.grid?.rows === 2 && z.grid?.cols === 2 ? 'ring-2 ring-blue-500' : ''
                           }`}
                           title="Carroyage 2x2"
@@ -482,7 +487,7 @@ export default function MissionZonesPage() {
                           onClick={async () => {
                             await setZoneGrid(z.id, { rows: 3, cols: 3, orientation: z.grid?.orientation ?? 'vertical' } as any);
                           }}
-                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                             z.grid?.rows === 3 && z.grid?.cols === 3 ? 'ring-2 ring-blue-500' : ''
                           }`}
                           title="Carroyage 3x3"
@@ -498,7 +503,7 @@ export default function MissionZonesPage() {
                           onClick={async () => {
                             await setZoneGrid(z.id, { rows: 4, cols: 4, orientation: z.grid?.orientation ?? 'vertical' } as any);
                           }}
-                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                          className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                             z.grid?.rows === 4 && z.grid?.cols === 4 ? 'ring-2 ring-blue-500' : ''
                           }`}
                           title="Carroyage 4x4"
@@ -514,7 +519,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, { rows: 5, cols: 5, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           z.grid?.rows === 5 && z.grid?.cols === 5 ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Carroyage 5x5"
@@ -530,7 +535,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, { rows: 6, cols: 6, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           z.grid?.rows === 6 && z.grid?.cols === 6 ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Carroyage 6x6"
@@ -546,7 +551,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, { rows: 8, cols: 8, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           z.grid?.rows === 8 && z.grid?.cols === 8 ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Carroyage 8x8"
@@ -562,7 +567,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, { rows: 10, cols: 10, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           z.grid?.rows === 10 && z.grid?.cols === 10 ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Carroyage 10x10"
@@ -578,7 +583,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, { rows: 12, cols: 12, orientation: z.grid?.orientation ?? 'vertical' } as any);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           z.grid?.rows === 12 && z.grid?.cols === 12 ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Carroyage 12x12"
@@ -594,7 +599,7 @@ export default function MissionZonesPage() {
                         onClick={async () => {
                           await setZoneGrid(z.id, null);
                         }}
-                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                        className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                           !z.grid ? 'ring-2 ring-blue-500' : ''
                         }`}
                         title="Désactiver le carroyage"
@@ -614,7 +619,7 @@ export default function MissionZonesPage() {
                             onClick={async () => {
                               await setZoneGrid(z.id, { rows: z.grid!.rows, cols: z.grid!.cols, orientation: 'vertical' } as any);
                             }}
-                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                               (z.grid?.orientation ?? 'vertical') === 'vertical' ? 'ring-2 ring-blue-500' : ''
                             }`}
                             title="Carroyage vertical"
@@ -630,7 +635,7 @@ export default function MissionZonesPage() {
                             onClick={async () => {
                               await setZoneGrid(z.id, { rows: z.grid!.rows, cols: z.grid!.cols, orientation: 'diag45' } as any);
                             }}
-                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-50 ${
+                            className={`h-10 w-full rounded-xl border bg-white px-3 text-sm shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100 ${
                               z.grid?.orientation === 'diag45' ? 'ring-2 ring-blue-500' : ''
                             }`}
                             title="Carroyage 45°"
@@ -672,7 +677,7 @@ export default function MissionZonesPage() {
                   window.open(waze, '_blank');
                   setNavPickerTarget(null);
                 }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                 title="Waze"
               >
                 <img src="/icon/waze.png" alt="Waze" className="h-12 w-12 object-contain" />
@@ -685,7 +690,7 @@ export default function MissionZonesPage() {
                   window.open(gmaps, '_blank');
                   setNavPickerTarget(null);
                 }}
-                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                 title="Google Maps"
               >
                 <img src="/icon/maps.png" alt="Google Maps" className="h-12 w-12 object-contain" />
@@ -699,7 +704,7 @@ export default function MissionZonesPage() {
                     window.open(apple, '_blank');
                     setNavPickerTarget(null);
                   }}
-                  className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50"
+                  className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border bg-white shadow-sm hover:bg-gray-50 active:scale-[0.97] transition-transform duration-100"
                   title="Plans (Apple)"
                 >
                   <img src="/icon/apple.png" alt="Plans (Apple)" className="h-12 w-12 object-contain" />

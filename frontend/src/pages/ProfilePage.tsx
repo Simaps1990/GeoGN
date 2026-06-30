@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Copy, MessageCircle, Send } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { changeMyPassword, updateMyProfile } from '../lib/api';
+import { PageHeading } from '../components/ui/PageHeading';
 
 export default function ProfilePage() {
   const { user, signOut, refreshUser } = useAuth();
@@ -32,8 +33,8 @@ export default function ProfilePage() {
 
   return (
     <div className="p-4 pb-20">
-      <h1 className="text-xl font-bold text-gray-900">Profil</h1>
-      <div className="mt-4 rounded-lg border bg-white p-4">
+      <PageHeading title="Profil" />
+      <div className="mt-4 rounded-2xl border bg-white p-4">
         <div className="text-sm text-gray-500">Nom</div>
         <div className="font-semibold text-gray-900">{user?.displayName ?? '-'}</div>
         <div className="mt-3 text-sm text-gray-500">Email</div>
@@ -42,7 +43,7 @@ export default function ProfilePage() {
         <div className="font-mono text-gray-900 break-all">{user?.appUserId ?? '-'}</div>
       </div>
 
-      <div className="mt-4 rounded-lg border bg-white p-4">
+      <div className="mt-4 rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Modifier mon pseudo</div>
         <div className="mt-3 grid gap-2">
           <input
@@ -68,7 +69,7 @@ export default function ProfilePage() {
                 setSavingName(false);
               }
             }}
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             Enregistrer
           </button>
@@ -76,7 +77,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border bg-white p-4">
+      <div className="mt-4 rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Changer mon mot de passe</div>
         <div className="mt-3 grid gap-2">
           <input
@@ -110,7 +111,7 @@ export default function ProfilePage() {
                 setChangingPassword(false);
               }
             }}
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             Changer le mot de passe
           </button>
@@ -118,7 +119,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border bg-white p-4">
+      <div className="mt-4 rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Partager mon code</div>
         <div className="mt-1 text-xs text-gray-500">
           Ce code est ton identifiant GeoGN personnel. Partage-le pour que d'autres puissent t'ajouter.
@@ -130,7 +131,7 @@ export default function ProfilePage() {
             onClick={() => {
               window.open(whatsappUrl, '_blank');
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Send size={18} />
             WhatsApp
@@ -141,7 +142,7 @@ export default function ProfilePage() {
             onClick={() => {
               window.location.href = smsUrl;
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <MessageCircle size={18} />
             SMS
@@ -158,7 +159,7 @@ export default function ProfilePage() {
                 // ignore
               }
             }}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-900 disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-900 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.97] transition-transform duration-100"
           >
             <Copy size={18} />
             {copied ? 'Copié' : 'Copier'}
@@ -166,12 +167,12 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="mt-4 mb-8 rounded-lg border bg-white p-4">
+      <div className="mt-4 mb-8 rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Paramètres</div>
         <button
           type="button"
           onClick={signOut}
-          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-gray-900 px-4 text-sm font-semibold text-white"
+          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-gray-900 px-4 text-sm font-semibold text-white active:scale-[0.97] transition-transform duration-100"
         >
           Déconnexion
         </button>
