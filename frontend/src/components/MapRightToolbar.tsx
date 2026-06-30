@@ -290,13 +290,24 @@ export const MapRightToolbar = memo(function MapRightToolbar({
         </div>
       ) : null}
 
-      <div
-        className={`relative w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
-          settingsMenuOpen ? 'h-auto ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
-        }`}
-      >
+      <div className="relative">
+        {(() => {
+          const count =
+            (projectionNotification ? 1 : 0) +
+            (gridHasAssignments && gridViewMode === 'off' ? 1 : 0);
+          return count > 0 ? (
+            <span className="absolute -right-1 -top-1 z-10 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white pointer-events-none">
+              {count}
+            </span>
+          ) : null;
+        })()}
+        <div
+          className={`w-12 overflow-hidden rounded-2xl bg-white/0 shadow backdrop-blur p-px transition-all duration-200 ${
+            settingsMenuOpen ? 'h-auto ring-1 ring-inset ring-black/10' : 'h-12 ring-0'
+          }`}
+        >
         <div className="flex flex-col gap-2">
-          <div className="relative">
+          <div>
             <button
               type="button"
               onClick={() => {
@@ -325,16 +336,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
                 size={20}
               />
             </button>
-            {(() => {
-              const count =
-                (projectionNotification ? 1 : 0) +
-                (gridHasAssignments && gridViewMode === 'off' ? 1 : 0);
-              return count > 0 ? (
-                <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white pointer-events-none">
-                  {count}
-                </span>
-              ) : null;
-            })()}
           </div>
 
           <div
@@ -478,6 +479,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               </button>
             ) : null}
           </div>
+        </div>
         </div>
       </div>
 

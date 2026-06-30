@@ -557,13 +557,30 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'INVALID_ID' });
       }
 
-      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
-      if (!membership || membership.role !== 'admin') {
-        return reply.code(403).send({ error: 'FORBIDDEN' });
-      }
+      const isSelfLeave = String(req.userId) === String(memberUserId);
 
-      if (String(req.userId) === String(memberUserId)) {
-        return reply.code(400).send({ error: 'CANNOT_REMOVE_SELF' });
+      if (isSelfLeave) {
+        // Auto-retrait : autorisé quel que soit le rôle
+        const selfMembership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+        if (!selfMembership) {
+          return reply.code(404).send({ error: 'NOT_FOUND' });
+        }
+        // Empêcher le dernier admin de partir s'il reste d'autres membres actifs
+        if (selfMembership.role === 'admin') {
+          const otherAdmins = await MissionMemberModel.countDocuments({ missionId, userId: { $ne: new mongoose.Types.ObjectId(req.userId) }, role: 'admin', removedAt: null });
+          if (otherAdmins === 0) {
+            const otherMembers = await MissionMemberModel.countDocuments({ missionId, userId: { $ne: new mongoose.Types.ObjectId(req.userId) }, removedAt: null });
+            if (otherMembers > 0) {
+              return reply.code(400).send({ error: 'LAST_ADMIN' });
+            }
+          }
+        }
+      } else {
+        // Retrait d'un autre membre : admin uniquement
+        const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+        if (!membership || membership.role !== 'admin') {
+          return reply.code(403).send({ error: 'FORBIDDEN' });
+        }
       }
 
       const now = new Date();
