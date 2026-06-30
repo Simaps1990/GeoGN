@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { AlertTriangle, ChevronDown, Info, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Info, Pencil, Trash2, X } from 'lucide-react';
 import type { ApiPersonCase } from '../lib/api';
 import { FACTOR_DESCRIPTIONS } from '../lib/estimationWalking';
 
@@ -134,8 +134,18 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
     const d = FACTOR_DESCRIPTIONS[factorKey];
     if (!d) return null;
     return (
-      <div className="mt-1 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800 leading-relaxed">
-        {d.description}
+      <div className="absolute left-0 top-6 z-50 w-72 rounded-xl border bg-white shadow-xl p-3">
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <div className="text-xs font-semibold text-blue-700">{d.label}</div>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setActiveInfo(null); }}
+            className="shrink-0 text-gray-400 hover:text-gray-600"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <div className="text-xs text-gray-700 leading-relaxed">{d.description}</div>
       </div>
     );
   }
@@ -311,7 +321,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div className="relative">
-                  <div className="text-xs font-semibold text-gray-700">Dernière position connue</div>
+                  <div className="text-sm font-semibold text-gray-800">Dernière position connue</div>
                   <input
                     type="text"
                     value={personDraft.lastKnownQuery}
@@ -404,9 +414,9 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       el.focus();
                     }
                   }}
-                  className="cursor-pointer"
+                  className="min-w-0 cursor-pointer"
                 >
-                  <div className="text-xs font-semibold text-gray-700">Date / heure</div>
+                  <div className="text-sm font-semibold text-gray-800">Date / heure</div>
                   <input
                     ref={lastKnownWhenInputRef}
                     type="datetime-local"
@@ -430,7 +440,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
               </div>
 
               <div>
-                <div className="text-xs font-semibold text-gray-700">Mode de déplacement</div>
+                <div className="text-sm font-semibold text-gray-800">Mode de déplacement</div>
                 <select
                   value={personDraft.mobility}
                   onChange={(e) => setPersonDraft((p: any) => ({ ...p, mobility: e.target.value as any }))}
@@ -447,8 +457,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
               {normalizeMobility(personDraft.mobility as any) === 'none' ? (
                 <>
                   <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                    <div className="relative">
+                      <div className="flex items-center text-sm font-semibold text-gray-800">
                         Âge<InfoBtn factorKey="age" />
                       </div>
                       <InfoBox factorKey="age" />
@@ -461,8 +471,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
                       />
                     </div>
-                    <div>
-                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                    <div className="relative">
+                      <div className="flex items-center text-sm font-semibold text-gray-800">
                         Sexe<InfoBtn factorKey="sex" />
                       </div>
                       <InfoBox factorKey="sex" />
@@ -476,8 +486,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                         <option value="male">Homme</option>
                       </select>
                     </div>
-                    <div>
-                      <div className="flex items-center text-xs font-semibold text-gray-700">
+                    <div className="relative">
+                      <div className="flex items-center text-sm font-semibold text-gray-800">
                         État<InfoBtn factorKey="healthStatus" />
                       </div>
                       <InfoBox factorKey="healthStatus" />
@@ -493,8 +503,8 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     </div>
                   </div>
 
-                  <div>
-                    <div className="flex items-center text-xs font-semibold text-gray-700">
+                  <div className="relative">
+                    <div className="flex items-center text-sm font-semibold text-gray-800">
                       Terrain<InfoBtn factorKey="terrain" />
                     </div>
                     <InfoBox factorKey="terrain" />
@@ -511,13 +521,13 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                   </div>
 
                   <div className="flex flex-col gap-3 md:flex-row md:items-start">
-                    <div className="rounded-2xl border p-3 md:flex-1">
+                    <div className="relative rounded-2xl border p-3 md:flex-1">
                       <button
                         type="button"
                         className="flex w-full items-center justify-between text-left"
                         onClick={() => setDiseasesOpen((v: boolean) => !v)}
                       >
-                        <div className="flex items-center text-xs font-semibold text-gray-700">
+                        <div className="flex items-center text-sm font-semibold text-gray-800">
                           Maladies connues<InfoBtn factorKey="diseases" />
                         </div>
                         <span className="text-xs text-gray-500">{diseasesOpen ? 'Masquer' : 'Afficher'}</span>
@@ -551,13 +561,13 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       ) : null}
                     </div>
 
-                    <div className="rounded-2xl border p-3 md:flex-1">
+                    <div className="relative rounded-2xl border p-3 md:flex-1">
                       <button
                         type="button"
                         className="flex w-full items-center justify-between text-left"
                         onClick={() => setInjuriesOpen((v: boolean) => !v)}
                       >
-                        <div className="flex items-center text-xs font-semibold text-gray-700">
+                        <div className="flex items-center text-sm font-semibold text-gray-800">
                           Blessures<InfoBtn factorKey="injuries" />
                         </div>
                         <span className="text-xs text-gray-500">{injuriesOpen ? 'Masquer' : 'Afficher'}</span>
@@ -600,12 +610,12 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border p-3">
-                    <div className="flex items-center text-xs font-semibold text-gray-700">
+                  <div className="relative rounded-2xl border p-3">
+                    <div className="flex items-center text-sm font-semibold text-gray-800">
                       Médicaments / substances<InfoBtn factorKey="medications" />
                     </div>
                     <InfoBox factorKey="medications" />
-                    <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className="mt-2 grid grid-cols-2 gap-2">
                       {[
                         { id: 'anxiolytique', label: 'Anxiolytiques' },
                         { id: 'opioid', label: 'Opioïdes' },
