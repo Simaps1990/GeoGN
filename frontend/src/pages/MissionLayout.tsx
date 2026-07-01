@@ -82,21 +82,21 @@ export default function MissionLayout() {
         {visitedRef.current.has('zones') && (
           <div className={activeKey === 'zones' ? 'animate-page-enter' : 'hidden'}>
             <Suspense fallback={null}>
-              <MissionZonesPage />
+              <MissionZonesPage isActive={activeKey === 'zones'} />
             </Suspense>
           </div>
         )}
         {visitedRef.current.has('pois') && (
           <div className={activeKey === 'pois' ? 'animate-page-enter' : 'hidden'}>
             <Suspense fallback={null}>
-              <MissionPoisPage />
+              <MissionPoisPage isActive={activeKey === 'pois'} />
             </Suspense>
           </div>
         )}
         {visitedRef.current.has('contacts') && (
           <div className={activeKey === 'contacts' ? 'animate-page-enter' : 'hidden'}>
             <Suspense fallback={null}>
-              <MissionContactsPage />
+              <MissionContactsPage isActive={activeKey === 'contacts'} />
             </Suspense>
           </div>
         )}

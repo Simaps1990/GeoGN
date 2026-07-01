@@ -7,7 +7,7 @@ import { PageHeading } from '../components/ui/PageHeading';
 import { SkeletonCard } from '../components/ui/SkeletonCard';
 import { EmptyState } from '../components/ui/EmptyState';
 
-export default function MissionZonesPage() {
+export default function MissionZonesPage({ isActive = false }: { isActive?: boolean }) {
   const { missionId } = useParams();
   const navigate = useNavigate();
   const { confirm, dialog } = useConfirmDialog();
@@ -68,7 +68,7 @@ export default function MissionZonesPage() {
   );
 
   useEffect(() => {
-    if (!missionId) return;
+    if (!missionId || !isActive) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -86,7 +86,7 @@ export default function MissionZonesPage() {
     return () => {
       cancelled = true;
     };
-  }, [missionId]);
+  }, [missionId, isActive]);
 
   const memberById = useMemo(() => {
     const map = new Map<string, ApiMissionMember>();

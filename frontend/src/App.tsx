@@ -34,8 +34,25 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Chargement...</div>
+      <div
+        className="min-h-screen w-full bg-black bg-cover bg-center bg-no-repeat flex items-center justify-center px-4 py-10"
+        style={{ backgroundImage: "url('/icon/fondgris.png')" }}
+      >
+        <div className="w-full max-w-md rounded-3xl bg-[#1c1f24] px-8 pt-2 pb-8 shadow-[0_30px_90px_rgba(0,0,0,0.65)] ring-1 ring-white/10">
+          <div className="flex flex-col items-center text-center">
+            <img
+              src="/icon/patte.png"
+              alt="GeoGN"
+              className="h-80 w-80 object-contain drop-shadow -mt-12 -mb-16"
+            />
+            <h1 className="-mt-4 text-4xl font-semibold tracking-wide text-white">GeoGN</h1>
+          </div>
+          <div className="mt-8 flex items-center justify-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-white/40 animate-bounce [animation-delay:-0.3s]" />
+            <span className="h-2 w-2 rounded-full bg-white/40 animate-bounce [animation-delay:-0.15s]" />
+            <span className="h-2 w-2 rounded-full bg-white/40 animate-bounce" />
+          </div>
+        </div>
       </div>
     );
   }
