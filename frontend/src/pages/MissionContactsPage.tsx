@@ -25,7 +25,7 @@ import {
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { getSocket } from '../lib/socket';
 
-export default function MissionContactsPage({ isActive = false }: { isActive?: boolean }) {
+export default function MissionContactsPage() {
   const { missionId } = useParams();
 
   const { user } = useAuth();
@@ -265,10 +265,9 @@ export default function MissionContactsPage({ isActive = false }: { isActive?: b
   }, [addContactOpen]);
 
   useEffect(() => {
-    if (!isActive) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missionId, isActive]);
+  }, [missionId]);
 
   // Real-time socket events
   useEffect(() => {

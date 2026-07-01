@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CircleDot, CircleDotDashed, Spline, Grid2X2, Map as MapIcon, Navigation2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { deleteZone, getMission, listMissionMembers, listZones, updateZone, type ApiMission, type ApiMissionMember, type ApiZone } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { PageHeading } from '../components/ui/PageHeading';
 import { SkeletonCard } from '../components/ui/SkeletonCard';
 import { EmptyState } from '../components/ui/EmptyState';
 
-export default function MissionZonesPage({ isActive = false }: { isActive?: boolean }) {
+export default function MissionZonesPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
   const { confirm, dialog } = useConfirmDialog();
@@ -68,7 +69,7 @@ export default function MissionZonesPage({ isActive = false }: { isActive?: bool
   );
 
   useEffect(() => {
-    if (!missionId || !isActive) return;
+    if (!missionId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -86,7 +87,32 @@ export default function MissionZonesPage({ isActive = false }: { isActive?: bool
     return () => {
       cancelled = true;
     };
-  }, [missionId, isActive]);
+  }, [missionId]);
+
+  useEffect(() => {
+    if (!missionId) return;
+    const socket = getSocket();
+    const onCreated = (msg: any) => {
+      if (msg?.missionId !== missionId || !msg?.zone?.id) return;
+      setZones((prev) => prev.some((z) => z.id === msg.zone.id) ? prev : [msg.zone as ApiZone, ...prev]);
+    };
+    const onUpdated = (msg: any) => {
+      if (msg?.missionId !== missionId || !msg?.zone?.id) return;
+      setZones((prev) => prev.map((z) => z.id === msg.zone.id ? (msg.zone as ApiZone) : z));
+    };
+    const onDeleted = (msg: any) => {
+      if (!msg?.zoneId) return;
+      setZones((prev) => prev.filter((z) => z.id !== msg.zoneId));
+    };
+    socket.on('zone:created', onCreated);
+    socket.on('zone:updated', onUpdated);
+    socket.on('zone:deleted', onDeleted);
+    return () => {
+      socket.off('zone:created', onCreated);
+      socket.off('zone:updated', onUpdated);
+      socket.off('zone:deleted', onDeleted);
+    };
+  }, [missionId]);
 
   const memberById = useMemo(() => {
     const map = new Map<string, ApiMissionMember>();

@@ -319,7 +319,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
             </div>
           ) : canEditPerson ? (
             <>
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 min-w-0">
                 <div className="relative">
                   <div className="text-sm font-semibold text-gray-800">Dernière position connue</div>
                   <input

@@ -32,12 +32,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { deletePoi, getMission, listMissionMembers, listPois, updatePoi, type ApiMission, type ApiMissionMember, type ApiPoi } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { PageHeading } from '../components/ui/PageHeading';
 import { SkeletonCard } from '../components/ui/SkeletonCard';
 import { EmptyState } from '../components/ui/EmptyState';
 
-export default function MissionPoisPage({ isActive = false }: { isActive?: boolean }) {
+export default function MissionPoisPage() {
   const { missionId } = useParams();
   const navigate = useNavigate();
   const { confirm, dialog } = useConfirmDialog();
@@ -136,7 +137,7 @@ export default function MissionPoisPage({ isActive = false }: { isActive?: boole
   }
 
   useEffect(() => {
-    if (!missionId || !isActive) return;
+    if (!missionId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -154,7 +155,32 @@ export default function MissionPoisPage({ isActive = false }: { isActive?: boole
     return () => {
       cancelled = true;
     };
-  }, [missionId, isActive]);
+  }, [missionId]);
+
+  useEffect(() => {
+    if (!missionId) return;
+    const socket = getSocket();
+    const onCreated = (msg: any) => {
+      if (msg?.missionId !== missionId || !msg?.poi?.id) return;
+      setPois((prev) => prev.some((p) => p.id === msg.poi.id) ? prev : [msg.poi as ApiPoi, ...prev]);
+    };
+    const onUpdated = (msg: any) => {
+      if (msg?.missionId !== missionId || !msg?.poi?.id) return;
+      setPois((prev) => prev.map((p) => p.id === msg.poi.id ? (msg.poi as ApiPoi) : p));
+    };
+    const onDeleted = (msg: any) => {
+      if (msg?.missionId !== missionId || !msg?.poiId) return;
+      setPois((prev) => prev.filter((p) => p.id !== msg.poiId));
+    };
+    socket.on('poi:created', onCreated);
+    socket.on('poi:updated', onUpdated);
+    socket.on('poi:deleted', onDeleted);
+    return () => {
+      socket.off('poi:created', onCreated);
+      socket.off('poi:updated', onUpdated);
+      socket.off('poi:deleted', onDeleted);
+    };
+  }, [missionId]);
 
   const memberById = useMemo(() => {
     const map = new Map<string, ApiMissionMember>();
