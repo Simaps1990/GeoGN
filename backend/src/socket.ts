@@ -42,15 +42,19 @@ const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
 const lastTraceTsByUserMission = new Map<string, number>();
 
 const BATCH_TICK_MS = 1500;
-// The real trace-density gatekeeper is now the client-side movement filter
-// (frontend/src/lib/gpsFilter.ts), which never sends more often than every
-// 2s while moving. This throttle only needs to be a safety net against a
-// buggy/malicious client sending faster than that — set well below the
-// client's own 2s cap so it doesn't additionally throttle well-behaved
-// clients (setting it equal to BATCH_TICK_MS previously reintroduced the
-// same beat this was meant to remove, since selectTraceInserts compares
-// real client timestamps, not tick boundaries).
-const TRACE_THROTTLE_MS = 1000;
+// The per-tick buffer already caps trace writes at one vertex per user per
+// BATCH_TICK_MS no matter how fast a client sends (buffer.set overwrites),
+// and position:bulk deliberately bypasses this throttle by design (see
+// "Pas de throttle pour les bulks" below) — so this throttle's only real
+// job is de-duping a tick vertex against a vertex a bulk flush just
+// inserted for the same user. Because selectTraceInserts compares real
+// client timestamps (not tick boundaries), any value above half the tick
+// interval can still beat against a client emitting near that rate and
+// silently drop every other tick-sampled vertex (this happened at both
+// BATCH_TICK_MS itself and at 1000ms — verified by review). Half the tick
+// interval is the largest value that provably can never drop a
+// tick-sampled point, for any client emission rate.
+const TRACE_THROTTLE_MS = BATCH_TICK_MS / 2;
 const positionBuffers = new Map<string, Map<string, BufferedPosition>>();
 const missionTickTimers = new Map<string, NodeJS.Timeout>();
 
@@ -59,19 +63,20 @@ const missionTickTimers = new Map<string, NodeJS.Timeout>();
 // buffered-but-not-yet-flushed position so it can't resurrect a
 // cleared/removed member's marker on the next position:batch tick.
 // Canonicalize internally (mirrors mission:join) so a route passing a
-// case-variant hex id still hits the same buffer key.
-function canonicalMissionId(missionId: string): string | null {
-  return mongoose.Types.ObjectId.isValid(missionId) ? String(new mongoose.Types.ObjectId(missionId)) : null;
+// case-variant hex id — mission OR user — still hits the same buffer key.
+function canonicalObjectId(id: string): string | null {
+  return mongoose.Types.ObjectId.isValid(id) ? String(new mongoose.Types.ObjectId(id)) : null;
 }
 
 export function clearBufferedPosition(missionId: string, userId: string): void {
-  const canonical = canonicalMissionId(missionId);
-  if (!canonical) return;
-  positionBuffers.get(canonical)?.delete(userId);
+  const canonicalMission = canonicalObjectId(missionId);
+  const canonicalUser = canonicalObjectId(userId);
+  if (!canonicalMission || !canonicalUser) return;
+  positionBuffers.get(canonicalMission)?.delete(canonicalUser);
 }
 
 export function clearBufferedPositionsForMission(missionId: string): void {
-  const canonical = canonicalMissionId(missionId);
+  const canonical = canonicalObjectId(missionId);
   if (!canonical) return;
   positionBuffers.delete(canonical);
 }
