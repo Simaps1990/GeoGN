@@ -14,6 +14,7 @@ import { PositionCurrentModel } from '../models/positionCurrent.js';
 import { VehicleTrackModel } from '../models/vehicleTrack.js';
 import { HuntIsochroneModel } from '../models/huntIsochrone.js';
 import { UserModel } from '../models/user.js';
+import { clearBufferedPositionsForMission } from '../socket.js';
 
 type CreateMissionBody = {
   title: string;
@@ -197,6 +198,7 @@ export async function missionsRoutes(app: FastifyInstance) {
 
     const missionObjectId = new mongoose.Types.ObjectId(id);
 
+    clearBufferedPositionsForMission(id);
     await Promise.all([
       TraceModel.deleteMany({ missionId: missionObjectId }),
       PositionModel.deleteMany({ missionId: missionObjectId }),
@@ -333,6 +335,8 @@ export async function missionsRoutes(app: FastifyInstance) {
     }
 
     const missionObjectId = new mongoose.Types.ObjectId(id);
+
+    clearBufferedPositionsForMission(missionObjectId.toString());
 
     // Cascade en parallèle. On loggue les échecs partiels mais on ne fail pas
     // la requête : tout ce qui peut être supprimé doit l'être.

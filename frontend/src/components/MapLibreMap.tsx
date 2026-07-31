@@ -7785,7 +7785,7 @@ export default function MapLibreMap() {
     if (!src) return;
 
     const now = Date.now();
-    const inactiveAfterMs = 30_000;
+    const inactiveAfterMs = 45_000;
     const inactiveColor = '#9ca3af';
     const features = Object.entries(otherTracesRef.current)
       .filter(([userId, pts]) => {
@@ -7828,10 +7828,10 @@ export default function MapLibreMap() {
     if (!src) return;
 
     const now = Date.now();
-    const inactiveAfterMs = 30_000;
+    const inactiveAfterMs = 45_000;
     const inactiveColor = '#9ca3af';
     const features: any[] = [];
-    const segmentGapMs = 30_000;
+    const segmentGapMs = 45_000;
 
     for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
       // Ne jamais rendre la trace "others" pour l'utilisateur courant.
@@ -7916,7 +7916,7 @@ export default function MapLibreMap() {
       const now = Date.now();
       const filtered = tracePoints.filter((p) => now - p.t <= retentionMs);
 
-      const segmentGapMs = 30_000;
+      const segmentGapMs = 45_000;
       const n = filtered.length;
 
       const selfFeatures: any[] = [];

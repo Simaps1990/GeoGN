@@ -77,8 +77,8 @@ function toDto(doc: any) {
       : [],
     diseasesFreeText: typeof doc.diseasesFreeText === 'string' ? doc.diseasesFreeText : '',
     injuriesFreeText: typeof doc.injuriesFreeText === 'string' ? doc.injuriesFreeText : '',
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
   };
 }
 

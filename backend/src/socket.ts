@@ -37,15 +37,29 @@ type PositionBulkPayload = {
   points: PositionUpdatePayload[];
 };
 
-const TRACE_THROTTLE_MS = 2000;
-
 const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
 
 const lastTraceTsByUserMission = new Map<string, number>();
 
 const BATCH_TICK_MS = 1500;
+// Derived from BATCH_TICK_MS so the two can never beat against each other:
+// a throttle shorter than the tick interval would otherwise alternate
+// accept/reject every other tick for a continuously-moving user.
+const TRACE_THROTTLE_MS = BATCH_TICK_MS;
 const positionBuffers = new Map<string, Map<string, BufferedPosition>>();
 const missionTickTimers = new Map<string, NodeJS.Timeout>();
+
+// Fix 5 helpers: let callers outside the tick loop (position:clear handler,
+// member-removal route, clear-traces / mission-delete routes) drop a
+// buffered-but-not-yet-flushed position so it can't resurrect a
+// cleared/removed member's marker on the next position:batch tick.
+export function clearBufferedPosition(missionId: string, userId: string): void {
+  positionBuffers.get(missionId)?.delete(userId);
+}
+
+export function clearBufferedPositionsForMission(missionId: string): void {
+  positionBuffers.delete(missionId);
+}
 
 // Per-mission chain of in-flight flushPositionBatch calls. Ticks fire on a
 // setInterval that does NOT wait for the previous tick's async callback to
@@ -87,22 +101,30 @@ async function flushPositionBatch(missionId: string, points: BufferedPosition[])
         upsert: true,
       },
     }));
-    await PositionCurrentModel.bulkWrite(positionOps, { ordered: false });
+    try {
+      await PositionCurrentModel.bulkWrite(positionOps, { ordered: false });
+    } catch (e) {
+      console.error('[socket] positionCurrent bulkWrite failed:', e);
+    }
   }
 
   const traceInserts = selectTraceInserts(points, missionId, lastTraceTsByUserMission, TRACE_THROTTLE_MS);
   if (traceInserts.length > 0) {
-    await TraceModel.insertMany(
-      traceInserts.map((ins) => ({
-        missionId: new mongoose.Types.ObjectId(ins.missionId),
-        userId: new mongoose.Types.ObjectId(ins.userId),
-        color: ins.color,
-        loc: { type: 'Point', coordinates: [ins.lng, ins.lat] },
-        createdAt: new Date(ins.createdAt),
-        expiresAt: new Date(ins.expiresAt),
-      })),
-      { ordered: false }
-    );
+    try {
+      await TraceModel.insertMany(
+        traceInserts.map((ins) => ({
+          missionId: new mongoose.Types.ObjectId(ins.missionId),
+          userId: new mongoose.Types.ObjectId(ins.userId),
+          color: ins.color,
+          loc: { type: 'Point', coordinates: [ins.lng, ins.lat] },
+          createdAt: new Date(ins.createdAt),
+          expiresAt: new Date(ins.expiresAt),
+        })),
+        { ordered: false }
+      );
+    } catch (e) {
+      console.error('[socket] trace insertMany failed:', e);
+    }
   }
 }
 
@@ -132,6 +154,7 @@ function ensureMissionTick(io: Server, missionId: string) {
         clearInterval(timer);
         missionTickTimers.delete(missionId);
         positionBuffers.delete(missionId);
+        flushChains.delete(missionId);
 
         // Flush any pending buffer so the final position before drop-off
         // isn't silently discarded — no one is left to receive a
@@ -288,8 +311,8 @@ export function setupSocket(app: FastifyInstance) {
       'mission:join',
       async (payload: { missionId: string; retentionSeconds?: number }, ack?: (res: any) => void) => {
         try {
-          const missionId = payload?.missionId;
-          if (!missionId) {
+          const rawMissionId = payload?.missionId;
+          if (!rawMissionId) {
             ack?.({ ok: false, error: 'MISSION_ID_REQUIRED' });
             return;
           }
@@ -299,11 +322,19 @@ export function setupSocket(app: FastifyInstance) {
             return;
           }
 
-          const ok = await requireMissionMember(userId, missionId);
+          const ok = await requireMissionMember(userId, rawMissionId);
           if (!ok) {
             ack?.({ ok: false, error: 'FORBIDDEN' });
             return;
           }
+
+          // Canonicalize to the same string form Mongo casts equivalent
+          // case-variant ObjectId strings to. Without this, an authenticated
+          // member could loop mission:join with case-variants of their own
+          // mission id (each passing requireMissionMember, since Mongo casts
+          // them identically) and grow positionBuffers/missionTickTimers/
+          // flushChains with a new map key per variant, unbounded.
+          const missionId = String(new mongoose.Types.ObjectId(rawMissionId));
 
           const requested =
             typeof payload?.retentionSeconds === 'number' && Number.isFinite(payload.retentionSeconds)
@@ -390,6 +421,7 @@ export function setupSocket(app: FastifyInstance) {
           return;
         }
 
+        clearBufferedPosition(missionId, userId);
         io.to(`mission:${missionId}`).emit('position:clear', { missionId, userId });
         ack?.({ ok: true });
       } catch (e) {
@@ -455,7 +487,10 @@ export function setupSocket(app: FastifyInstance) {
         }
 
         const nowMs = Date.now();
-        const tMs = typeof payload.t === 'number' ? payload.t : nowMs;
+        const tMs =
+          typeof payload.t === 'number' && Number.isFinite(payload.t) && payload.t <= nowMs + 60_000
+            ? payload.t
+            : nowMs;
 
         let buffer = positionBuffers.get(missionId);
         if (!buffer) {
@@ -466,9 +501,9 @@ export function setupSocket(app: FastifyInstance) {
           userId,
           lng: payload.lng,
           lat: payload.lat,
-          speed: payload.speed ?? null,
-          heading: payload.heading ?? null,
-          accuracy: payload.accuracy ?? null,
+          speed: typeof payload.speed === 'number' && Number.isFinite(payload.speed) ? payload.speed : null,
+          heading: typeof payload.heading === 'number' && Number.isFinite(payload.heading) ? payload.heading : null,
+          accuracy: typeof payload.accuracy === 'number' && Number.isFinite(payload.accuracy) ? payload.accuracy : null,
           t: tMs,
           color: memberColor,
           retentionSeconds,

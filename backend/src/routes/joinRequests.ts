@@ -7,6 +7,7 @@ import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
 import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
 import { ZoneModel } from '../models/zone.js';
+import { clearBufferedPosition } from '../socket.js';
 
 const MEMBER_COLOR_PALETTE = [
   '#ef4444',
@@ -599,6 +600,7 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         member: { userId: memberUserId, role: (updated as any).role, color: (updated as any).color },
       });
 
+      clearBufferedPosition(missionId, memberUserId);
       app.io?.to(`mission:${missionId}`).emit('position:clear', { missionId, userId: memberUserId });
 
       // Invalider le cache socket du membre pour que la prochaine
