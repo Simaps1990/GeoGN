@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getSocket } from '../lib/socket';
+import { roundCoord, shouldEmitPosition } from '../lib/gpsFilter.js';
 
 type PendingPoint = {
   lng: number;
@@ -33,6 +34,7 @@ export function useMissionGeolocation(params: {
   const watchIdRef = useRef<number | null>(null);
   const pendingRef = useRef<PendingPoint[]>([]);
   const persistTimeoutRef = useRef<number | null>(null);
+  const lastSentRef = useRef<{ lng: number; lat: number; t: number } | null>(null);
 
   useEffect(() => {
     if (!missionId || !userId) return;
@@ -112,15 +114,20 @@ export function useMissionGeolocation(params: {
       if (!navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          const t = Date.now();
+          const lng = roundCoord(pos.coords.longitude);
+          const lat = roundCoord(pos.coords.latitude);
           const payload: PendingPoint = {
-            lng: pos.coords.longitude,
-            lat: pos.coords.latitude,
+            lng,
+            lat,
             speed: pos.coords.speed ?? undefined,
             heading: pos.coords.heading ?? undefined,
             accuracy: pos.coords.accuracy ?? undefined,
-            t: Date.now(),
+            t,
           };
           if (socket.connected) {
+            if (!shouldEmitPosition(lastSentRef.current, { lng, lat, t })) return;
+            lastSentRef.current = { lng, lat, t };
             socket.emit('position:update', payload);
           } else {
             pendingRef.current = [...pendingRef.current, payload].slice(-MAX_PENDING);
@@ -150,17 +157,24 @@ export function useMissionGeolocation(params: {
         watchIdRef.current = null;
       }
 
+      lastSentRef.current = null;
+
       watchIdRef.current = navigator.geolocation.watchPosition(
         (pos) => {
+          const t = Date.now();
+          const lng = roundCoord(pos.coords.longitude);
+          const lat = roundCoord(pos.coords.latitude);
           const payload: PendingPoint = {
-            lng: pos.coords.longitude,
-            lat: pos.coords.latitude,
+            lng,
+            lat,
             speed: pos.coords.speed ?? undefined,
             heading: pos.coords.heading ?? undefined,
             accuracy: pos.coords.accuracy ?? undefined,
-            t: Date.now(),
+            t,
           };
           if (socket.connected) {
+            if (!shouldEmitPosition(lastSentRef.current, { lng, lat, t })) return;
+            lastSentRef.current = { lng, lat, t };
             socket.emit('position:update', payload);
           } else {
             pendingRef.current = [...pendingRef.current, payload].slice(-MAX_PENDING);
