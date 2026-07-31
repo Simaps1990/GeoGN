@@ -56,9 +56,9 @@ async function flushPositionBatch(missionId: string, points: BufferedPosition[])
         update: {
           $set: {
             loc: { type: 'Point' as const, coordinates: [p.lng, p.lat] as [number, number] },
-            speed: p.speed ?? undefined,
-            heading: p.heading ?? undefined,
-            accuracy: p.accuracy ?? undefined,
+            speed: p.speed,
+            heading: p.heading,
+            accuracy: p.accuracy,
             timestamp: new Date(p.t),
           },
         },
@@ -86,10 +86,32 @@ async function flushPositionBatch(missionId: string, points: BufferedPosition[])
 
 function ensureMissionTick(io: Server, missionId: string) {
   if (missionTickTimers.has(missionId)) return;
+  // Note: buffered positions live only in memory between ticks. If the server
+  // process crashes (or is killed) between ticks, whatever is sitting in the
+  // buffer for this mission (up to BATCH_TICK_MS / 1.5s worth of points) is
+  // lost and never reaches PositionCurrentModel or becomes a Trace doc. This
+  // is accepted for now — there is no persistent/durable queue backing this
+  // buffer — since the next position:update from the client will repopulate
+  // it moments later.
   const timer = setInterval(() => {
     void (async () => {
       const room = io.sockets.adapter.rooms.get(`mission:${missionId}`);
       if (!room || room.size === 0) {
+        // Room is empty (last member left/disconnected). Flush any pending
+        // buffer first so the final position before drop-off isn't silently
+        // discarded — no one is left to receive a position:batch emit, so we
+        // just persist it.
+        const pendingBuffer = positionBuffers.get(missionId);
+        if (pendingBuffer && pendingBuffer.size > 0) {
+          const pendingPoints = Array.from(pendingBuffer.values());
+          pendingBuffer.clear();
+          try {
+            await flushPositionBatch(missionId, pendingPoints);
+          } catch (e) {
+            console.error('[socket] position:batch final flush failed:', e);
+          }
+        }
+
         clearInterval(timer);
         missionTickTimers.delete(missionId);
         positionBuffers.delete(missionId);
@@ -102,12 +124,11 @@ function ensureMissionTick(io: Server, missionId: string) {
       const points = Array.from(buffer.values());
       buffer.clear();
 
-      try {
-        await flushPositionBatch(missionId, points);
-      } catch (e) {
-        console.error('[socket] position:batch flush failed:', e);
-      }
-
+      // Emit before the Mongo write so tick order is preserved for clients
+      // regardless of how long flushPositionBatch takes: setInterval doesn't
+      // serialize its async callbacks, so if we awaited the DB write first, a
+      // slow tick N could finish (and emit) after a faster tick N+1, making
+      // member markers jump backward on the client.
       io.to(`mission:${missionId}`).emit('position:batch', {
         missionId,
         points: points.map((p) => ({
@@ -120,6 +141,12 @@ function ensureMissionTick(io: Server, missionId: string) {
           t: p.t,
         })),
       });
+
+      try {
+        await flushPositionBatch(missionId, points);
+      } catch (e) {
+        console.error('[socket] position:batch flush failed:', e);
+      }
     })();
   }, BATCH_TICK_MS);
   missionTickTimers.set(missionId, timer);

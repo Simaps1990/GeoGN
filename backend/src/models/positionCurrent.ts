@@ -10,9 +10,9 @@ export interface PositionCurrentDoc {
   missionId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   loc: GeoPoint;
-  speed?: number;
-  heading?: number;
-  accuracy?: number;
+  speed?: number | null;
+  heading?: number | null;
+  accuracy?: number | null;
   timestamp: Date;
   createdAt: Date;
   updatedAt: Date;
