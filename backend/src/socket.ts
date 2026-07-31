@@ -46,6 +46,27 @@ const BATCH_TICK_MS = 1500;
 const positionBuffers = new Map<string, Map<string, BufferedPosition>>();
 const missionTickTimers = new Map<string, NodeJS.Timeout>();
 
+// Per-mission chain of in-flight flushPositionBatch calls. Ticks fire on a
+// setInterval that does NOT wait for the previous tick's async callback to
+// finish, so without this a slow bulkWrite on tick N could still be running
+// when tick N+1's (faster) write completes and advances
+// lastTraceTsByUserMission past tick N's point, silently dropping tick N's
+// trace vertex and letting a stale PositionCurrent write land last. Chaining
+// each call onto the previous one for the same mission forces the Mongo
+// writes to run strictly in tick order, even though the emit (above/before
+// this) already went out immediately.
+const flushChains = new Map<string, Promise<void>>();
+
+function queueFlush(missionId: string, points: BufferedPosition[]): Promise<void> {
+  const prev = flushChains.get(missionId) ?? Promise.resolve();
+  const next = prev.then(() => flushPositionBatch(missionId, points));
+  // Store a variant that never rejects so one failed write doesn't break
+  // the chain for subsequent ticks; the caller still gets the real
+  // rejection via the returned `next` promise for its own try/catch.
+  flushChains.set(missionId, next.catch(() => {}));
+  return next;
+}
+
 async function flushPositionBatch(missionId: string, points: BufferedPosition[]) {
   const missionObjectId = new mongoose.Types.ObjectId(missionId);
 
@@ -97,24 +118,30 @@ function ensureMissionTick(io: Server, missionId: string) {
     void (async () => {
       const room = io.sockets.adapter.rooms.get(`mission:${missionId}`);
       if (!room || room.size === 0) {
-        // Room is empty (last member left/disconnected). Flush any pending
-        // buffer first so the final position before drop-off isn't silently
-        // discarded — no one is left to receive a position:batch emit, so we
-        // just persist it.
+        // Room is empty (last member left/disconnected). Drain the buffer
+        // and tear down the timer/map entries synchronously, BEFORE
+        // awaiting the final flush below. If a client rejoins and emits
+        // position:update while the flush is still in flight, we want
+        // ensureMissionTick to see no timer registered and create a
+        // completely fresh buffer/timer, rather than writing into (and
+        // then losing) state this branch is about to discard anyway.
         const pendingBuffer = positionBuffers.get(missionId);
-        if (pendingBuffer && pendingBuffer.size > 0) {
-          const pendingPoints = Array.from(pendingBuffer.values());
-          pendingBuffer.clear();
-          try {
-            await flushPositionBatch(missionId, pendingPoints);
-          } catch (e) {
-            console.error('[socket] position:batch final flush failed:', e);
-          }
-        }
+        const pendingPoints = pendingBuffer && pendingBuffer.size > 0 ? Array.from(pendingBuffer.values()) : [];
 
         clearInterval(timer);
         missionTickTimers.delete(missionId);
         positionBuffers.delete(missionId);
+
+        // Flush any pending buffer so the final position before drop-off
+        // isn't silently discarded — no one is left to receive a
+        // position:batch emit, so we just persist it.
+        if (pendingPoints.length > 0) {
+          try {
+            await queueFlush(missionId, pendingPoints);
+          } catch (e) {
+            console.error('[socket] position:batch final flush failed:', e);
+          }
+        }
         return;
       }
 
@@ -143,7 +170,7 @@ function ensureMissionTick(io: Server, missionId: string) {
       });
 
       try {
-        await flushPositionBatch(missionId, points);
+        await queueFlush(missionId, points);
       } catch (e) {
         console.error('[socket] position:batch flush failed:', e);
       }
