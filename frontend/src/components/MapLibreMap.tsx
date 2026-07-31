@@ -43,6 +43,7 @@ import { useMission } from '../contexts/MissionContext';
 import { useGridView } from '../contexts/GridViewContext';
 import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { getSocket } from '../lib/socket';
+import { haversineMeters, roundCoord, shouldEmitPosition } from '../lib/gpsFilter.js';
 import {
   createPoi,
   createZone,
@@ -301,19 +302,6 @@ function closeRing(ring: number[][]) {
   return [...ring, first];
 }
 
-function haversineMeters(a: { lng: number; lat: number }, b: { lng: number; lat: number }) {
-  const R = 6371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLon = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLon / 2);
-  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
 function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
   const ring = closeRing(ringInput);
   const ys: number[] = [];
@@ -419,6 +407,7 @@ export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const lastSentRef = useRef<{ lng: number; lat: number; t: number } | null>(null);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirmDialog();
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastSnapshotAtRef = useRef<number>(0);
@@ -6600,6 +6589,8 @@ export default function MapLibreMap() {
       return;
     }
 
+    lastSentRef.current = null;
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const lng = pos.coords.longitude;
@@ -6620,9 +6611,11 @@ export default function MapLibreMap() {
 
         const socket = socketRef.current;
         if (socket && selectedMissionId) {
+          const roundedLng = roundCoord(lng);
+          const roundedLat = roundCoord(lat);
           const payload = {
-            lng,
-            lat,
+            lng: roundedLng,
+            lat: roundedLat,
             speed: pos.coords.speed ?? undefined,
             heading: pos.coords.heading ?? undefined,
             accuracy: pos.coords.accuracy ?? undefined,
@@ -6631,7 +6624,10 @@ export default function MapLibreMap() {
 
           if (socket.connected) {
             wasSocketConnectedRef.current = true;
-            socket.emit('position:update', payload);
+            if (shouldEmitPosition(lastSentRef.current, { lng: roundedLng, lat: roundedLat, t })) {
+              lastSentRef.current = { lng: roundedLng, lat: roundedLat, t };
+              socket.emit('position:update', payload);
+            }
           } else {
             // First offline point: persist immediately (then throttle every 2s)
             if (wasSocketConnectedRef.current) {
