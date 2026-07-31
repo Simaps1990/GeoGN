@@ -101,7 +101,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   settingsMenuOpen,
   setSettingsMenuOpen,
   setSettingsNotification,
-  settingsNotification,
+  settingsNotification: _settingsNotification,
   scaleEnabled,
   setScaleEnabled,
   labelsEnabled,

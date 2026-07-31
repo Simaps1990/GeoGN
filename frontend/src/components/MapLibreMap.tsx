@@ -676,6 +676,8 @@ export default function MapLibreMap() {
         diseasesFreeText: '',
         injuries: [],
         injuriesFreeText: '',
+        terrain: 'route',
+        medications: [],
       });
       setShowEstimationHeatmap(false);
       const map = mapInstanceRef.current;
@@ -2026,6 +2028,8 @@ export default function MapLibreMap() {
                 diseasesFreeText: '',
                 injuries: [],
                 injuriesFreeText: '',
+                terrain: 'route',
+                medications: [],
               };
             });
           } else {
@@ -2051,6 +2055,8 @@ export default function MapLibreMap() {
             ? c.injuries.map((x) => ({ id: x.id, locations: Array.isArray(x.locations) ? x.locations : [] }))
             : [],
           injuriesFreeText: c.injuriesFreeText ?? '',
+          terrain: (c.terrain as TerrainType) ?? 'route',
+          medications: Array.isArray(c.medications) ? c.medications : [],
         });
       } catch (e: any) {
         if (cancelled) return;
