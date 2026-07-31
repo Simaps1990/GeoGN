@@ -103,7 +103,7 @@ function App() {
       <MissionProvider>
         <StartupNoticeModal
           open={showStartupNotice}
-          onDismiss={() => setShowStartupNotice(false)}
+          onReady={() => setShowStartupNotice(false)}
         />
         <AppContent />
       </MissionProvider>
