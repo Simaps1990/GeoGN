@@ -1,5 +1,7 @@
 export const SIGNIFICANT_MOVE_METERS = 8;
 export const HEARTBEAT_MS = 30_000;
+export const MOVEMENT_NOISE_METERS = 2;
+export const MOVEMENT_MAX_INTERVAL_MS = 2000;
 
 export function haversineMeters(
   a: { lng: number; lat: number },
@@ -26,6 +28,9 @@ export function shouldEmitPosition(
   next: { lng: number; lat: number; t: number }
 ): boolean {
   if (!last) return true;
-  if (next.t - last.t >= HEARTBEAT_MS) return true;
-  return haversineMeters(last, next) >= SIGNIFICANT_MOVE_METERS;
+  const distance = haversineMeters(last, next);
+  const elapsed = next.t - last.t;
+  if (distance >= SIGNIFICANT_MOVE_METERS) return true;
+  if (distance > MOVEMENT_NOISE_METERS) return elapsed >= MOVEMENT_MAX_INTERVAL_MS;
+  return elapsed >= HEARTBEAT_MS;
 }
