@@ -42,10 +42,15 @@ const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
 const lastTraceTsByUserMission = new Map<string, number>();
 
 const BATCH_TICK_MS = 1500;
-// Derived from BATCH_TICK_MS so the two can never beat against each other:
-// a throttle shorter than the tick interval would otherwise alternate
-// accept/reject every other tick for a continuously-moving user.
-const TRACE_THROTTLE_MS = BATCH_TICK_MS;
+// The real trace-density gatekeeper is now the client-side movement filter
+// (frontend/src/lib/gpsFilter.ts), which never sends more often than every
+// 2s while moving. This throttle only needs to be a safety net against a
+// buggy/malicious client sending faster than that — set well below the
+// client's own 2s cap so it doesn't additionally throttle well-behaved
+// clients (setting it equal to BATCH_TICK_MS previously reintroduced the
+// same beat this was meant to remove, since selectTraceInserts compares
+// real client timestamps, not tick boundaries).
+const TRACE_THROTTLE_MS = 1000;
 const positionBuffers = new Map<string, Map<string, BufferedPosition>>();
 const missionTickTimers = new Map<string, NodeJS.Timeout>();
 
@@ -53,12 +58,22 @@ const missionTickTimers = new Map<string, NodeJS.Timeout>();
 // member-removal route, clear-traces / mission-delete routes) drop a
 // buffered-but-not-yet-flushed position so it can't resurrect a
 // cleared/removed member's marker on the next position:batch tick.
+// Canonicalize internally (mirrors mission:join) so a route passing a
+// case-variant hex id still hits the same buffer key.
+function canonicalMissionId(missionId: string): string | null {
+  return mongoose.Types.ObjectId.isValid(missionId) ? String(new mongoose.Types.ObjectId(missionId)) : null;
+}
+
 export function clearBufferedPosition(missionId: string, userId: string): void {
-  positionBuffers.get(missionId)?.delete(userId);
+  const canonical = canonicalMissionId(missionId);
+  if (!canonical) return;
+  positionBuffers.get(canonical)?.delete(userId);
 }
 
 export function clearBufferedPositionsForMission(missionId: string): void {
-  positionBuffers.delete(missionId);
+  const canonical = canonicalMissionId(missionId);
+  if (!canonical) return;
+  positionBuffers.delete(canonical);
 }
 
 // Per-mission chain of in-flight flushPositionBatch calls. Ticks fire on a
@@ -75,10 +90,20 @@ const flushChains = new Map<string, Promise<void>>();
 function queueFlush(missionId: string, points: BufferedPosition[]): Promise<void> {
   const prev = flushChains.get(missionId) ?? Promise.resolve();
   const next = prev.then(() => flushPositionBatch(missionId, points));
-  // Store a variant that never rejects so one failed write doesn't break
-  // the chain for subsequent ticks; the caller still gets the real
-  // rejection via the returned `next` promise for its own try/catch.
-  flushChains.set(missionId, next.catch(() => {}));
+  // flushPositionBatch catches its own two Mongo-call errors internally, so
+  // `next` never actually rejects today — but store a never-rejecting
+  // variant anyway so this chain can't break if that changes later.
+  const stored = next.catch(() => {});
+  flushChains.set(missionId, stored);
+  // Self-clean once this link settles, but only if nothing has chained past
+  // it in the meantime (identity check) — otherwise the empty-room teardown
+  // deleting this map immediately before its own drain-flush re-populates it
+  // would just leave a permanent entry once that flush settles.
+  void stored.finally(() => {
+    if (flushChains.get(missionId) === stored) {
+      flushChains.delete(missionId);
+    }
+  });
   return next;
 }
 
@@ -154,7 +179,10 @@ function ensureMissionTick(io: Server, missionId: string) {
         clearInterval(timer);
         missionTickTimers.delete(missionId);
         positionBuffers.delete(missionId);
-        flushChains.delete(missionId);
+        // Not deleting flushChains here: if a flush is still pending for
+        // this mission, queueFlush's own self-cleanup (see above) removes it
+        // once that flush settles — deleting it here would just have it
+        // immediately re-added by the drain-flush below, for no benefit.
 
         // Flush any pending buffer so the final position before drop-off
         // isn't silently discarded — no one is left to receive a
