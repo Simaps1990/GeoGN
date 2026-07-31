@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import * as parser from 'socket.io-msgpack-parser';
 import { getAccessToken, getApiBaseUrl, refreshTokens } from './api';
 
 let socket: Socket | null = null;
@@ -19,6 +20,7 @@ export function getSocket() {
     socket = io(baseUrl, {
       transports: ['websocket', 'polling'],
       autoConnect: false,
+      parser,
     });
 
     // Handle connection errors due to expired token

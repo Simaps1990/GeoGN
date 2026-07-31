@@ -13,21 +13,22 @@
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^9.3.1",
+    "@fastify/cors": "^9.0.1",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
-    "@fastify/cors": "^9.0.1",
-    "@fastify/cookie": "^9.3.1",
     "geojson": "^0.5.0",
-    "openid-client": "^5.4.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
-    "socket.io": "^4.7.5"
+    "openid-client": "^5.4.0",
+    "socket.io": "^4.7.5",
+    "socket.io-msgpack-parser": "^3.0.2"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/geojson": "^7946.0.14",
     "@types/jsonwebtoken": "^9.0.6",
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.14.10",
     "tsx": "^4.19.2",
     "typescript": "^5.5.3"

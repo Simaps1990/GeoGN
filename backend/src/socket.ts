@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { Server } from 'socket.io';
+import * as parser from 'socket.io-msgpack-parser';
 import mongoose from 'mongoose';
 import { verifyAccessToken } from './auth/jwt.js';
 import { isAllowedOrigin } from './corsOrigins.js';
@@ -254,6 +255,7 @@ export function setupSocket(app: FastifyInstance) {
       },
       credentials: true,
     },
+    parser,
   });
 
   io.use((socket, next) => {
