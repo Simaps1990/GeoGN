@@ -1,10 +1,11 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import AppShell from './pages/AppShell';
 import { MissionProvider, useMission } from './contexts/MissionContext';
 import { GridViewProvider } from './contexts/GridViewContext';
+import StartupNoticeModal from './components/StartupNoticeModal';
 
 // Lazy-loaded pages
 const MissionsPage = lazy(() => import('./pages/MissionsPage'));
@@ -95,9 +96,15 @@ function AppContent() {
 }
 
 function App() {
+  const [showStartupNotice, setShowStartupNotice] = useState(true);
+
   return (
     <AuthProvider>
       <MissionProvider>
+        <StartupNoticeModal
+          open={showStartupNotice}
+          onDismiss={() => setShowStartupNotice(false)}
+        />
         <AppContent />
       </MissionProvider>
     </AuthProvider>
