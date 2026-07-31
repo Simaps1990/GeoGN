@@ -8,6 +8,7 @@ import { MissionModel } from './models/mission.js';
 import { PositionModel } from './models/position.js';
 import { TraceModel } from './models/trace.js';
 import { PositionCurrentModel } from './models/positionCurrent.js';
+import { selectTraceInserts, type BufferedPosition } from './positionBatch.js';
 
 type AuthedSocket = {
   data: {
@@ -40,6 +41,89 @@ const TRACE_THROTTLE_MS = 2000;
 const DEFAULT_SNAPSHOT_RETENTION_SECONDS = 1800;
 
 const lastTraceTsByUserMission = new Map<string, number>();
+
+const BATCH_TICK_MS = 1500;
+const positionBuffers = new Map<string, Map<string, BufferedPosition>>();
+const missionTickTimers = new Map<string, NodeJS.Timeout>();
+
+async function flushPositionBatch(missionId: string, points: BufferedPosition[]) {
+  const missionObjectId = new mongoose.Types.ObjectId(missionId);
+
+  if (points.length > 0) {
+    const positionOps = points.map((p) => ({
+      updateOne: {
+        filter: { missionId: missionObjectId, userId: new mongoose.Types.ObjectId(p.userId) },
+        update: {
+          $set: {
+            loc: { type: 'Point' as const, coordinates: [p.lng, p.lat] as [number, number] },
+            speed: p.speed ?? undefined,
+            heading: p.heading ?? undefined,
+            accuracy: p.accuracy ?? undefined,
+            timestamp: new Date(p.t),
+          },
+        },
+        upsert: true,
+      },
+    }));
+    await PositionCurrentModel.bulkWrite(positionOps, { ordered: false });
+  }
+
+  const traceInserts = selectTraceInserts(points, missionId, lastTraceTsByUserMission, TRACE_THROTTLE_MS);
+  if (traceInserts.length > 0) {
+    await TraceModel.insertMany(
+      traceInserts.map((ins) => ({
+        missionId: new mongoose.Types.ObjectId(ins.missionId),
+        userId: new mongoose.Types.ObjectId(ins.userId),
+        color: ins.color,
+        loc: { type: 'Point', coordinates: [ins.lng, ins.lat] },
+        createdAt: new Date(ins.createdAt),
+        expiresAt: new Date(ins.expiresAt),
+      })),
+      { ordered: false }
+    );
+  }
+}
+
+function ensureMissionTick(io: Server, missionId: string) {
+  if (missionTickTimers.has(missionId)) return;
+  const timer = setInterval(() => {
+    void (async () => {
+      const room = io.sockets.adapter.rooms.get(`mission:${missionId}`);
+      if (!room || room.size === 0) {
+        clearInterval(timer);
+        missionTickTimers.delete(missionId);
+        positionBuffers.delete(missionId);
+        return;
+      }
+
+      const buffer = positionBuffers.get(missionId);
+      if (!buffer || buffer.size === 0) return;
+
+      const points = Array.from(buffer.values());
+      buffer.clear();
+
+      try {
+        await flushPositionBatch(missionId, points);
+      } catch (e) {
+        console.error('[socket] position:batch flush failed:', e);
+      }
+
+      io.to(`mission:${missionId}`).emit('position:batch', {
+        missionId,
+        points: points.map((p) => ({
+          userId: p.userId,
+          lng: p.lng,
+          lat: p.lat,
+          speed: p.speed,
+          heading: p.heading,
+          accuracy: p.accuracy,
+          t: p.t,
+        })),
+      });
+    })();
+  }, BATCH_TICK_MS);
+  missionTickTimers.set(missionId, timer);
+}
 
 async function emitMissionSnapshot(socket: any, missionId: string, requestedRetentionSeconds?: number) {
   if (!mongoose.Types.ObjectId.isValid(missionId)) return;
@@ -316,53 +400,25 @@ export function setupSocket(app: FastifyInstance) {
 
         const nowMs = Date.now();
         const tMs = typeof payload.t === 'number' ? payload.t : nowMs;
-        const t = new Date(tMs);
 
-        await PositionCurrentModel.updateOne(
-          { missionId: new mongoose.Types.ObjectId(missionId), userId: new mongoose.Types.ObjectId(userId) },
-          {
-            $set: {
-              loc: { type: 'Point', coordinates: [payload.lng, payload.lat] },
-              speed: payload.speed,
-              heading: payload.heading,
-              accuracy: payload.accuracy,
-              timestamp: t,
-            },
-          },
-          { upsert: true }
-        );
-
-        const expiresAt = new Date(t.getTime() + Math.max(0, retentionSeconds) * 1000);
-
-        const key = `${missionId}:${userId}`;
-        const lastTs = lastTraceTsByUserMission.get(key) ?? 0;
-        const diff = tMs - lastTs;
-
-        if (diff >= TRACE_THROTTLE_MS) {
-          await TraceModel.create({
-            missionId: new mongoose.Types.ObjectId(missionId),
-            userId: new mongoose.Types.ObjectId(userId),
-            color: memberColor,
-            loc: { type: 'Point', coordinates: [payload.lng, payload.lat] },
-            createdAt: t,
-            expiresAt,
-          });
-
-          lastTraceTsByUserMission.set(key, tMs);
+        let buffer = positionBuffers.get(missionId);
+        if (!buffer) {
+          buffer = new Map();
+          positionBuffers.set(missionId, buffer);
         }
-
-        const msg = {
-          missionId,
+        buffer.set(userId, {
           userId,
           lng: payload.lng,
           lat: payload.lat,
           speed: payload.speed ?? null,
           heading: payload.heading ?? null,
           accuracy: payload.accuracy ?? null,
-          t: t.getTime(),
-        };
+          t: tMs,
+          color: memberColor,
+          retentionSeconds,
+        });
+        ensureMissionTick(io, missionId);
 
-        io.to(`mission:${missionId}`).emit('position:update', msg);
         ack?.({ ok: true });
       } catch (e) {
         console.error('[socket] position:update failed:', e);
