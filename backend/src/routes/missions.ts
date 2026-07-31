@@ -284,7 +284,7 @@ export async function missionsRoutes(app: FastifyInstance) {
         prevTraceRetentionSeconds,
         traceRetentionSeconds: mission.traceRetentionSeconds,
         title: mission.title,
-        updatedAt: mission.updatedAt,
+        updatedAt: mission.updatedAt.toISOString(),
         actorUserId: req.userId,
         actorDisplayName,
       });

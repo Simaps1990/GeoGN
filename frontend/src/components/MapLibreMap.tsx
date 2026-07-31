@@ -6109,6 +6109,7 @@ export default function MapLibreMap() {
       if (!msg || msg.missionId !== selectedMissionId) return;
       const points = Array.isArray(msg.points) ? msg.points : [];
       for (const p of points) {
+        if (user?.id && p.userId === user.id) continue;
         applyRemotePosition(p);
       }
     };

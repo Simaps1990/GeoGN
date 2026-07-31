@@ -89,7 +89,7 @@ async function notifyAdminsJoinRequestCreated(
             displayName: requester.displayName,
           }
         : null,
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
     },
   };
   for (const adminId of adminIds) {

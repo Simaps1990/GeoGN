@@ -134,7 +134,11 @@ export async function poisRoutes(app: FastifyInstance) {
         // non bloquant
       }
 
-      app.io?.to(`mission:${missionId}`).emit('poi:created', { missionId, poi: dto, createdByDisplayName });
+      app.io?.to(`mission:${missionId}`).emit('poi:created', {
+        missionId,
+        poi: { ...dto, createdAt: dto.createdAt.toISOString() },
+        createdByDisplayName,
+      });
 
       return reply.code(201).send(dto);
     }
@@ -196,7 +200,10 @@ export async function poisRoutes(app: FastifyInstance) {
 
       };
 
-      app.io?.to(`mission:${missionId}`).emit('poi:updated', { missionId, poi: dto });
+      app.io?.to(`mission:${missionId}`).emit('poi:updated', {
+        missionId,
+        poi: { ...dto, createdAt: dto.createdAt.toISOString() },
+      });
 
       return reply.send(dto);
     }

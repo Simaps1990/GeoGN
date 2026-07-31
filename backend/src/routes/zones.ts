@@ -192,7 +192,11 @@ export async function zonesRoutes(app: FastifyInstance) {
         // non bloquant
       }
 
-      app.io?.to(`mission:${missionId}`).emit('zone:created', { missionId, zone: dto, createdByDisplayName });
+      app.io?.to(`mission:${missionId}`).emit('zone:created', {
+        missionId,
+        zone: { ...dto, createdAt: dto.createdAt.toISOString(), updatedAt: dto.updatedAt.toISOString() },
+        createdByDisplayName,
+      });
 
       return reply.code(201).send(dto);
     }
@@ -268,7 +272,10 @@ export async function zonesRoutes(app: FastifyInstance) {
         updatedAt: zone.updatedAt,
       };
 
-      app.io?.to(`mission:${missionId}`).emit('zone:updated', { missionId, zone: dto });
+      app.io?.to(`mission:${missionId}`).emit('zone:updated', {
+        missionId,
+        zone: { ...dto, createdAt: dto.createdAt.toISOString(), updatedAt: dto.updatedAt.toISOString() },
+      });
 
       return reply.send(dto);
     }
