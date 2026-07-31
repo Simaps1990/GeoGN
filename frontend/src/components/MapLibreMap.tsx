@@ -6105,8 +6105,12 @@ export default function MapLibreMap() {
       }));
     };
 
-    const onPos = (msg: any) => {
-      applyRemotePosition(msg);
+    const onPosBatch = (msg: any) => {
+      if (!msg || msg.missionId !== selectedMissionId) return;
+      const points = Array.isArray(msg.points) ? msg.points : [];
+      for (const p of points) {
+        applyRemotePosition(p);
+      }
     };
 
     const onPosBulk = (msg: any) => {
@@ -6119,7 +6123,7 @@ export default function MapLibreMap() {
     };
 
     socket.on('mission:snapshot', onSnapshot);
-    socket.on('position:update', onPos);
+    socket.on('position:batch', onPosBatch);
     socket.on('position:bulk', onPosBulk);
 
     const onPosClear = (msg: any) => {
@@ -6512,7 +6516,7 @@ export default function MapLibreMap() {
       window.removeEventListener('focus', onVisibility);
       window.removeEventListener('online', onOnline);
       socket.off('mission:snapshot', onSnapshot);
-      socket.off('position:update', onPos);
+      socket.off('position:batch', onPosBatch);
       socket.off('position:bulk', onPosBulk);
       socket.off('position:clear', onPosClear);
 
