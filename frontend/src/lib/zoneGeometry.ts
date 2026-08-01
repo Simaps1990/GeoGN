@@ -81,6 +81,23 @@ export function isPointInZone(lng: number, lat: number, z: ApiZone) {
   return false;
 }
 
+/** Approximation polygonale d'un cercle (zone circulaire, brouillon de zone). */
+export function circleToPolygon(center: { lng: number; lat: number }, radiusMeters: number, steps = 64) {
+  const latRad = (center.lat * Math.PI) / 180;
+  const metersPerDegLat = METERS_PER_DEG_LAT;
+  const metersPerDegLng = METERS_PER_DEG_LAT * Math.cos(latRad);
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dx = (radiusMeters / metersPerDegLng) * Math.cos(angle);
+    const dy = (radiusMeters / metersPerDegLat) * Math.sin(angle);
+    coords.push([center.lng + dx, center.lat + dy]);
+  }
+  coords.push(coords[0]);
+  return { type: 'Polygon', coordinates: [coords] };
+}
+
 export function closeRing(ring: number[][]) {
   if (ring.length === 0) return ring;
   const first = ring[0];
