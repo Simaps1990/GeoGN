@@ -232,8 +232,11 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
             // avec un budget croissant en pas de 20 secondes (aligné sur le
             // scheduler), afin d'avoir une forme monotone et une clé différente
             // à chaque tick.
+            // Hoisted above the try so the catch's circle fallback can size itself
+            // by the same growing budget instead of raw track-elapsed time.
+            let budgetSeconds = simulatedElapsedSeconds;
             try {
-              const budgetSeconds = (() => {
+              budgetSeconds = (() => {
                 const step = Math.max(1, refreshSeconds);
                 const maxSec = Number.isFinite(fresh.maxDurationSeconds)
                   ? Math.max(1, fresh.maxDurationSeconds)
@@ -336,24 +339,40 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 'vehicleTrackScheduler tomtom_reachable_range compute failed'
               );
 
+              // Use the same growing budget the TomTom call just failed on, not the
+              // raw track-elapsed time — otherwise the circle is sized for "time
+              // since track start" while the isochrone it replaces was sized for
+              // "time since the last known position", underselling the reachable
+              // area whenever those two differ (e.g. a stale last-known fix).
               const fallback = await computeVehicleIsoline({
                 lng,
                 lat,
-                elapsedSeconds,
-                vehicleType: track.vehicleType,
+                elapsedSeconds: budgetSeconds,
+                vehicleType: fresh.vehicleType,
               });
               geojson = fallback.geojson;
               meta = {
                 ...fallback.meta,
                 provider: 'tomtom_reachable_range_fallback_circle',
+                budgetSec: budgetSeconds,
               };
+              try {
+                if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
+                  geojson.features[0].properties.budgetSec = budgetSeconds;
+                }
+              } catch {
+                // ignore
+              }
             }
           } else if (fresh.algorithm === 'road_graph') {
             // Legacy "tomtom_tiles" grid mode is disabled.
             // For road_graph tracks we also use TomTom Reachable Range so the frontend
             // always receives a polygon isochrone with a monotonically increasing budget.
+            // Hoisted above the try so the catch's circle fallback can size itself
+            // by the same growing budget instead of raw track-elapsed time.
+            let budgetSeconds = simulatedElapsedSeconds;
             try {
-              const budgetSeconds = (() => {
+              budgetSeconds = (() => {
                 const step = Math.max(10, refreshSeconds);
                 const maxSec = Number.isFinite(fresh.maxDurationSeconds)
                   ? Math.max(1, fresh.maxDurationSeconds)
@@ -436,17 +455,29 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 'vehicleTrackScheduler tomtom_reachable_range compute failed'
               );
 
+              // Same reasoning as the TEST-track fallback above: size the circle by
+              // the growing budget the TomTom call just failed on, not raw
+              // track-elapsed time, and carry budgetSec so the frontend's
+              // monotonic-growth guard doesn't see an identical key every tick.
               const fallback = await computeVehicleIsoline({
                 lng,
                 lat,
-                elapsedSeconds,
-                vehicleType: track.vehicleType,
+                elapsedSeconds: budgetSeconds,
+                vehicleType: fresh.vehicleType,
               });
               geojson = fallback.geojson;
               meta = {
                 ...fallback.meta,
                 provider: 'tomtom_reachable_range_fallback_circle',
+                budgetSec: budgetSeconds,
               };
+              try {
+                if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
+                  geojson.features[0].properties.budgetSec = budgetSeconds;
+                }
+              } catch {
+                // ignore
+              }
             }
           } else {
             const fallback = await computeVehicleIsoline({
