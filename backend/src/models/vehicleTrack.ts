@@ -100,5 +100,6 @@ const VehicleTrackSchema = new Schema<VehicleTrackDoc>(
 
 VehicleTrackSchema.index({ missionId: 1, status: 1, updatedAt: -1 });
 VehicleTrackSchema.index({ missionId: 1, createdAt: -1 });
+VehicleTrackSchema.index({ status: 1, startedAt: 1 });
 
 export const VehicleTrackModel = mongoose.model<VehicleTrackDoc>('VehicleTrack', VehicleTrackSchema);
