@@ -6,7 +6,6 @@ import { verifyAccessToken } from './auth/jwt.js';
 import { isAllowedOrigin } from './corsOrigins.js';
 import { MissionMemberModel } from './models/missionMember.js';
 import { MissionModel } from './models/mission.js';
-import { PositionModel } from './models/position.js';
 import { TraceModel } from './models/trace.js';
 import { PositionCurrentModel } from './models/positionCurrent.js';
 import { selectTraceInserts, type BufferedPosition } from './positionBatch.js';

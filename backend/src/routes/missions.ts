@@ -6,7 +6,6 @@ import { MissionMemberModel } from '../models/missionMember.js';
 import { MissionInviteModel } from '../models/missionInvite.js';
 import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
 import { ZoneModel } from '../models/zone.js';
-import { PositionModel } from '../models/position.js';
 import { TraceModel } from '../models/trace.js';
 import { PoiModel } from '../models/poi.js';
 import { PersonCaseModel } from '../models/personCase.js';
@@ -203,7 +202,6 @@ export async function missionsRoutes(app: FastifyInstance) {
     clearBufferedPositionsForMission(id);
     await Promise.all([
       TraceModel.deleteMany({ missionId: missionObjectId }),
-      PositionModel.deleteMany({ missionId: missionObjectId }),
       PositionCurrentModel.deleteMany({ missionId: missionObjectId }),
     ]);
 
@@ -352,7 +350,6 @@ export async function missionsRoutes(app: FastifyInstance) {
       MissionInviteModel.deleteMany({ missionId: missionObjectId }),
       MissionJoinRequestModel.deleteMany({ missionId: missionObjectId }),
       ZoneModel.deleteMany({ missionId: missionObjectId }),
-      PositionModel.deleteMany({ missionId: missionObjectId }),
       PositionCurrentModel.deleteMany({ missionId: missionObjectId }),
       TraceModel.deleteMany({ missionId: missionObjectId }),
       PoiModel.deleteMany({ missionId: missionObjectId }),
