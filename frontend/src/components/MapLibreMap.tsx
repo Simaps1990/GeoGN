@@ -4189,117 +4189,12 @@ export default function MapLibreMap() {
     }
   }
 
-  function resyncAllOverlays(map: MapLibreMapInstance) {
-    const meSource = map.getSource('me') as GeoJSONSource | undefined;
-    const traceSource = map.getSource('trace') as GeoJSONSource | undefined;
-    const othersSource = map.getSource('others') as GeoJSONSource | undefined;
-    const othersTracesSource = map.getSource('others-traces') as GeoJSONSource | undefined;
+  // Redessine uniquement les couches liées aux zones (contours, libellés, quadrillage).
+  // Extrait de resyncAllOverlays pour que les changements de zones ne reconstruisent pas
+  // aussi les traces des autres membres, les POI et les brouillons.
+  function resyncZoneOverlays(map: MapLibreMapInstance) {
     const zonesSource = map.getSource('zones') as GeoJSONSource | undefined;
     const zonesLabelsSource = map.getSource('zones-labels') as GeoJSONSource | undefined;
-    const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
-    const draftZoneSource = map.getSource('draft-zone') as GeoJSONSource | undefined;
-    const draftPoiSource = map.getSource('draft-poi') as GeoJSONSource | undefined;
-
-    if (meSource && lastPos) {
-      meSource.setData({
-        type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [lastPos.lng, lastPos.lat] },
-            properties: {},
-          },
-        ],
-      });
-    }
-
-    if (traceSource) {
-      const retentionMs = traceRetentionMs;
-      const now = Date.now();
-      const currentTracePoints = tracePointsRef.current;
-      const filtered = currentTracePoints.filter((p) => now - p.t <= retentionMs);
-      const coords = filtered.map((p) => [p.lng, p.lat]);
-      if (coords.length >= 2) {
-        const fc = {
-          type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              properties: {},
-              geometry: { type: 'LineString', coordinates: coords },
-            },
-          ],
-        } as any;
-        traceSource.setData(fc);
-      } else if (coords.length === 1) {
-        const [lng, lat] = coords[0];
-        const fc = {
-          type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              properties: {},
-              geometry: {
-                type: 'LineString',
-                coordinates: [
-                  [lng, lat],
-                  [lng + 1e-9, lat + 1e-9],
-                ],
-              },
-            },
-          ],
-        } as any;
-        traceSource.setData(fc);
-      } else {
-        const fc = { type: 'FeatureCollection', features: [] } as any;
-        traceSource.setData(fc);
-      }
-    }
-
-    if (othersSource) {
-      const features = Object.entries(otherPositions)
-        .filter(([userId]) => !hiddenUserIds[userId])
-        .map(([userId, p]) => {
-          const memberColor = memberColors[userId];
-          const color = memberColor ?? '#4b5563';
-          const name = memberNames[userId] ?? '';
-
-          return {
-            type: 'Feature',
-            properties: {
-              userId,
-              t: p.t,
-              color,
-              name,
-            },
-            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-          };
-        });
-
-      othersSource.setData({
-        type: 'FeatureCollection',
-        features: features as any,
-      });
-    }
-
-    if (othersTracesSource) {
-      const features: any[] = [];
-      const now = Date.now();
-      for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
-        if (hiddenUserIds[userId]) continue;
-        const filtered = pts.filter((p) => now - p.t <= traceRetentionMs);
-        if (filtered.length < 2) continue;
-        const memberColor = memberColors[userId];
-        const color = memberColor ?? '#4b5563';
-        features.push({
-          type: 'Feature',
-          properties: { userId, color },
-          geometry: { type: 'LineString', coordinates: filtered.map((p) => [p.lng, p.lat]) },
-        });
-      }
-
-      othersTracesSource.setData({ type: 'FeatureCollection', features } as any);
-    }
 
     if (zonesSource) {
       const features: any[] = [];
@@ -4705,6 +4600,121 @@ export default function MapLibreMap() {
 
       zonesGridSource.setData({ type: 'FeatureCollection', features } as any);
     }
+  }
+
+  function resyncAllOverlays(map: MapLibreMapInstance) {
+    const meSource = map.getSource('me') as GeoJSONSource | undefined;
+    const traceSource = map.getSource('trace') as GeoJSONSource | undefined;
+    const othersSource = map.getSource('others') as GeoJSONSource | undefined;
+    const othersTracesSource = map.getSource('others-traces') as GeoJSONSource | undefined;
+    const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
+    const draftZoneSource = map.getSource('draft-zone') as GeoJSONSource | undefined;
+    const draftPoiSource = map.getSource('draft-poi') as GeoJSONSource | undefined;
+
+    if (meSource && lastPos) {
+      meSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [lastPos.lng, lastPos.lat] },
+            properties: {},
+          },
+        ],
+      });
+    }
+
+    if (traceSource) {
+      const retentionMs = traceRetentionMs;
+      const now = Date.now();
+      const currentTracePoints = tracePointsRef.current;
+      const filtered = currentTracePoints.filter((p) => now - p.t <= retentionMs);
+      const coords = filtered.map((p) => [p.lng, p.lat]);
+      if (coords.length >= 2) {
+        const fc = {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: coords },
+            },
+          ],
+        } as any;
+        traceSource.setData(fc);
+      } else if (coords.length === 1) {
+        const [lng, lat] = coords[0];
+        const fc = {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [lng, lat],
+                  [lng + 1e-9, lat + 1e-9],
+                ],
+              },
+            },
+          ],
+        } as any;
+        traceSource.setData(fc);
+      } else {
+        const fc = { type: 'FeatureCollection', features: [] } as any;
+        traceSource.setData(fc);
+      }
+    }
+
+    if (othersSource) {
+      const features = Object.entries(otherPositions)
+        .filter(([userId]) => !hiddenUserIds[userId])
+        .map(([userId, p]) => {
+          const memberColor = memberColors[userId];
+          const color = memberColor ?? '#4b5563';
+          const name = memberNames[userId] ?? '';
+
+          return {
+            type: 'Feature',
+            properties: {
+              userId,
+              t: p.t,
+              color,
+              name,
+            },
+            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+          };
+        });
+
+      othersSource.setData({
+        type: 'FeatureCollection',
+        features: features as any,
+      });
+    }
+
+    if (othersTracesSource) {
+      const features: any[] = [];
+      const now = Date.now();
+      for (const [userId, pts] of Object.entries(otherTracesRef.current)) {
+        if (hiddenUserIds[userId]) continue;
+        const filtered = pts.filter((p) => now - p.t <= traceRetentionMs);
+        if (filtered.length < 2) continue;
+        const memberColor = memberColors[userId];
+        const color = memberColor ?? '#4b5563';
+        features.push({
+          type: 'Feature',
+          properties: { userId, color },
+          geometry: { type: 'LineString', coordinates: filtered.map((p) => [p.lng, p.lat]) },
+        });
+      }
+
+      othersTracesSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+
+    // Bug 6: les couches de zones sont redessinées seules par resyncZoneOverlays,
+    // qui est aussi appelée directement par l'effet déclenché sur `zones`.
+    resyncZoneOverlays(map);
 
     if (poisSource) {
       poisSource.setData(buildPoisFeatureCollection(pois));
@@ -5590,7 +5600,9 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
-    resyncAllOverlays(map);
+    // Un create/update/delete de zone ne doit redessiner que les couches de zones,
+    // pas reconstruire tous les overlays (traces des autres membres, POI, brouillons).
+    resyncZoneOverlays(map);
   }, [zones, mapReady]);
 
   useEffect(() => {
@@ -7479,38 +7491,6 @@ export default function MapLibreMap() {
       markers.set(p.id, marker);
     }
   }, [pois, mapReady, poiIconOptions, currentBaseStyle]);
-
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    const src = map.getSource('zones') as GeoJSONSource | undefined;
-    if (!src) return;
-
-    const features: any[] = [];
-    for (const z of zones) {
-      if (z.type === 'circle' && z.circle) {
-        features.push({
-          type: 'Feature',
-          properties: { id: z.id, title: z.title, color: z.color },
-          geometry: circleToPolygon(z.circle.center, z.circle.radiusMeters),
-        });
-      }
-      if (z.type === 'polygon' && z.polygon) {
-        features.push({ type: 'Feature', properties: { id: z.id, title: z.title, color: z.color }, geometry: z.polygon });
-      }
-      if (Array.isArray(z.sectors)) {
-        for (const s of z.sectors) {
-          features.push({
-            type: 'Feature',
-            properties: { id: z.id, title: z.title, sectorId: s.sectorId, color: s.color },
-            geometry: s.geometry,
-          });
-        }
-      }
-    }
-
-    src.setData({ type: 'FeatureCollection', features });
-  }, [zones, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
