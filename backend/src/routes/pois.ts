@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
 import { MissionMemberModel } from '../models/missionMember.js';
+import { PersonCaseModel } from '../models/personCase.js';
 import { PoiModel, type PoiType } from '../models/poi.js';
 import { UserModel } from '../models/user.js';
 
@@ -228,10 +229,27 @@ export async function poisRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      const res = await PoiModel.deleteOne({ _id: poiId, missionId });
-      if (!res.deletedCount) {
+      const res = await PoiModel.updateOne(
+        { _id: poiId, missionId, deletedAt: { $exists: false } },
+        { $set: { deletedAt: new Date() } }
+      );
+      if (!res.matchedCount) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
       }
+
+      // Cascade: clear dangling references from the mission's person case that
+      // pointed at this specific POI, without touching the rest of the
+      // last-known / next-clue data (address text, coordinates, etc).
+      await Promise.all([
+        PersonCaseModel.updateOne(
+          { missionId, 'lastKnown.poiId': poiId },
+          { $unset: { 'lastKnown.poiId': '' } }
+        ),
+        PersonCaseModel.updateOne(
+          { missionId, 'nextClue.poiId': poiId },
+          { $unset: { 'nextClue.poiId': '' } }
+        ),
+      ]);
 
       app.io?.to(`mission:${missionId}`).emit('poi:deleted', { missionId, poiId });
 
