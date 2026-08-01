@@ -1,4 +1,4 @@
-export const SIGNIFICANT_MOVE_METERS = 8;
+export const SIGNIFICANT_MOVE_METERS = 5;
 export const HEARTBEAT_MS = 30_000;
 export const MOVEMENT_NOISE_METERS = 2;
 export const MOVEMENT_MAX_INTERVAL_MS = 2000;

@@ -41,7 +41,7 @@ test('shouldEmitPosition rejects a near-identical point sent quickly', () => {
 
 test('shouldEmitPosition accepts a point past the significant-move threshold', () => {
   const last = { lng: 2.35, lat: 48.85, t: 1000 };
-  // ~14.6m at this latitude, past SIGNIFICANT_MOVE_METERS (8m); always emits
+  // ~14.6m at this latitude, past SIGNIFICANT_MOVE_METERS (5m); always emits
   // immediately regardless of elapsed time.
   const next = { lng: 2.3502, lat: 48.85, t: 1500 };
   assert.equal(shouldEmitPosition(last, next), true);
@@ -57,7 +57,7 @@ test('shouldEmitPosition rejects modest real movement before the 2s movement cap
   const last = { lng: 2.35, lat: 48.85, t: 1000 };
   // haversineMeters({lng:2.35,lat:48.85}, {lng:2.35004,lat:48.85}) ~= 2.93m:
   // above MOVEMENT_NOISE_METERS (2m, so it's real movement, not jitter) but
-  // below SIGNIFICANT_MOVE_METERS (8m). Only 1000ms elapsed, under the 2s cap.
+  // below SIGNIFICANT_MOVE_METERS (5m). Only 1000ms elapsed, under the 2s cap.
   const next = { lng: 2.35004, lat: 48.85, t: 1000 + 1000 };
   assert.ok(haversineMeters(last, next) > MOVEMENT_NOISE_METERS);
   assert.ok(haversineMeters(last, next) < SIGNIFICANT_MOVE_METERS);
@@ -75,8 +75,8 @@ test('shouldEmitPosition emits modest real movement once the 2s movement cap ela
 test('shouldEmitPosition emits a fast mover immediately even with almost no elapsed time', () => {
   const last = { lng: 2.35, lat: 48.85, t: 1000 };
   // haversineMeters({lng:2.35,lat:48.85}, {lng:2.35012,lat:48.85}) ~= 8.78m,
-  // at/above SIGNIFICANT_MOVE_METERS (8m); only 200ms elapsed, far under the
-  // 2s movement cap, but the 8m distance still forces an immediate emit.
+  // at/above SIGNIFICANT_MOVE_METERS (5m); only 200ms elapsed, far under the
+  // 2s movement cap, but the distance still forces an immediate emit.
   const next = { lng: 2.35012, lat: 48.85, t: 1000 + 200 };
   assert.ok(haversineMeters(last, next) >= SIGNIFICANT_MOVE_METERS);
   assert.equal(shouldEmitPosition(last, next), true);

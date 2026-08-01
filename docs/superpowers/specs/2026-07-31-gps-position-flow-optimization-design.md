@@ -43,11 +43,23 @@ Fichiers : `frontend/src/hooks/useMissionGeolocation.ts`,
 `frontend/src/components/MapLibreMap.tsx` (watcher GPS uniquement, pas le listener).
 
 - Avant d'émettre `position:update`, comparer à la dernière position **envoyée**
-  (pas juste reçue) : n'émettre que si distance haversine ≥ `SIGNIFICANT_MOVE_METERS`
-  (8m, constante nommée) OU ≥ 30s écoulées depuis le dernier envoi (heartbeat).
+  (pas juste reçue). Trois paliers (correction post-audit du 2026-08-01, le
+  design initial 8m-OU-30s laissait un marcheur lent attendre jusqu'à 6-7s
+  entre deux envois — le produit exige un envoi au moins toutes les 2s dès
+  qu'il y a un vrai mouvement) :
+  - Mouvement ≥ `SIGNIFICANT_MOVE_METERS` (5m) : envoi immédiat.
+  - Mouvement réel mais < 5m (au-dessus du bruit GPS, `MOVEMENT_NOISE_METERS`
+    = 2m) : envoi dès que `MOVEMENT_MAX_INTERVAL_MS` (2000ms) s'est écoulé
+    depuis le dernier envoi — jamais plus lent que 2s tant qu'il y a du
+    mouvement.
+  - Quasi immobile (≤ 2m, bruit GPS) : envoi uniquement au heartbeat 30s
+    (`HEARTBEAT_MS`) — c'est la seule source de gain de bande passante de ce
+    lot désormais (les gens qui bougent, même lentement, restent à 2s).
 - Arrondir `lat`/`lng` à 5 décimales avant l'émission.
 - Ne touche pas `position:bulk` (flush offline, chemin différent, déjà correct).
-- Test manuel : un membre immobile ne doit générer qu'un message toutes les ~30s.
+- Test manuel : un membre immobile ne doit générer qu'un message toutes les
+  ~30s ; un membre qui marche ne doit jamais attendre plus de ~2s entre deux
+  envois.
 
 ### Lot B — Batching temps réel serveur + réception client (bande passante ~10%, CPU important)
 
