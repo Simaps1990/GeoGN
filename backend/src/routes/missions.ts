@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { requireAuth } from '../plugins/auth.js';
-import { MissionModel } from '../models/mission.js';
+import { MissionModel, type MissionStatus } from '../models/mission.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { MissionInviteModel } from '../models/missionInvite.js';
 import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
@@ -25,6 +25,8 @@ type UpdateMissionBody = {
   traceRetentionSeconds?: number;
   title?: string;
 };
+
+const MISSION_STATUS_VALUES: MissionStatus[] = ['draft', 'active', 'closed'];
 
 const MEMBER_COLOR_PALETTE = [
   '#ef4444',
@@ -248,7 +250,12 @@ export async function missionsRoutes(app: FastifyInstance) {
     }
 
     const update: any = { updatedAt: new Date() };
-    if (req.body.status) update.status = req.body.status;
+    if (typeof req.body.status !== 'undefined') {
+      if (!MISSION_STATUS_VALUES.includes(req.body.status as MissionStatus)) {
+        return reply.code(400).send({ error: 'INVALID_STATUS' });
+      }
+      update.status = req.body.status;
+    }
     if (typeof req.body.traceRetentionSeconds === 'number') {
       const v = Math.floor(req.body.traceRetentionSeconds);
       if (v > 0) {
