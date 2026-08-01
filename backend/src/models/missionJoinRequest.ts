@@ -14,9 +14,9 @@ export interface MissionJoinRequestDoc {
 
 const MissionJoinRequestSchema = new Schema<MissionJoinRequestDoc>(
   {
-    missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    requestedBy: { type: Schema.Types.ObjectId, required: true, index: true },
-    status: { type: String, required: true, enum: ['pending', 'accepted', 'declined'], default: 'pending', index: true },
+    missionId: { type: Schema.Types.ObjectId, required: true },
+    requestedBy: { type: Schema.Types.ObjectId, required: true },
+    status: { type: String, required: true, enum: ['pending', 'accepted', 'declined'], default: 'pending' },
     createdAt: { type: Date, required: true, default: () => new Date() },
     handledBy: { type: Schema.Types.ObjectId, required: false, default: null },
     handledAt: { type: Date, required: false, default: null },

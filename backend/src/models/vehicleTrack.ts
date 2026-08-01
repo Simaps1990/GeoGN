@@ -42,7 +42,7 @@ export interface VehicleTrackDoc {
 const VehicleTrackSchema = new Schema<VehicleTrackDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
+    createdBy: { type: Schema.Types.ObjectId, required: true },
     label: { type: String, required: true },
     vehicleType: {
       type: String,

@@ -55,7 +55,5 @@ const PositionCurrentSchema = new Schema<PositionCurrentDoc>(
 );
 
 PositionCurrentSchema.index({ missionId: 1, userId: 1 }, { unique: true });
-PositionCurrentSchema.index({ loc: '2dsphere' });
-PositionCurrentSchema.index({ missionId: 1 });
 
 export const PositionCurrentModel = mongoose.model<PositionCurrentDoc>('PositionCurrent', PositionCurrentSchema);

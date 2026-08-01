@@ -16,7 +16,7 @@ export interface MissionMemberDoc {
 
 const MissionMemberSchema = new Schema<MissionMemberDoc>(
   {
-    missionId: { type: Schema.Types.ObjectId, required: true, index: true },
+    missionId: { type: Schema.Types.ObjectId, required: true },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
     role: { type: String, required: true, enum: ['admin', 'member', 'viewer'] },
     color: { type: String, required: true },

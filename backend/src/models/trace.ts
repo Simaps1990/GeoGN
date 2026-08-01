@@ -25,11 +25,11 @@ const GeoPointSchema = new Schema<GeoPoint>(
 
 const TraceSchema = new Schema<TraceDoc>(
   {
-    missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    userId: { type: Schema.Types.ObjectId, required: true, index: true },
+    missionId: { type: Schema.Types.ObjectId, required: true },
+    userId: { type: Schema.Types.ObjectId, required: true },
     color: { type: String, required: true },
     loc: { type: GeoPointSchema, required: true },
-    createdAt: { type: Date, required: true, default: () => new Date(), index: true },
+    createdAt: { type: Date, required: true, default: () => new Date() },
     expiresAt: { type: Date, required: true },
   },
   { collection: 'traces' }
@@ -37,6 +37,5 @@ const TraceSchema = new Schema<TraceDoc>(
 
 TraceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 TraceSchema.index({ missionId: 1, userId: 1, createdAt: 1 });
-TraceSchema.index({ loc: '2dsphere' });
 
 export const TraceModel = mongoose.model<TraceDoc>('Trace', TraceSchema);

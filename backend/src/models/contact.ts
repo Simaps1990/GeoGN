@@ -10,7 +10,7 @@ export interface ContactDoc {
 
 const ContactSchema = new Schema<ContactDoc>(
   {
-    ownerUserId: { type: Schema.Types.ObjectId, required: true, index: true },
+    ownerUserId: { type: Schema.Types.ObjectId, required: true },
     contactUserId: { type: Schema.Types.ObjectId, required: true, index: true },
     alias: { type: String, required: false },
     createdAt: { type: Date, required: true, default: () => new Date() },

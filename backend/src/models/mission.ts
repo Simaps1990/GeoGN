@@ -17,8 +17,8 @@ export interface MissionDoc {
 const MissionSchema = new Schema<MissionDoc>(
   {
     title: { type: String, required: true },
-    createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
-    status: { type: String, required: true, enum: ['draft', 'active', 'closed'], index: true },
+    createdBy: { type: Schema.Types.ObjectId, required: true },
+    status: { type: String, required: true, enum: ['draft', 'active', 'closed'] },
     mapStyle: { type: String, required: true, enum: ['streets', 'satellite'], default: 'streets' },
     // Default trace retention: 24h (86400s). TTL + snapshot window rely on this.
     traceRetentionSeconds: { type: Number, required: true, default: 86400 },

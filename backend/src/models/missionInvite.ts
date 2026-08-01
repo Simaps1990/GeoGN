@@ -15,9 +15,9 @@ export interface MissionInviteDoc {
 
 const MissionInviteSchema = new Schema<MissionInviteDoc>(
   {
-    missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    invitedBy: { type: Schema.Types.ObjectId, required: true, index: true },
-    invitedUserId: { type: Schema.Types.ObjectId, required: true, index: true },
+    missionId: { type: Schema.Types.ObjectId, required: true },
+    invitedBy: { type: Schema.Types.ObjectId, required: true },
+    invitedUserId: { type: Schema.Types.ObjectId, required: true },
     status: { type: String, required: true, enum: ['pending', 'accepted', 'declined', 'revoked'], default: 'pending', index: true },
     token: { type: String, required: true, unique: true, index: true },
     createdAt: { type: Date, required: true, default: () => new Date() },

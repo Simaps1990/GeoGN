@@ -32,7 +32,7 @@ const GeoPointSchema = new Schema<GeoPoint>(
 const PoiSchema = new Schema<PoiDoc>(
   {
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    createdBy: { type: Schema.Types.ObjectId, required: true, index: true },
+    createdBy: { type: Schema.Types.ObjectId, required: true },
     type: { type: String, required: true, enum: ['zone_a_verifier', 'doute', 'cible_trouvee', 'danger', 'autre'] },
     title: { type: String, required: true },
     icon: { type: String, required: true, default: 'marker' },
@@ -46,7 +46,6 @@ const PoiSchema = new Schema<PoiDoc>(
 );
 
 PoiSchema.index({ loc: '2dsphere' });
-PoiSchema.index({ deletedAt: 1 });
 PoiSchema.index({ missionId: 1, deletedAt: 1 });
 
 export const PoiModel = mongoose.model<PoiDoc>('Poi', PoiSchema);
