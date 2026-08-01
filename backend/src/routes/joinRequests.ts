@@ -500,6 +500,9 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       const update: any = {};
       if (typeof (req.body as any)?.color === 'string') {
         const c = (req.body as any).color.trim();
+        if (c && !isAllowedMemberColor(c)) {
+          return reply.code(400).send({ error: 'INVALID_COLOR' });
+        }
         if (c) update.color = c;
       }
 
