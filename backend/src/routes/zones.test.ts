@@ -62,14 +62,15 @@ test('validateCircle rejects bad centers and non-positive radii', () => {
 test('isGridCellIdWithinGrid accepts cells inside the grid and rejects malformed or out-of-bounds labels', () => {
   // "C3" -> col 'C' = index 2, row 3 = index 2
   assert.equal(isGridCellIdWithinGrid('C3', 12, 12), true);
-  // Same label "C3" still parses to the same indices under a 4x4 grid, but index 2 is
-  // out of bounds for both rows and cols there -> must be rejected (shrink case).
-  assert.equal(isGridCellIdWithinGrid('C3', 4, 4), false);
+  // "H9" -> col 'H' = index 7, row 9 = index 8: both out of bounds once the grid shrinks
+  // to 4x4 (the exact 12x12 -> 4x4 shrink scenario from the audit finding).
+  assert.equal(isGridCellIdWithinGrid('H9', 4, 4), false);
   // A label that stays structurally valid ("C3" -> col 2, row 2) under a different-sized
   // grid (12x12 -> 10x10) is still considered "in bounds" by this helper: this is exactly
-  // why the caller must only trust this when it also knows the label was recomputed for
-  // stale geometry, which is why the route clears gridCellId on any dimension change,
-  // not just ones that push a label out of bounds.
+  // why the PATCH route does NOT rely on this helper to decide whether to keep an
+  // assignment across a real dimension change (it clears unconditionally instead) -
+  // bounds-checking alone can't tell "still the same real cell" from "coincidentally
+  // still a valid label".
   assert.equal(isGridCellIdWithinGrid('C3', 10, 10), true);
   // Row/col at the edge of the grid.
   assert.equal(isGridCellIdWithinGrid('A1', 1, 1), true);

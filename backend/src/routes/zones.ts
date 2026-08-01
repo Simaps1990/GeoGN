@@ -503,10 +503,7 @@ export async function zonesRoutes(app: FastifyInstance) {
         if ((zone.grid as any)?.orientation === 'diag45') {
           return reply.code(400).send({ error: 'GRID_ORIENTATION_NOT_ASSIGNABLE' });
         }
-        const m = gridCellId.match(/^([A-Z])(\d+)$/)!;
-        const col = m[1].charCodeAt(0) - 65;
-        const row = parseInt(m[2], 10) - 1;
-        if (col < 0 || col >= zone.grid.cols || row < 0 || row >= zone.grid.rows) {
+        if (!isGridCellIdWithinGrid(gridCellId, zone.grid.rows, zone.grid.cols)) {
           return reply.code(400).send({ error: 'GRID_CELL_OUT_OF_BOUNDS' });
         }
       }

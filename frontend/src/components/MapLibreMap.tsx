@@ -404,6 +404,20 @@ function clipHorizontalLineToPolygon(lat: number, ringInput: number[][]) {
   return segments;
 }
 
+// Source unique de vérité pour les propriétés attachées aux features de la source `pois`:
+// la couche `pois-labels` lit `title`, la couche `pois` lit `color`, et les popups lisent
+// `id`/`type`/`icon`/`comment`. Tout écrivain de la source doit passer par ici.
+function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: pois.map((p) => ({
+      type: 'Feature',
+      properties: { id: p.id, type: p.type, title: p.title, icon: p.icon, color: p.color, comment: p.comment },
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+    })) as any,
+  };
+}
+
 export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
@@ -4693,14 +4707,7 @@ export default function MapLibreMap() {
     }
 
     if (poisSource) {
-      poisSource.setData({
-        type: 'FeatureCollection',
-        features: pois.map((p) => ({
-          type: 'Feature',
-          properties: { id: p.id, type: p.type, title: p.title, icon: p.icon, color: p.color, comment: p.comment },
-          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-        })) as any,
-      });
+      poisSource.setData(buildPoisFeatureCollection(pois));
     }
 
     if (draftPoiSource) {
@@ -5578,23 +5585,6 @@ export default function MapLibreMap() {
       map.off('zoomend', onMoveEnd);
     };
   }, [mapReady, camerasEnabled]);
-
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    if (!mapReady) return;
-    const poisSource = map.getSource('pois') as GeoJSONSource | undefined;
-    if (poisSource) {
-      poisSource.setData({
-        type: 'FeatureCollection',
-        features: pois.map((p) => ({
-          type: 'Feature',
-          properties: { color: p.color },
-          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-        })),
-      });
-    }
-  }, [pois, mapReady]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -6685,14 +6675,7 @@ export default function MapLibreMap() {
     if (!map) return;
     const src = map.getSource('pois') as GeoJSONSource | undefined;
     if (!src) return;
-    src.setData({
-      type: 'FeatureCollection',
-      features: pois.map((p) => ({
-        type: 'Feature',
-        properties: { id: p.id, type: p.type, title: p.title, icon: p.icon, color: p.color, comment: p.comment },
-        geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-      })) as any,
-    });
+    src.setData(buildPoisFeatureCollection(pois));
   }, [pois, mapReady]);
 
   useEffect(() => {

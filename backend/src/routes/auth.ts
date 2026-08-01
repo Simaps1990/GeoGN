@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../auth/jwt.js';
 import { requireAuth } from '../plugins/auth.js';
 import { getBffUserFromRequest } from './oidc.js';
+import { isAllowedOrigin } from '../corsOrigins.js';
 
 type RegisterBody = {
   email: string;
@@ -109,6 +110,14 @@ export async function authRoutes(app: FastifyInstance) {
 	// comme pour /auth/login. Utilisé après un login SSO pour que les autorisations
 	// backend (requireAuth) fonctionnent de la même façon.
 	app.post('/auth/oidc/attach', async (req: FastifyRequest, reply: FastifyReply) => {
+		// Défense en profondeur CSRF : la route émet des JWT à partir d'un cookie ambiant.
+		// Une origine explicite non autorisée est rejetée ; une origine absente est traitée
+		// comme same-origin/fiable, comme le callback CORS de index.ts.
+		const origin = req.headers.origin;
+		if (origin && !isAllowedOrigin(origin)) {
+			return reply.code(403).send({ error: 'INVALID_ORIGIN' });
+		}
+
 		const bffUser = getBffUserFromRequest(req);
 		if (!bffUser) {
 			return reply.code(401).send({ error: 'BFF_SESSION_MISSING' });
