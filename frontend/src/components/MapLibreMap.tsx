@@ -7440,9 +7440,19 @@ export default function MapLibreMap() {
     vehicleTrackGeojsonById,
   ]);
 
+  // Détruire les marqueurs POI au démontage: ce sont des noeuds DOM ajoutés à la carte
+  // en dehors de React, personne d'autre ne les enlève.
+  useEffect(() => {
+    const markers = poiMarkersRef.current;
+    return () => {
+      for (const marker of markers.values()) marker.remove();
+      markers.clear();
+    };
+  }, []);
+
   // HTML markers for POIs (circles with inner icon).
-  // We fully rebuild them whenever POIs, map readiness, icon options or base style change,
-  // to avoid inconsistent DOM state after style changes.
+  // Mise à jour différentielle: on ne touche qu'aux POI ajoutés/retirés/modifiés,
+  // les marqueurs inchangés restent en place (pas de flash ni de fuite DOM).
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -7476,19 +7486,36 @@ export default function MapLibreMap() {
       };
     };
 
-    // Remove all existing markers and rebuild from scratch.
-    for (const marker of markers.values()) {
-      marker.remove();
+    // Retirer les marqueurs dont le POI n'existe plus.
+    const nextIds = new Set(pois.map((p) => p.id));
+    for (const [id, marker] of markers) {
+      if (!nextIds.has(id)) {
+        marker.remove();
+        markers.delete(id);
+      }
     }
-    markers.clear();
 
+    // Ajouter les nouveaux, mettre à jour sur place ceux qui ont changé, ne rien faire
+    // pour les autres. La signature est stockée sur l'élément DOM du marqueur: pas de
+    // structure parallèle à garder synchronisée.
     for (const p of pois) {
+      const sig = JSON.stringify(p);
+      const existing = markers.get(p.id);
+      if (existing) {
+        const el = existing.getElement() as HTMLDivElement;
+        if (el.dataset.poiSig === sig) continue;
+        applyMarkerContent(el, p);
+        el.dataset.poiSig = sig;
+        existing.setLngLat([p.lng, p.lat]);
+        continue;
+      }
       const el = document.createElement('div');
       applyMarkerContent(el, p);
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([p.lng, p.lat])
-        .addTo(map);
-      markers.set(p.id, marker);
+      el.dataset.poiSig = sig;
+      markers.set(
+        p.id,
+        new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lng, p.lat]).addTo(map)
+      );
     }
   }, [pois, mapReady, poiIconOptions, currentBaseStyle]);
 
