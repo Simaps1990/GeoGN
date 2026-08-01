@@ -211,10 +211,20 @@ export async function personCasesRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'HEALTH_STATUS_REQUIRED' });
       }
 
+      // JSON.stringify drops `undefined` keys, so the frontend already omits `age`
+      // entirely to mean "leave it as-is" / "clear it" — `'age' in body` is how we
+      // tell that apart from "the key is present but the value is invalid", which
+      // must be rejected rather than silently treated as a clear.
       let age: number | undefined = undefined;
-      if (typeof body.age === 'number') {
+      if ('age' in body && body.age !== null && body.age !== undefined) {
+        if (typeof body.age !== 'number' || !Number.isFinite(body.age)) {
+          return reply.code(400).send({ error: 'INVALID_AGE' });
+        }
         const v = Math.floor(body.age);
-        if (Number.isFinite(v) && v >= 0 && v <= 120) age = v;
+        if (v < 0 || v > 120) {
+          return reply.code(400).send({ error: 'INVALID_AGE' });
+        }
+        age = v;
       }
 
       let poiId: mongoose.Types.ObjectId | undefined = undefined;
@@ -289,7 +299,13 @@ export async function personCasesRoutes(app: FastifyInstance) {
             .filter(Boolean)
         : [];
 
-      const terrain = ['route', 'foret', 'montagne', 'marais'].includes(body?.terrain) ? body.terrain : undefined;
+      let terrain: string | undefined = undefined;
+      if ('terrain' in body && body.terrain !== null && body.terrain !== undefined) {
+        if (!['route', 'foret', 'montagne', 'marais'].includes(body.terrain)) {
+          return reply.code(400).send({ error: 'INVALID_TERRAIN' });
+        }
+        terrain = body.terrain;
+      }
 
       const medications = Array.isArray(body?.medications)
         ? body.medications
@@ -324,8 +340,11 @@ export async function personCasesRoutes(app: FastifyInstance) {
         update.age = age;
       }
 
+      // The shipped client never sends `nextClue` at all, so an unconditional
+      // unset here would wipe it on every save. Only clear it when the request
+      // explicitly included the key.
       if (nextClue === undefined) {
-        unset.nextClue = '';
+        if ('nextClue' in body) unset.nextClue = '';
       } else {
         update.nextClue = nextClue;
       }
