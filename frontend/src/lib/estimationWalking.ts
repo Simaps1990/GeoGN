@@ -455,7 +455,7 @@ export function computeMedicationFactor(medications: string[] | null | undefined
 }
 
 export function computeEffectiveWalkingKmh(
-  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car',
+  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car' | 'truck',
   age: number | null,
   healthStatus: HealthStatus | null | undefined,
   diseases: string[] | null | undefined,

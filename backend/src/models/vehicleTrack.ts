@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 
-export type VehicleTrackVehicleType = 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+export type VehicleTrackVehicleType = 'car' | 'motorcycle' | 'scooter' | 'truck' | 'bike' | 'unknown';
 export type VehicleTrackOriginType = 'address' | 'poi';
 export type VehicleTrackStatus = 'active' | 'stopped' | 'expired';
 export type VehicleTrackAlgorithm = 'mvp_isoline' | 'road_graph';
@@ -47,7 +47,7 @@ const VehicleTrackSchema = new Schema<VehicleTrackDoc>(
     vehicleType: {
       type: String,
       required: true,
-      enum: ['car', 'motorcycle', 'scooter', 'truck', 'unknown'],
+      enum: ['car', 'motorcycle', 'scooter', 'truck', 'bike', 'unknown'],
       default: 'unknown',
     },
     origin: {

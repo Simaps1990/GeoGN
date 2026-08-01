@@ -53,7 +53,7 @@ function toDto(doc: any) {
 
 type CreateVehicleTrackBody = {
   label: string;
-  vehicleType: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+  vehicleType: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'bike' | 'unknown';
   origin: {
     type: 'address' | 'poi';
     query: string;
@@ -76,7 +76,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
     Params: { missionId: string };
     Querystring: {
       status?: 'active' | 'stopped' | 'expired';
-      vehicleType?: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+      vehicleType?: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'bike' | 'unknown';
       q?: string;
       limit?: string;
       offset?: string;
@@ -88,7 +88,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
         Params: { missionId: string };
         Querystring: {
           status?: 'active' | 'stopped' | 'expired';
-          vehicleType?: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+          vehicleType?: 'car' | 'motorcycle' | 'scooter' | 'truck' | 'bike' | 'unknown';
           q?: string;
           limit?: string;
           offset?: string;
@@ -128,7 +128,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
       if (status && ['active', 'stopped', 'expired'].includes(status)) {
         filter.status = status;
       }
-      if (vehicleType && ['car', 'motorcycle', 'scooter', 'truck', 'unknown'].includes(vehicleType)) {
+      if (vehicleType && ['car', 'motorcycle', 'scooter', 'truck', 'bike', 'unknown'].includes(vehicleType)) {
         filter.vehicleType = vehicleType;
       }
       if (q && q.trim()) {
@@ -182,7 +182,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
       }
 
       const vehicleType = body?.vehicleType;
-      if (!['car', 'motorcycle', 'scooter', 'truck', 'unknown'].includes(vehicleType)) {
+      if (!['car', 'motorcycle', 'scooter', 'truck', 'bike', 'unknown'].includes(vehicleType)) {
         return reply.code(400).send({ error: 'VEHICLE_TYPE_REQUIRED' });
       }
 
@@ -308,7 +308,6 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
             elapsedSeconds: firstBudgetSec,
             maxBudgetSeconds: firstBudgetSec,
             vehicleType,
-            label,
           });
 
           // S'assurer que le GeoJSON embarque bien budgetSec=20 (clé côté front).
@@ -412,7 +411,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
 
       if (typeof body.vehicleType === 'string') {
         const vt = body.vehicleType;
-        if (!['car', 'motorcycle', 'scooter', 'truck', 'unknown'].includes(vt)) {
+        if (!['car', 'motorcycle', 'scooter', 'truck', 'bike', 'unknown'].includes(vt)) {
           return reply.code(400).send({ error: 'INVALID_VEHICLE_TYPE' });
         }
         updateSet.vehicleType = vt;

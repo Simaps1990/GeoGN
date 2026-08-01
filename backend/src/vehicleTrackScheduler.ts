@@ -286,7 +286,6 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 elapsedSeconds: budgetSeconds,
                 vehicleType: fresh.vehicleType,
                 maxBudgetSeconds: budgetSeconds,
-                label,
               });
 
               if (!result.geojson?.features?.length) {
@@ -420,7 +419,6 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
                 elapsedSeconds: budgetSeconds,
                 maxBudgetSeconds: budgetSeconds,
                 vehicleType: fresh.vehicleType,
-                label,
               });
 
               if (!result.geojson?.features?.length) {

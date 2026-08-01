@@ -43,14 +43,6 @@ export interface ComputeVehicleTomtomReachableRangeInput {
   elapsedSeconds: number;
   vehicleType: VehicleTrackVehicleType | string;
   maxBudgetSeconds?: number;
-  label?: string;
-}
-
-function vehicleProfileKey(input: { vehicleType: VehicleTrackVehicleType | string; label?: string }): string {
-  const label = typeof input.label === 'string' ? input.label : '';
-  const isBike = /\bvelo\b|\bv[ée]lo\b/i.test(label);
-  if (isBike) return 'bike';
-  return String(input.vehicleType || 'unknown');
 }
 
 export interface ComputeVehicleTomtomReachableRangeResult {
@@ -74,21 +66,21 @@ function computeBudgetForMode(args: {
   vehicleType: VehicleTrackVehicleType | string;
   baseBudgetSec: number;
   travelMode: string;
-  label?: string;
 }): { budgetSec: number; factor: number } {
   // Ajustements "métier" demandés :
-  // - scooter : on tente motorcycle mais on réduit la portée via un facteur.
+  // - bike / scooter : on tente motorcycle mais on réduit la portée via un facteur.
   // - truck : si fallback en car, on réduit aussi.
   // NB: ces facteurs sont volontairement simples et pourront être paramétrés plus tard.
 
   const vt = args.vehicleType;
   const mode = args.travelMode;
-  const label = typeof args.label === 'string' ? args.label : '';
-  const isBike = /\bvelo\b|\bv[ée]lo\b/i.test(label);
 
-  if (isBike) {
-    // Vélo TEST : on passe par motorcycle si possible, mais avec un facteur fort.
+  if (vt === 'bike') {
+    // Vélo : on passe par motorcycle si possible, mais avec un facteur fort.
     // Si on tombe sur car (fallback), on réduit encore.
+    // IMPORTANT: la détection se fait sur le vehicleType, jamais sur le libellé
+    // de la piste — un libellé libre ne dit rien du véhicule réel et laissait
+    // sinon un vélo être calculé à vitesse moto (isochrone ~2x trop grande).
     const factor = mode === 'motorcycle' ? 0.45 : mode === 'car' ? 0.4 : 0.45;
     return { budgetSec: clampBudgetFloor(args.baseBudgetSec * factor), factor };
   }
@@ -119,7 +111,9 @@ function toTomtomTravelModeCandidates(vehicleType: VehicleTrackVehicleType | str
       // puis fallback "car" si rejeté.
       return ['motorcycle', 'car'];
     case 'scooter':
-      // Pas de mode dédié scooter : tenter motorcycle si dispo, sinon car.
+    case 'bike':
+      // TomTom n'expose pas de mode dédié scooter/vélo : on tente motorcycle si
+      // dispo, sinon car, et on corrige la portée via computeBudgetForMode.
       return ['motorcycle', 'car'];
     case 'car':
     default:
@@ -162,7 +156,7 @@ export async function computeVehicleTomtomReachableRange(
   const budgetSec = clampBudget(input.elapsedSeconds, input.maxBudgetSeconds);
 
   const candidates = toTomtomTravelModeCandidates(input.vehicleType);
-  const profileKey = vehicleProfileKey({ vehicleType: input.vehicleType, label: input.label });
+  const profileKey = String(input.vehicleType || 'unknown');
   const rejected = unsupportedTravelModesByProfile.get(profileKey) ?? new Set<string>();
 
   const timeoutMs = (() => {
@@ -209,7 +203,6 @@ export async function computeVehicleTomtomReachableRange(
         vehicleType: input.vehicleType,
         baseBudgetSec: budgetSec,
         travelMode,
-        label: input.label,
       });
       const url = new URL(
         '/routing/1/calculateReachableRange/' + encodeURIComponent(`${lat},${lng}`) + '/json',

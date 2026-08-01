@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 
 export type PersonCaseLastKnownType = 'address' | 'poi';
-export type PersonCaseMobility = 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+export type PersonCaseMobility = 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car' | 'truck';
 export type PersonCaseSex = 'unknown' | 'female' | 'male';
 export type PersonCaseHealthStatus = 'stable' | 'fragile' | 'critique';
 
@@ -87,7 +87,12 @@ const PersonCaseSchema = new Schema<PersonCaseDoc>(
       lat: { type: Number, required: false },
       when: { type: Date, required: false },
     },
-    mobility: { type: String, required: true, enum: ['none', 'bike', 'scooter', 'motorcycle', 'car'], default: 'none' },
+    mobility: {
+      type: String,
+      required: true,
+      enum: ['none', 'bike', 'scooter', 'motorcycle', 'car', 'truck'],
+      default: 'none',
+    },
     age: { type: Number, required: false },
     sex: { type: String, required: true, enum: ['unknown', 'female', 'male'], default: 'unknown' },
     healthStatus: { type: String, required: true, enum: ['stable', 'fragile', 'critique'], default: 'stable' },

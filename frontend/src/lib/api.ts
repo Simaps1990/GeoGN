@@ -94,7 +94,7 @@ export type ApiVehicleTrackOrigin = {
 };
 
 export type ApiVehicleTrackStatus = 'active' | 'stopped' | 'expired';
-export type ApiVehicleTrackVehicleType = 'car' | 'motorcycle' | 'scooter' | 'truck' | 'unknown';
+export type ApiVehicleTrackVehicleType = 'car' | 'motorcycle' | 'scooter' | 'truck' | 'bike' | 'unknown';
 export type ApiVehicleTrackAlgorithm = 'mvp_isoline' | 'road_graph';
 
 export type ApiVehicleTrackCache = {
@@ -169,7 +169,7 @@ export type ApiPersonCase = {
     lat?: number;
     when: string | null;
   } | null;
-  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car' | 'truck';
   age: number | null;
   sex: 'unknown' | 'female' | 'male';
   healthStatus: 'stable' | 'fragile' | 'critique';
@@ -850,7 +850,7 @@ export async function upsertPersonCase(
   input: {
     lastKnown: { type: 'address' | 'poi'; query: string; poiId?: string; lng?: number; lat?: number; when?: string };
     nextClue?: { type: 'address' | 'poi'; query: string; poiId?: string; lng?: number; lat?: number; when?: string };
-    mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+    mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car' | 'truck';
     age?: number;
     sex: 'unknown' | 'female' | 'male';
     healthStatus: 'stable' | 'fragile' | 'critique';

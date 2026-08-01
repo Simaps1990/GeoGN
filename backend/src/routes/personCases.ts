@@ -23,7 +23,7 @@ type PersonCaseBody = {
     lat?: number;
     when?: string;
   };
-  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car' | 'truck';
   age?: number;
   sex: 'unknown' | 'female' | 'male';
   healthStatus: 'stable' | 'fragile' | 'critique';
@@ -197,7 +197,7 @@ export async function personCasesRoutes(app: FastifyInstance) {
       }
 
       const mobility = body?.mobility;
-      if (!['none', 'bike', 'scooter', 'motorcycle', 'car'].includes(mobility)) {
+      if (!['none', 'bike', 'scooter', 'motorcycle', 'car', 'truck'].includes(mobility)) {
         return reply.code(400).send({ error: 'MOBILITY_REQUIRED' });
       }
 
