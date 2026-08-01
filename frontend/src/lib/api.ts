@@ -245,8 +245,11 @@ export async function refreshTokens() {
     body: JSON.stringify({ refreshToken }),
   });
 
-  if (!res.ok) {
+  if (res.status === 401) {
     clearTokens();
+    return null;
+  }
+  if (!res.ok) {
     return null;
   }
 
