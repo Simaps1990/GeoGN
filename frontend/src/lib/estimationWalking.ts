@@ -242,6 +242,24 @@ export function computeLocomotorInjuryFactor(
       case 'plaie':
         factors.push(0.93);
         break;
+      case 'luxation':
+        factors.push(0.5);
+        break;
+      case 'entorse':
+        factors.push(0.7);
+        break;
+      case 'brulure':
+        factors.push(0.7);
+        break;
+      case 'hematome':
+        factors.push(0.85);
+        break;
+      case 'hypothermie':
+        factors.push(0.6);
+        break;
+      case 'deshydratation':
+        factors.push(0.75);
+        break;
       default:
         break;
     }
@@ -255,12 +273,9 @@ export function computeLocomotorInjuryFactor(
   return clamp(combined, 0.2, 1);
 }
 
-export function computeDiseaseFactor(diseases: string[] | null | undefined, weather: SimpleWeather | null): number {
+export function computeDiseaseFactor(diseases: string[] | null | undefined, _weather: SimpleWeather | null): number {
   const ids = cleanDiseases(diseases || []);
   if (!ids.length) return 1;
-
-  const t = typeof weather?.temperatureC === 'number' ? weather!.temperatureC! : null;
-  const r = typeof weather?.precipitationMm === 'number' ? weather!.precipitationMm! : null;
 
   const mapBase: Record<DiseaseId, number> = {
     diabete: 0.9,
@@ -277,13 +292,6 @@ export function computeDiseaseFactor(diseases: string[] | null | undefined, weat
   const factors: number[] = [];
   for (const id of ids) {
     let f = mapBase[id];
-    if (id === 'asthme') {
-      const cold = t !== null && t <= 10;
-      const rain = r !== null && r > 0;
-      if (cold || rain) {
-        f = 0.75;
-      }
-    }
     factors.push(f);
   }
 
@@ -333,12 +341,11 @@ export function computeWeatherFactor(
 
 export function computeNightFactor(
   isNight: boolean,
-  weather: SimpleWeather | null,
+  _weather: SimpleWeather | null,
   hasLocomotorInjury: boolean
 ): number {
   if (!isNight) return 1;
-  const r = weather?.precipitationMm;
-  let f = typeof r === 'number' && r > 0 ? 0.75 : 0.85;
+  let f = 0.85;
   if (hasLocomotorInjury) f *= 0.9;
   return f;
 }
