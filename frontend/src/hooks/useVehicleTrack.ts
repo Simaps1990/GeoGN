@@ -7,7 +7,6 @@ import {
   getVehicleTrackState,
   type ApiVehicleTrack,
   type ApiVehicleTrackStatus,
-  type ApiVehicleTrackVehicleType,
 } from '../lib/api';
 
 export const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -38,7 +37,6 @@ export type UseVehicleTrackParams = {
 };
 
 export type UseVehicleTrackResult = {
-  activeVehicleTrack: ApiVehicleTrack | null;
   hasActiveTestVehicleTrack: boolean;
   setActiveVehicleTrackId: React.Dispatch<React.SetStateAction<string | null>>;
   setShowActiveVehicleTrack: React.Dispatch<React.SetStateAction<boolean>>;
@@ -144,13 +142,6 @@ export function useVehicleTrack({
   // Indique si la liste des pistes véhicule a déjà été chargée au moins une fois
   // pour la mission courante durant cette session.
   const [vehicleTracksLoaded, setVehicleTracksLoaded] = useState(false);
-  const [vehicleTracksQuery, _setVehicleTracksQuery] = useState<{
-    status?: ApiVehicleTrackStatus;
-    vehicleType?: ApiVehicleTrackVehicleType;
-    q: string;
-    limit: number;
-    offset: number;
-  }>({ status: undefined, vehicleType: undefined, q: '', limit: 20, offset: 0 });
 
   // ID de la piste véhicule actuellement affichée sur la carte (persistée pour survivre aux rechargements).
   const [activeVehicleTrackId, setActiveVehicleTrackId] = useState<string | null>(() => {
@@ -278,7 +269,10 @@ export function useVehicleTrack({
     (async () => {
       try {
         const missionIdAtCall = selectedMissionId;
-        const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, vehicleTracksQuery);
+        // L'API sait filtrer (status / vehicleType / q / pagination) mais aucun
+        // écran ne l'expose : on demande simplement la première page. Passer des
+        // filtres ici sans UI pour les changer ne créait que de l'état mort.
+        const { tracks, total: _total } = await listVehicleTracks(missionIdAtCall, { limit: 20, offset: 0 });
         if (cancelled) return;
 
         setVehicleTracksLoaded(true);
@@ -361,11 +355,6 @@ export function useVehicleTrack({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedMissionId,
-    vehicleTracksQuery.status,
-    vehicleTracksQuery.vehicleType,
-    vehicleTracksQuery.q,
-    vehicleTracksQuery.limit,
-    vehicleTracksQuery.offset,
     // activeVehicleTrackId / vehicleTrackGeojsonById sont *écrits* par cet effet et mis à
     // jour par les événements socket à chaque tick d'isochrone: les garder en dépendances
     // relançait un listVehicleTracks complet en boucle. Ils sont lus via leurs refs.
@@ -1521,7 +1510,6 @@ export function useVehicleTrack({
   }, []);
 
   return {
-    activeVehicleTrack,
     hasActiveTestVehicleTrack,
     setActiveVehicleTrackId,
     setShowActiveVehicleTrack,

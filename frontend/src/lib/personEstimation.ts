@@ -51,6 +51,8 @@ export function computeEstimation(
 
   const mobilityBaseKmh = (() => {
     switch (personCase.mobility) {
+      case 'truck':
+        return 40;
       case 'car':
         return 45;
       case 'motorcycle':
@@ -113,11 +115,8 @@ export function computeEstimation(
     if (personCase.mobility === 'bike') {
       return clamp(v, 2, 25);
     }
-    if (
-      personCase.mobility === 'car' ||
-      personCase.mobility === 'motorcycle' ||
-      personCase.mobility === 'scooter'
-    ) {
+    if (personCase.mobility !== 'none') {
+      // car / motorcycle / scooter / truck
       return clamp(v, 15, 70);
     }
     return clamp(v, 0.2, 6.5);
@@ -140,7 +139,7 @@ export function computeEstimation(
 
   const radiusCapKm = personCase.mobility === 'none' ? 50
     : personCase.mobility === 'bike' ? 100
-    : 300; // car/motorcycle/scooter
+    : 300; // car/motorcycle/scooter/truck
   const probableKm = Math.min(d50Km, radiusCapKm);
   const maxKm = Math.min(d50Km * kDisp, radiusCapKm);
 
@@ -228,11 +227,7 @@ export function computeEstimation(
       )} h → temps de marche effectif estimé ~${effectiveHours.toFixed(1)} h (pauses + fatigue).`
     );
   }
-  if (
-    personCase.mobility === 'car' ||
-    personCase.mobility === 'motorcycle' ||
-    personCase.mobility === 'scooter'
-  ) {
+  if (personCase.mobility !== 'none' && personCase.mobility !== 'bike') {
     reasoning.push(
       "Attention: mode motorisé sans routage (OSRM / GraphHopper) – distance estimée très grossière à vol d'oiseau."
     );

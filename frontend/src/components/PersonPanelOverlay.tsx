@@ -22,7 +22,6 @@ type PersonPanelOverlayProps = {
   hasActiveTestVehicleTrack: boolean;
   estimation: any;
   mobilityLabel: (m: any) => string;
-  normalizeMobility: (m: any) => any;
   sexLabel: (s: any) => string;
   cleanDiseases: (d: any) => any;
   cleanInjuries: (i: any) => any;
@@ -50,7 +49,6 @@ type PersonPanelOverlayProps = {
 
   upsertPersonCase: (missionId: string, payload: any) => Promise<any>;
   setPersonCase: (v: any) => void;
-  isMobilityTest: (m: any) => boolean;
   isTestTrack: (t: any) => boolean;
   createVehicleTrack: (missionId: string, payload: any) => Promise<any>;
   getVehicleTrackState: (missionId: string, trackId: string) => Promise<any>;
@@ -76,7 +74,6 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
   hasActiveTestVehicleTrack,
   estimation,
   mobilityLabel,
-  normalizeMobility,
   sexLabel,
   cleanDiseases,
   cleanInjuries,
@@ -102,7 +99,6 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
   injuryOptions,
   upsertPersonCase,
   setPersonCase,
-  isMobilityTest,
   isTestTrack,
   createVehicleTrack,
   getVehicleTrackState,
@@ -228,7 +224,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                 ) : null}
                 <div className="mt-1 text-xs text-gray-600">Déplacement: {mobilityLabel(personCase.mobility)}</div>
               </div>
-              {normalizeMobility(personCase.mobility as any) === 'none' ? (
+              {personCase.mobility === 'none' ? (
                 <div className="rounded-2xl border p-3">
                   <div className="text-xs font-semibold text-gray-700">Profil</div>
                   <div className="mt-1 text-sm text-gray-900">
@@ -447,14 +443,14 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                   className="mt-1 h-10 w-full rounded-2xl border px-3 text-sm"
                 >
                   <option value="none">À pied</option>
-                  <option value="bike_test">Vélo</option>
-                  <option value="scooter_test">Scooter</option>
-                  <option value="motorcycle_test">Moto</option>
-                  <option value="car_test">Voiture</option>
-                  <option value="truck_test">Camion</option>
+                  <option value="bike">Vélo</option>
+                  <option value="scooter">Scooter</option>
+                  <option value="motorcycle">Moto</option>
+                  <option value="car">Voiture</option>
+                  <option value="truck">Camion</option>
                 </select>
               </div>
-              {normalizeMobility(personDraft.mobility as any) === 'none' ? (
+              {personDraft.mobility === 'none' ? (
                 <>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="relative">
@@ -725,8 +721,7 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                     try {
                       const ageTrimmed = personDraft.age.trim();
                       const ageParsed = ageTrimmed ? Number(ageTrimmed) : undefined;
-                      const mobilityUi = personDraft.mobility as any;
-                      const mobility = normalizeMobility(mobilityUi);
+                      const mobility = personDraft.mobility;
                       const payload = {
                         lastKnown: {
                           type: personDraft.lastKnownType,
@@ -754,33 +749,18 @@ export const PersonPanelOverlay = memo(function PersonPanelOverlay({
                       setPersonCase(saved.case);
                       setPersonEdit(false);
 
-                      if (isMobilityTest(mobilityUi) && canEditPerson) {
+                      // Tout mode motorisé (et le vélo) ouvre une piste TomTom, et
+                      // seulement elle : le disque d'estimation n'est plus calculé.
+                      // `mobility` et `vehicleType` partagent désormais le même
+                      // vocabulaire, donc plus aucun mapping à maintenir ici.
+                      if (mobility !== 'none' && canEditPerson) {
                         const whenIso = personDraft.lastKnownWhen
                           ? new Date(personDraft.lastKnownWhen).toISOString()
                           : undefined;
-                        const vehicleType =
-                          mobilityUi === 'motorcycle_test'
-                            ? 'motorcycle'
-                            : mobilityUi === 'scooter_test'
-                              ? 'scooter'
-                              : mobilityUi === 'bike_test'
-                                ? 'motorcycle'
-                                : mobilityUi === 'truck_test'
-                                  ? 'truck'
-                                  : 'car';
                         try {
                           const created = await createVehicleTrack(selectedMissionId, {
-                            label:
-                              mobilityUi === 'motorcycle_test'
-                                ? 'Moto'
-                                : mobilityUi === 'scooter_test'
-                                    ? 'Scooter'
-                                    : mobilityUi === 'bike_test'
-                                      ? 'Vélo'
-                                      : mobilityUi === 'truck_test'
-                                        ? 'Camion'
-                                        : 'Voiture',
-                            vehicleType: vehicleType as any,
+                            label: mobilityLabel(mobility),
+                            vehicleType: mobility,
                             origin: {
                               type: personDraft.lastKnownType,
                               query: address,

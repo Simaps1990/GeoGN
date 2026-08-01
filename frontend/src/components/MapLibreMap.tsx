@@ -47,9 +47,7 @@ import { useMapDraft } from '../hooks/useMapDraft';
 import {
   formatElapsedSince,
   formatHoursToHM,
-  isMobilityTest,
   mobilityLabel,
-  normalizeMobility,
   sexLabel,
   usePersonCase,
   weatherStatusLabel,
@@ -429,7 +427,6 @@ export default function MapLibreMap() {
   // en a besoin et que ses valeurs de retour sont lues plus haut dans le rendu.
   const [activityToast, setActivityToast] = useState<string | null>(null);
   const {
-    activeVehicleTrack,
     hasActiveTestVehicleTrack,
     setActiveVehicleTrackId,
     setShowActiveVehicleTrack,
@@ -648,10 +645,6 @@ export default function MapLibreMap() {
   const canEditMap = role === 'admin' || role === 'member'; // zones / POI
   const canEditPerson = isAdmin; // fiche personne / projection
 
-  // Le disque d'estimation reste affiché hors mobilité piétonne uniquement si un
-  // suivi véhicule non-TEST est actif (jamais pour une piste TEST seule).
-  const hasActiveNonTestVehicle = !!(activeVehicleTrack && !isTestTrack(activeVehicleTrack));
-
   const {
     personCase,
     setPersonCase,
@@ -702,7 +695,6 @@ export default function MapLibreMap() {
     mission,
     canEditPerson,
     pois,
-    hasActiveNonTestVehicle,
     deleteAllVehicleTracks,
     setActivityToast,
     currentUserId: user?.id ?? null,
@@ -4686,7 +4678,6 @@ export default function MapLibreMap() {
           hasActiveTestVehicleTrack={hasActiveTestVehicleTrack}
           estimation={estimation}
           mobilityLabel={mobilityLabel}
-          normalizeMobility={normalizeMobility}
           sexLabel={sexLabel}
           cleanDiseases={cleanDiseases}
           cleanInjuries={cleanInjuries}
@@ -4712,7 +4703,6 @@ export default function MapLibreMap() {
           injuryOptions={injuryOptions}
           upsertPersonCase={upsertPersonCase}
           setPersonCase={setPersonCase}
-          isMobilityTest={isMobilityTest}
           isTestTrack={isTestTrack}
           createVehicleTrack={createVehicleTrack}
           getVehicleTrackState={getVehicleTrackState}

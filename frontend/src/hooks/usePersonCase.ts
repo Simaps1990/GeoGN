@@ -13,14 +13,13 @@ import { computeEstimation, type EstimationResult } from '../lib/personEstimatio
 
 export type { EstimationResult };
 
-export type MobilityUi =
-  | ApiPersonCase['mobility']
-  | 'car_test'
-  | 'motorcycle_test'
-  | 'scooter_test'
-  | 'truck_test'
-  | 'bike_test';
-
+/**
+ * Le formulaire manipule directement les valeurs de `personCase.mobility` : chaque
+ * choix de l'UI a désormais son équivalent 1:1 côté modèle (y compris 'truck'), et
+ * `vehicleType` de la piste porte le même nom. L'ancien vocabulaire UI suffixé
+ * `_test` (car_test, truck_test, …) n'existe plus : il ne servait qu'à ce mapping,
+ * la cadence rapide du scheduler venant, elle, de `algorithm: 'road_graph'`.
+ */
 export function mobilityLabel(m: ApiPersonCase['mobility']) {
   switch (m) {
     case 'none':
@@ -33,28 +32,11 @@ export function mobilityLabel(m: ApiPersonCase['mobility']) {
       return 'Moto';
     case 'car':
       return 'Voiture';
+    case 'truck':
+      return 'Camion';
     default:
       return 'Inconnu';
   }
-}
-
-export function normalizeMobility(m: MobilityUi): ApiPersonCase['mobility'] {
-  if (m === 'car_test') return 'car';
-  if (m === 'motorcycle_test') return 'motorcycle';
-  if (m === 'scooter_test') return 'scooter';
-  if (m === 'truck_test') return 'car';
-  if (m === 'bike_test') return 'bike';
-  return m;
-}
-
-export function isMobilityTest(m: MobilityUi): boolean {
-  return (
-    m === 'car_test' ||
-    m === 'motorcycle_test' ||
-    m === 'scooter_test' ||
-    m === 'truck_test' ||
-    m === 'bike_test'
-  );
 }
 
 export function sexLabel(s: ApiPersonCase['sex']) {
@@ -116,7 +98,7 @@ export type PersonDraft = {
   lastKnownLng?: number;
   lastKnownLat?: number;
   lastKnownWhen: string;
-  mobility: 'none' | 'bike' | 'scooter' | 'motorcycle' | 'car';
+  mobility: ApiPersonCase['mobility'];
   age: string;
   sex: 'unknown' | 'female' | 'male';
   healthStatus: 'stable' | 'fragile' | 'critique';
@@ -174,8 +156,6 @@ export type UsePersonCaseParams = {
   canEditPerson: boolean;
   /** POI de la mission : alimentent l'autocomplétion « dernière position connue ». */
   pois: ApiPoi[];
-  /** Un suivi véhicule non-TEST est actif : le disque reste affiché même hors mobilité piétonne. */
-  hasActiveNonTestVehicle: boolean;
   /** Fourni par useVehicleTrack : la suppression d'une fiche purge aussi les pistes. */
   deleteAllVehicleTracks: (missionId: string) => Promise<void>;
   setActivityToast: (msg: string) => void;
@@ -191,7 +171,6 @@ export function usePersonCase({
   mission,
   canEditPerson,
   pois,
-  hasActiveNonTestVehicle,
   deleteAllVehicleTracks,
   setActivityToast,
   currentUserId,
@@ -442,7 +421,7 @@ export function usePersonCase({
   }, [personDraft.lastKnownQuery, pois]);
 
   useEffect(() => {
-    if (normalizeMobility(personDraft.mobility as any) === 'none') return;
+    if (personDraft.mobility === 'none') return;
     setDiseasesOpen(false);
     setInjuriesOpen(false);
   }, [personDraft.mobility]);
@@ -558,8 +537,12 @@ export function usePersonCase({
 
   // Source de vérité unique de l'estimation : le disque tracé sur la carte, le
   // score de risque, les besoins et le texte d'explication en sortent tous.
+  // Exclusivité stricte des deux visualisations : « À pied » → uniquement ce
+  // disque (facteurs santé/blessures) ; tout véhicule → uniquement l'isochrone
+  // TomTom (routes réelles + trafic), donc aucune estimation n'est calculée.
   const estimation = useMemo<EstimationResult | null>(() => {
     if (!personCase) return null;
+    if (personCase.mobility !== 'none') return null;
     return computeEstimation(personCase, weather as SimpleWeather | null, estimationNowMs);
   }, [personCase, weather, estimationNowMs]);
 
@@ -573,13 +556,13 @@ export function usePersonCase({
 
     const est = estimation;
 
-    // Règle métier :
-    // - Afficher le disque d'estimation si la mobilité est piétonne;
-    // - OU si un suivi véhicule non-TEST est actif;
-    // - Ne jamais l'afficher pour une piste TEST seule.
+    // Règle métier : le disque d'estimation n'existe QUE pour la mobilité
+    // piétonne. Dès qu'un véhicule est choisi, seule l'isochrone TomTom est
+    // affichée — on vide donc activement la source (et pas seulement au
+    // prochain rendu) pour ne jamais superposer les deux visualisations.
     const isPedestrian = (personCase?.mobility ?? 'none') === 'none';
 
-    if (!est || !personCase || (!isPedestrian && !hasActiveNonTestVehicle)) {
+    if (!est || !personCase || !isPedestrian) {
       src.setData({ type: 'FeatureCollection', features: [] } as any);
       return;
     }
@@ -674,9 +657,6 @@ export function usePersonCase({
     }
 
     src.setData({ type: 'FeatureCollection', features });
-    // NOTE: dépendances volontairement identiques au composant d'origine —
-    // `hasActiveNonTestVehicle` n'en fait pas partie (le disque n'est pas redessiné
-    // sur la seule apparition/disparition d'un suivi véhicule).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, personCase, estimation, styleVersion]);
 
