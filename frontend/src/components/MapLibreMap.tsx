@@ -506,6 +506,8 @@ export default function MapLibreMap() {
   const [navPickerTarget, setNavPickerTarget] = useState<{ lng: number; lat: number; title: string } | null>(null);
   const [zones, setZones] = useState<ApiZone[]>([]);
   const [mapReady, setMapReady] = useState(false);
+  // Miroir de mapReady lisible depuis les closures longue durée (listeners MapLibre).
+  const mapReadyRef = useRef(false);
   const [hiddenUserIds, setHiddenUserIds] = useState<Record<string, true>>({});
   // Compteur de version du style de carte pour forcer la resynchro des overlays (dont la zone d'estimation)
   const [styleVersion, setStyleVersion] = useState(0);
@@ -892,6 +894,10 @@ export default function MapLibreMap() {
   useEffect(() => {
     showActiveVehicleTrackRef.current = showActiveVehicleTrack;
   }, [showActiveVehicleTrack]);
+
+  useEffect(() => {
+    mapReadyRef.current = mapReady;
+  }, [mapReady]);
 
   // Quand l'utilisateur réactive l'affichage via le bouton Paw, réappliquer
   // immédiatement la dernière géométrie connue (sans attendre un tick).
@@ -3254,6 +3260,10 @@ export default function MapLibreMap() {
     return style ? cloneStyle(style) : undefined;
   }, [baseStyleIndex, baseStyles]);
 
+  // Dernier style réellement appliqué à la carte (à la création ou via setStyle),
+  // pour éviter un setStyle redondant au premier rendu.
+  const appliedStyleRef = useRef<unknown>(null);
+
   function applyMyDynamicPaint(map: MapLibreMapInstance) {
     if (!user?.id) return;
     const myColor = memberColors[user.id];
@@ -5362,6 +5372,7 @@ export default function MapLibreMap() {
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const initialStyle = currentBaseStyle ?? baseStyles[0]?.style;
+    appliedStyleRef.current = initialStyle;
 
     const map = new maplibregl.Map({
       container: mapRef.current,
@@ -5393,7 +5404,7 @@ export default function MapLibreMap() {
     };
 
     const onStyleData = () => {
-      if (!mapReady) return;
+      if (!mapReadyRef.current) return;
       // Après un changement de style (setStyle), toutes les couches custom sont perdues.
       // On recrée donc les overlays (zones, POI, estimation, etc.), on remet l'ordre,
       // puis on réapplique la visibilité de la heatmap.
@@ -5487,7 +5498,10 @@ export default function MapLibreMap() {
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, [currentBaseStyle]);
+    // La carte est créée UNE seule fois: un changement de fond de carte passe par
+    // setStyle (voir effet dédié plus bas) et non par une destruction/recréation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep scale visibility in sync with scaleEnabled
   useEffect(() => {
@@ -5520,6 +5534,10 @@ export default function MapLibreMap() {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!currentBaseStyle) return;
+    // Style déjà appliqué (création de la carte, ou re-run dû à user/memberColors):
+    // pas de setStyle redondant, qui reconstruirait inutilement toutes les couches.
+    if (appliedStyleRef.current === currentBaseStyle) return;
+    appliedStyleRef.current = currentBaseStyle;
     const c = map.getCenter();
     const fallbackView = { lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
     const view = lastViewRef.current ?? fallbackView;
