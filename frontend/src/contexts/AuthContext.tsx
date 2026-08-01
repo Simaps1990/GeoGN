@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type { ApiUser } from '../lib/api';
 import { clearTokens, getApiBaseUrl, login, me, register, setTokens } from '../lib/api';
+import { resetSocket } from '../lib/socket';
 
 const SELECTED_MISSION_KEY = 'geotacops.selectedMissionId';
 const LAST_USER_KEY = 'geotacops.lastUserId';
@@ -19,7 +20,9 @@ function clearCachedMissionState() {
         key &&
         (key.startsWith('geotacops.mapView.') ||
           key.startsWith('geogn.trace.self.') ||
-          key.startsWith('geogn.trace.others.'))
+          key.startsWith('geogn.trace.others.') ||
+          key.startsWith('geogn.pendingActions.') ||
+          key.startsWith('geogn.hiddenMembers.'))
       ) {
         toRemove.push(key);
       }
@@ -27,6 +30,10 @@ function clearCachedMissionState() {
     for (const k of toRemove) {
       localStorage.removeItem(k);
     }
+
+    // Global vehicle-track display prefs
+    localStorage.removeItem('gtc_activeVehicleTrackId');
+    localStorage.removeItem('gtc_showActiveVehicleTrack');
 
     // Pending explicit centering instructions
     sessionStorage.removeItem('geogn.centerPoi');
@@ -160,6 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 1) Nettoyage local (JWT + état mission)
     clearTokens();
     clearCachedMissionState();
+    resetSocket();
     try {
       localStorage.setItem(EXPLICIT_LOGOUT_KEY, 'true');
       localStorage.removeItem(LAST_USER_KEY);
@@ -185,6 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (localStorage.getItem(EXPLICIT_LOGOUT_KEY) === 'true') {
       clearTokens();
       clearCachedMissionState();
+      resetSocket();
       setUser(null);
       return;
     }
@@ -209,6 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (e?.message === 'NOT_FOUND') {
         clearTokens();
         clearCachedMissionState();
+        resetSocket();
         try {
           localStorage.removeItem(LAST_USER_KEY);
         } catch {
