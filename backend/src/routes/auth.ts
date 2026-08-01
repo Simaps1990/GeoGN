@@ -36,6 +36,14 @@ const AUTH_RATE_LIMIT = { config: { rateLimit: { max: 5, timeWindow: '1 minute' 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
 
+// Hash bcrypt (cost 12, comme hashPassword) d'un mot de passe factice. Utilisé pour
+// consommer le même temps CPU quand l'email est inconnu, afin de ne pas révéler
+// l'existence d'un compte par le temps de réponse.
+const DUMMY_PASSWORD_HASH = '$2a$12$lt1soyXupC3YJJ.qx9w/XuC6VSb52mcgwY9UlOa3TH5N1WRUp2bjG';
+
+const normalizeEmail = (value: unknown) =>
+  typeof value === 'string' ? value.trim().toLowerCase() : undefined;
+
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: RegisterBody }>(
     '/auth/register',
@@ -43,14 +51,15 @@ export async function authRoutes(app: FastifyInstance) {
     async (req: FastifyRequest<{ Body: RegisterBody }>, reply: FastifyReply) => {
       const { email, password, displayName } = req.body;
 
-      if (typeof email !== 'string' || !EMAIL_RE.test(email)) {
+      const normalizedEmail = normalizeEmail(email);
+      if (!normalizedEmail || !EMAIL_RE.test(normalizedEmail)) {
         return reply.code(400).send({ error: 'INVALID_EMAIL' });
       }
       if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
         return reply.code(400).send({ error: 'PASSWORD_TOO_SHORT' });
       }
 
-      const existing = await UserModel.findOne({ email }).lean();
+      const existing = await UserModel.findOne({ email: normalizedEmail }).lean();
       if (existing) {
         return reply.code(409).send({ error: 'EMAIL_ALREADY_USED' });
       }
@@ -68,7 +77,7 @@ export async function authRoutes(app: FastifyInstance) {
       const user = await UserModel.create({
         appUserId,
         displayName,
-        email,
+        email: normalizedEmail,
         passwordHash,
         createdAt: new Date(),
       });
@@ -157,12 +166,17 @@ export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: LoginBody }>('/auth/login', AUTH_RATE_LIMIT, async (req: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
     const { email, password } = req.body;
 
-    const user = await UserModel.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const candidatePassword = typeof password === 'string' ? password : '';
+    const user = normalizedEmail ? await UserModel.findOne({ email: normalizedEmail }) : null;
     if (!user) {
+      // Consomme le même coût bcrypt que le cas "utilisateur trouvé" pour ne pas
+      // révéler l'existence de l'email via le temps de réponse.
+      await verifyPassword(candidatePassword, DUMMY_PASSWORD_HASH);
       return reply.code(401).send({ error: 'INVALID_CREDENTIALS' });
     }
 
-    const ok = await verifyPassword(password, user.passwordHash);
+    const ok = await verifyPassword(candidatePassword, user.passwordHash);
     if (!ok) {
       return reply.code(401).send({ error: 'INVALID_CREDENTIALS' });
     }
@@ -185,7 +199,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: RefreshBody }>('/auth/refresh', AUTH_RATE_LIMIT, async (req: FastifyRequest<{ Body: RefreshBody }>, reply: FastifyReply) => {
     const { refreshToken } = req.body;
 
-    let payload: { sub: string };
+    let payload: { sub: string; iat?: number };
     try {
       payload = verifyRefreshToken(refreshToken);
     } catch {
@@ -199,6 +213,15 @@ export async function authRoutes(app: FastifyInstance) {
     const user = await UserModel.findById(payload.sub).lean();
     if (!user) {
       return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+    }
+
+    // Un changement de mot de passe révoque tous les refresh tokens émis avant.
+    // iat est en secondes, passwordChangedAt en millisecondes.
+    const passwordChangedAtSec = user.passwordChangedAt
+      ? Math.floor(user.passwordChangedAt.getTime() / 1000)
+      : 0;
+    if (typeof payload.iat === 'number' && payload.iat < passwordChangedAtSec) {
+      return reply.code(401).send({ error: 'REFRESH_TOKEN_REVOKED' });
     }
 
     const newAccessToken = signAccessToken(user._id.toString());
@@ -286,6 +309,7 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       user.passwordHash = await hashPassword(newPassword);
+      user.passwordChangedAt = new Date();
       await user.save();
 
       return reply.send({ ok: true });
