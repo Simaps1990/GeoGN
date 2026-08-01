@@ -110,6 +110,40 @@ export async function invitesRoutes(app: FastifyInstance) {
     }
   );
 
+  // Admin revokes a pending invite they (or another admin) sent for this mission.
+  app.delete<{ Params: { missionId: string; inviteId: string } }>(
+    '/missions/:missionId/invites/:inviteId',
+    async (req: FastifyRequest<{ Params: { missionId: string; inviteId: string } }>, reply: FastifyReply) => {
+      try {
+        requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
+
+      const { missionId, inviteId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(inviteId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
+
+      const membership = await MissionMemberModel.findOne({ missionId, userId: req.userId, removedAt: null }).lean();
+      if (!membership || membership.role !== 'admin') {
+        return reply.code(403).send({ error: 'FORBIDDEN' });
+      }
+
+      const invite = await MissionInviteModel.findOne({ _id: inviteId, missionId }).lean();
+      if (!invite) {
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
+      if (invite.status !== 'pending') {
+        return reply.code(409).send({ error: 'NOT_PENDING' });
+      }
+
+      await MissionInviteModel.updateOne({ _id: invite._id }, { $set: { status: 'revoked' } });
+      return reply.send({ ok: true });
+    }
+  );
+
   app.post<{ Params: { token: string } }>('/invites/:token/accept', async (req, reply) => {
     try {
       requireAuth(req);

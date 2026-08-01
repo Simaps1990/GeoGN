@@ -38,6 +38,45 @@ type CreateZoneBody =
 
 type UpdateZoneBody = Partial<CreateZoneBody>;
 
+type GeometryValidationError = { error: 'INVALID_POLYGON_RING' | 'INVALID_COORDINATES' | 'INVALID_CIRCLE_RADIUS' };
+
+function isFiniteNumber(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n);
+}
+
+export function isValidLngLat(lng: unknown, lat: unknown): boolean {
+  return isFiniteNumber(lng) && isFiniteNumber(lat) && lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+}
+
+// GeoJSON ring: >=4 positions (3 distinct + repeated closing point), first === last.
+export function isValidRingShape(ring: unknown): ring is number[][] {
+  if (!Array.isArray(ring) || ring.length < 4) return false;
+  if (!ring.every((pos) => Array.isArray(pos) && pos.length >= 2)) return false;
+  const first = ring[0] as number[];
+  const last = ring[ring.length - 1] as number[];
+  return first[0] === last[0] && first[1] === last[1];
+}
+
+export function validatePolygon(polygon: unknown): GeometryValidationError | null {
+  const coordinates = polygon && typeof polygon === 'object' ? (polygon as any).coordinates : undefined;
+  if (!Array.isArray(coordinates) || coordinates.length === 0) return { error: 'INVALID_POLYGON_RING' };
+  for (const ring of coordinates) {
+    if (!isValidRingShape(ring)) return { error: 'INVALID_POLYGON_RING' };
+    for (const pos of ring as number[][]) {
+      if (!isValidLngLat(pos[0], pos[1])) return { error: 'INVALID_COORDINATES' };
+    }
+  }
+  return null;
+}
+
+export function validateCircle(circle: unknown): GeometryValidationError | null {
+  const c = circle && typeof circle === 'object' ? (circle as any) : undefined;
+  const center = c?.center && typeof c.center === 'object' ? c.center : undefined;
+  if (!center || !isValidLngLat(center.lng, center.lat)) return { error: 'INVALID_COORDINATES' };
+  if (!isFiniteNumber(c.radiusMeters) || c.radiusMeters <= 0) return { error: 'INVALID_CIRCLE_RADIUS' };
+  return null;
+}
+
 async function getMembership(userId: string, missionId: string) {
   return MissionMemberModel.findOne({ missionId, userId, removedAt: null }).lean();
 }
@@ -136,6 +175,14 @@ export async function zonesRoutes(app: FastifyInstance) {
       if (!body?.title?.trim()) return reply.code(400).send({ error: 'TITLE_REQUIRED' });
       if (!body?.color?.trim()) return reply.code(400).send({ error: 'COLOR_REQUIRED' });
 
+      if (type === 'circle') {
+        const err = validateCircle(body.circle);
+        if (err) return reply.code(400).send(err);
+      } else if (type === 'polygon') {
+        const err = validatePolygon(body.polygon);
+        if (err) return reply.code(400).send(err);
+      }
+
       const now = new Date();
       const zone = await ZoneModel.create({
         missionId: new mongoose.Types.ObjectId(missionId),
@@ -228,8 +275,16 @@ export async function zonesRoutes(app: FastifyInstance) {
       if (typeof body.title === 'string') update.title = body.title.trim();
       if (typeof body.comment === 'string') update.comment = body.comment.trim();
       if (typeof body.color === 'string') update.color = body.color.trim();
-      if (body.circle) update.circle = body.circle;
-      if (body.polygon) update.polygon = body.polygon;
+      if (body.circle) {
+        const err = validateCircle(body.circle);
+        if (err) return reply.code(400).send(err);
+        update.circle = body.circle;
+      }
+      if (body.polygon) {
+        const err = validatePolygon(body.polygon);
+        if (err) return reply.code(400).send(err);
+        update.polygon = body.polygon;
+      }
       if (Array.isArray(body.sectors)) {
         update.sectors = body.sectors.map((s: any) => ({
           sectorId: new mongoose.Types.ObjectId(s.sectorId),
