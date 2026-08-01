@@ -1256,8 +1256,11 @@ export default function MapLibreMap() {
     if (isNight) kDisp += 0.1;
     kDisp = clamp(kDisp, 1.6, 4.2);
 
-    const probableKm = d50Km;
-    const maxKm = d50Km * kDisp;
+    const radiusCapKm = personCase.mobility === 'none' ? 50
+      : personCase.mobility === 'bike' ? 100
+      : 300; // car/motorcycle/scooter
+    const probableKm = Math.min(d50Km, radiusCapKm);
+    const maxKm = Math.min(d50Km * kDisp, radiusCapKm);
 
     const risk = (() => {
       let s = 0;
