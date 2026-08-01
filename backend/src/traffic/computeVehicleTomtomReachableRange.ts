@@ -9,6 +9,34 @@ type TravelMode = 'car' | 'truck' | 'motorcycle' | string;
 // Clé = profil logique (ex: scooter, truck, bike) ; valeur = modes rejetés.
 const unsupportedTravelModesByProfile = new Map<string, Set<string>>();
 
+// Budget global (partagé par toutes les missions/pistes) : protège le quota TomTom
+// contre un nombre non borné d'appels simultanés (scheduler = 1 appel par piste active
+// toutes les 20s, sans cap avant ce correctif).
+// ponytail: fixed 60s bucket, not a sliding window — simplest thing that gives a real
+// ceiling; upgrade to a sliding window if bursts right at the minute boundary matter.
+let tomtomCallWindowStartMs = Date.now();
+let tomtomCallsInWindow = 0;
+
+function getTomtomMaxCallsPerMinute(): number {
+  const raw = process.env.TOMTOM_MAX_CALLS_PER_MINUTE;
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  return 50; // default, adjustable via env — not a known-correct TomTom plan limit
+}
+
+// Consomme un slot du budget si disponible ; renvoie false si le quota de la minute
+// en cours est épuisé (auquel cas AUCUN appel TomTom ne doit être tenté).
+function tryConsumeTomtomCallBudget(): boolean {
+  const now = Date.now();
+  if (now - tomtomCallWindowStartMs >= 60_000) {
+    tomtomCallWindowStartMs = now;
+    tomtomCallsInWindow = 0;
+  }
+  if (tomtomCallsInWindow >= getTomtomMaxCallsPerMinute()) return false;
+  tomtomCallsInWindow += 1;
+  return true;
+}
+
 export interface ComputeVehicleTomtomReachableRangeInput {
   lng?: number;
   lat?: number;
@@ -165,10 +193,17 @@ export async function computeVehicleTomtomReachableRange(
     let chosenMode: string | null = null;
     let chosenData: any = null;
     let lastHttpStatus: number | null = null;
+    let rateBudgetExhausted = false;
 
     for (const travelMode of candidates) {
       if (rejected.has(travelMode)) {
         continue;
+      }
+      if (!tryConsumeTomtomCallBudget()) {
+        // Quota global épuisé pour la minute en cours : on n'appelle pas TomTom
+        // (ni pour ce candidat, ni pour un éventuel fallback).
+        rateBudgetExhausted = true;
+        break;
       }
       const scaled = computeBudgetForMode({
         vehicleType: input.vehicleType,
@@ -214,6 +249,17 @@ export async function computeVehicleTomtomReachableRange(
     }
 
     if (!chosenMode || !chosenData) {
+      if (rateBudgetExhausted) {
+        return {
+          geojson: { type: 'FeatureCollection', features: [] },
+          meta: {
+            provider: 'tomtom_reachable_range',
+            reason: 'RATE_BUDGET_EXHAUSTED',
+            travelModeCandidates: candidates,
+          },
+          budgetSec,
+        };
+      }
       return {
         geojson: { type: 'FeatureCollection', features: [] },
         meta: {
