@@ -235,7 +235,20 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
       let startedAt: Date = new Date();
       if (typeof body?.startedAt === 'string' && body.startedAt.trim()) {
         const d = new Date(body.startedAt);
-        if (!Number.isNaN(d.getTime())) startedAt = d;
+        if (Number.isNaN(d.getTime())) {
+          return reply.code(400).send({ error: 'INVALID_STARTED_AT' });
+        }
+        // Bound client-controlled startedAt: a far-future value would always win the
+        // "most recent active track wins" tie-break above and permanently block any
+        // legitimately-created track for this mission; a far-past value is almost
+        // certainly bad input rather than "the vehicle left a little while ago".
+        const nowMs = Date.now();
+        const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+        const PAST_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+        if (d.getTime() > nowMs + FUTURE_TOLERANCE_MS || d.getTime() < nowMs - PAST_TOLERANCE_MS) {
+          return reply.code(400).send({ error: 'INVALID_STARTED_AT' });
+        }
+        startedAt = d;
       }
 
       let maxDurationSeconds: number = 7200;
