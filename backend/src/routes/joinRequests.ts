@@ -497,13 +497,28 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
+      const targetMemberObjectId = new mongoose.Types.ObjectId(memberUserId);
+
       const update: any = {};
       if (typeof (req.body as any)?.color === 'string') {
         const c = (req.body as any).color.trim();
-        if (c && !isAllowedMemberColor(c)) {
-          return reply.code(400).send({ error: 'INVALID_COLOR' });
+        if (c) {
+          // The palette was tightened after this fix wave, so members coloured
+          // before that (or via the old invite-accept default) may hold a value
+          // outside it. Saving the color the member already has must stay a
+          // no-op, or every other field on this same PATCH (e.g. role) becomes
+          // impossible to change without also picking a new, allowed color.
+          const current = await MissionMemberModel.findOne({ missionId, userId: targetMemberObjectId, removedAt: null })
+            .select({ color: 1 })
+            .lean();
+          const unchanged = !!current && String((current as any).color ?? '') === c;
+          if (!unchanged) {
+            if (!isAllowedMemberColor(c)) {
+              return reply.code(400).send({ error: 'INVALID_COLOR' });
+            }
+            update.color = c;
+          }
         }
-        if (c) update.color = c;
       }
 
       if (typeof (req.body as any)?.role !== 'undefined') {
@@ -517,8 +532,6 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       if (!Object.keys(update).length) {
         return reply.code(400).send({ error: 'NO_CHANGES' });
       }
-
-      const targetMemberObjectId = new mongoose.Types.ObjectId(memberUserId);
 
       if (typeof update.role !== 'undefined' && update.role !== 'admin') {
         const targetMember = await MissionMemberModel.findOne({ missionId, userId: targetMemberObjectId, removedAt: null }).lean();

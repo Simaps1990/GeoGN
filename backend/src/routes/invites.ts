@@ -138,14 +138,22 @@ export async function invitesRoutes(app: FastifyInstance) {
     const now = new Date();
     await MissionInviteModel.updateOne({ _id: invite._id }, { $set: { status: 'accepted' } });
 
-    // Le rôle et la couleur sont toujours forcés via $set (pas $setOnInsert) :
-    // si l'upsert matche un MissionMember soft-deleted laissé par un retrait
-    // précédent, on ne veut surtout pas hériter de son ancien rôle (ex: admin).
-    // Une invitation ne redonne jamais mieux que le rôle le plus bas.
     const existingMember = await MissionMemberModel.findOne({
       missionId: invite.missionId,
       userId: invite.invitedUserId,
     }).lean();
+
+    // Already an active member (invite went stale while they joined some other
+    // way): a stale invite must never touch their role/color, nor use this
+    // upsert to bypass the last-admin safeguard the role-change route enforces.
+    if (existingMember && existingMember.removedAt == null) {
+      return reply.send({ ok: true });
+    }
+
+    // Le rôle et la couleur sont toujours forcés via $set (pas $setOnInsert) :
+    // si l'upsert matche un MissionMember soft-deleted laissé par un retrait
+    // précédent, on ne veut surtout pas hériter de son ancien rôle (ex: admin).
+    // Une invitation ne redonne jamais mieux que le rôle par défaut d'un membre.
     const existingColor = existingMember?.color ? String((existingMember as any).color).trim() : '';
     const memberColor =
       existingColor && isAllowedMemberColor(existingColor)
@@ -163,7 +171,7 @@ export async function invitesRoutes(app: FastifyInstance) {
           removedAt: null,
           joinedAt: now,
           isActive: true,
-          role: 'viewer',
+          role: 'member',
           color: memberColor,
         },
       },
@@ -172,7 +180,7 @@ export async function invitesRoutes(app: FastifyInstance) {
 
     app.io?.to(`mission:${invite.missionId}`).emit('member:updated', {
       missionId: invite.missionId.toString(),
-      member: { userId: invite.invitedUserId.toString(), role: 'viewer', color: memberColor },
+      member: { userId: invite.invitedUserId.toString(), role: 'member', color: memberColor },
     });
 
     // Ajoute le contact dans les deux sens (inviteur <-> invité), comme dans
