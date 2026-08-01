@@ -6,7 +6,7 @@ export function isAllowedOrigin(origin: string): boolean {
 
   try {
     const { hostname } = new URL(origin);
-    if (hostname.endsWith('.netlify.app')) return true;
+    if (hostname === 'geogn2.netlify.app' || hostname.endsWith('.geogn2.netlify.app')) return true;
     if (isDev && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
   } catch {
     return false;
