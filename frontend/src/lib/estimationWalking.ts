@@ -443,7 +443,15 @@ export function computeMedicationFactor(medications: string[] | null | undefined
     .map((m) => factors[m]);
 
   if (!vals.length) return 1;
-  return Math.min(...vals);
+
+  // Combine multiple simultaneous medications/substances the same way
+  // computeDiseaseFactor does (systemic effects stacking, not per-body-part
+  // like computeLocomotorInjuryFactor) — e.g. a benzodiazepine + alcohol
+  // combination is more impairing than either alone, not identical to alone.
+  const minF = Math.min(...vals);
+  const n = vals.length;
+  const combined = minF * Math.pow(0.97, n - 1);
+  return clamp(combined, 0.35, 1);
 }
 
 export function computeEffectiveWalkingKmh(

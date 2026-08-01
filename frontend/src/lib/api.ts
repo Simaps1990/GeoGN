@@ -215,18 +215,28 @@ export function clearTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
-async function rawFetch(path: string, init?: RequestInit) {
+// Field connections are often degraded mobile networks: a slow-but-successful
+// request shouldn't be killed and treated the same as a hung one. 20s is a
+// more forgiving default than the old hardcoded 10s; call sites with a known
+// legitimately-slow request (e.g. one that waits on an external routing API)
+// can override via the `timeoutMs` option.
+export const DEFAULT_FETCH_TIMEOUT_MS = 20000;
+
+type FetchOptions = RequestInit & { timeoutMs?: number };
+
+async function rawFetch(path: string, init?: FetchOptions) {
+  const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, ...rest } = init ?? {};
   const url = `${getApiBaseUrl()}${path}`;
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 10000);
-  const hasBody = init?.body != null;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const hasBody = rest.body != null;
   try {
     return await fetch(url, {
-      ...init,
-      signal: init?.signal ?? controller.signal,
+      ...rest,
+      signal: rest.signal ?? controller.signal,
       headers: {
         ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-        ...(init?.headers ?? {}),
+        ...(rest.headers ?? {}),
       },
     });
   } catch (e: any) {
@@ -273,7 +283,7 @@ export async function refreshTokens() {
   }
 }
 
-export async function apiFetch(path: string, init?: RequestInit) {
+export async function apiFetch(path: string, init?: FetchOptions) {
   const accessToken = getAccessToken();
   const res = await rawFetch(path, {
     ...init,
@@ -407,6 +417,10 @@ export async function createVehicleTrack(
   const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/vehicle-tracks`, {
     method: 'POST',
     body: JSON.stringify(input),
+    // This endpoint can synchronously await an external routing/traffic API
+    // call (TomTom reachable-range) before responding — give it more room
+    // than the default REST timeout.
+    timeoutMs: 30000,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
