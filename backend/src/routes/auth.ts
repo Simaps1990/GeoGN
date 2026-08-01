@@ -44,6 +44,13 @@ const DUMMY_PASSWORD_HASH = '$2a$12$lt1soyXupC3YJJ.qx9w/XuC6VSb52mcgwY9UlOa3TH5N
 const normalizeEmail = (value: unknown) =>
   typeof value === 'string' ? value.trim().toLowerCase() : undefined;
 
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Case-insensitive exact match. Login/register normalize new emails to lowercase,
+// but accounts created before that existed may still hold a mixed-case email.
+const findUserByEmailCI = (email: string) =>
+  UserModel.findOne({ email: { $regex: `^${escapeRegex(email)}$`, $options: 'i' } });
+
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: RegisterBody }>(
     '/auth/register',
@@ -59,7 +66,7 @@ export async function authRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'PASSWORD_TOO_SHORT' });
       }
 
-      const existing = await UserModel.findOne({ email: normalizedEmail }).lean();
+      const existing = await findUserByEmailCI(normalizedEmail).lean();
       if (existing) {
         return reply.code(409).send({ error: 'EMAIL_ALREADY_USED' });
       }
@@ -168,7 +175,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     const normalizedEmail = normalizeEmail(email);
     const candidatePassword = typeof password === 'string' ? password : '';
-    const user = normalizedEmail ? await UserModel.findOne({ email: normalizedEmail }) : null;
+    const user = normalizedEmail ? await findUserByEmailCI(normalizedEmail) : null;
     if (!user) {
       // Consomme le même coût bcrypt que le cas "utilisateur trouvé" pour ne pas
       // révéler l'existence de l'email via le temps de réponse.
@@ -312,7 +319,13 @@ export async function authRoutes(app: FastifyInstance) {
       user.passwordChangedAt = new Date();
       await user.save();
 
-      return reply.send({ ok: true });
+      // passwordChangedAt revokes every refresh token issued before this instant,
+      // including the one the caller is currently holding — reissue a fresh pair
+      // so this request doesn't end in a surprise logout.
+      const accessToken = signAccessToken(user._id.toString());
+      const refreshToken = signRefreshToken(user._id.toString());
+
+      return reply.send({ ok: true, accessToken, refreshToken });
     }
   );
 }

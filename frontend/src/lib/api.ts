@@ -236,26 +236,41 @@ async function rawFetch(path: string, init?: RequestInit) {
   }
 }
 
+let inFlightRefresh: Promise<string | null> | null = null;
+
+// The auth-sensitive routes (including /auth/refresh itself) are rate-limited.
+// Every concurrent 401 used to fire its own refresh call; sharing one in-flight
+// request means N simultaneous 401s cost one call instead of N.
 export async function refreshTokens() {
-  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-  if (!refreshToken) return null;
+  if (inFlightRefresh) return inFlightRefresh;
 
-  const res = await rawFetch('/auth/refresh', {
-    method: 'POST',
-    body: JSON.stringify({ refreshToken }),
-  });
+  inFlightRefresh = (async () => {
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    if (!refreshToken) return null;
 
-  if (res.status === 401) {
-    clearTokens();
-    return null;
+    const res = await rawFetch('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (res.status === 401) {
+      clearTokens();
+      return null;
+    }
+    if (!res.ok) {
+      return null;
+    }
+
+    const data = (await res.json()) as RefreshResponse;
+    setTokens(data.accessToken, data.refreshToken);
+    return data.accessToken;
+  })();
+
+  try {
+    return await inFlightRefresh;
+  } finally {
+    inFlightRefresh = null;
   }
-  if (!res.ok) {
-    return null;
-  }
-
-  const data = (await res.json()) as RefreshResponse;
-  setTokens(data.accessToken, data.refreshToken);
-  return data.accessToken;
 }
 
 export async function apiFetch(path: string, init?: RequestInit) {
@@ -335,7 +350,12 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? 'CHANGE_PASSWORD_FAILED');
   }
-  return (await res.json()) as { ok: true };
+  const data = (await res.json()) as { ok: true; accessToken: string; refreshToken: string };
+  // Changing the password revokes every refresh token issued before it, including
+  // the one this session is currently holding — swap in the fresh pair the backend
+  // just issued so this doesn't end in a surprise logout.
+  setTokens(data.accessToken, data.refreshToken);
+  return data;
 }
 
 export async function listVehicleTracks(
