@@ -117,367 +117,382 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
         // reflète l'instant réel du calcul et non l'instant de démarrage du tick.
         const now = new Date();
 
-        // Sécurité supplémentaire : il est possible qu'une piste ait été supprimée ou
-        // passée en "stopped" entre le moment où on a listé les pistes actives et
-        // maintenant. On revérifie donc qu'elle existe encore et qu'elle est toujours
-        // "active" avant de lancer un calcul TomTom potentiellement coûteux.
-        const fresh = await VehicleTrackModel.findOne({ _id: track._id, status: 'active' })
-          .select({
-            missionId: 1,
-            startedAt: 1,
-            maxDurationSeconds: 1,
-            trafficRefreshSeconds: 1,
-            lastComputedAt: 1,
-            origin: 1,
-            vehicleType: 1,
-            algorithm: 1,
-            label: 1,
-            cache: 1,
-          })
-          .lean();
+        try {
+          // Sécurité supplémentaire : il est possible qu'une piste ait été supprimée ou
+          // passée en "stopped" entre le moment où on a listé les pistes actives et
+          // maintenant. On revérifie donc qu'elle existe encore et qu'elle est toujours
+          // "active" avant de lancer un calcul TomTom potentiellement coûteux.
+          const fresh = await VehicleTrackModel.findOne({ _id: track._id, status: 'active' })
+            .select({
+              missionId: 1,
+              startedAt: 1,
+              maxDurationSeconds: 1,
+              trafficRefreshSeconds: 1,
+              lastComputedAt: 1,
+              origin: 1,
+              vehicleType: 1,
+              algorithm: 1,
+              label: 1,
+              cache: 1,
+            })
+            .lean();
 
-        if (!fresh) {
-          continue;
-        }
-
-        const trackId = fresh._id.toString();
-        const missionId = (fresh.missionId as mongoose.Types.ObjectId).toString();
-
-        const startedAtMs = fresh.startedAt instanceof Date ? fresh.startedAt.getTime() : now.getTime();
-        const elapsedSeconds = clampElapsed(
-          (now.getTime() - startedAtMs) / 1000,
-          fresh.maxDurationSeconds ?? 3600
-        );
-
-        const originWhenMs = (() => {
-          const raw = (fresh as any)?.origin?.when;
-          if (raw instanceof Date) return raw.getTime();
-          if (typeof raw === 'string') {
-            const d = new Date(raw);
-            if (!Number.isNaN(d.getTime())) return d.getTime();
+          if (!fresh) {
+            continue;
           }
-          return null;
-        })();
 
-        const baseElapsedSeconds =
-          typeof originWhenMs === 'number' && Number.isFinite(originWhenMs) && originWhenMs <= startedAtMs
-            ? Math.max(0, Math.floor((startedAtMs - originWhenMs) / 1000))
-            : 0;
+          const trackId = fresh._id.toString();
+          const missionId = (fresh.missionId as mongoose.Types.ObjectId).toString();
 
-        const simulatedElapsedSeconds = baseElapsedSeconds + elapsedSeconds;
+          const startedAtMs = fresh.startedAt instanceof Date ? fresh.startedAt.getTime() : now.getTime();
+          const elapsedSeconds = clampElapsed(
+            (now.getTime() - startedAtMs) / 1000,
+            fresh.maxDurationSeconds ?? 3600
+          );
 
-        const maxDurationSeconds = Number.isFinite(fresh.maxDurationSeconds)
-          ? Math.min(fresh.maxDurationSeconds, 7200)
-          : 7200;
+          const originWhenMs = (() => {
+            const raw = (fresh as any)?.origin?.when;
+            if (raw instanceof Date) return raw.getTime();
+            if (typeof raw === 'string') {
+              const d = new Date(raw);
+              if (!Number.isNaN(d.getTime())) return d.getTime();
+            }
+            return null;
+          })();
 
-        if (elapsedSeconds >= maxDurationSeconds) {
+          const baseElapsedSeconds =
+            typeof originWhenMs === 'number' && Number.isFinite(originWhenMs) && originWhenMs <= startedAtMs
+              ? Math.max(0, Math.floor((startedAtMs - originWhenMs) / 1000))
+              : 0;
+
+          const simulatedElapsedSeconds = baseElapsedSeconds + elapsedSeconds;
+
+          const maxDurationSeconds = Number.isFinite(fresh.maxDurationSeconds)
+            ? Math.min(fresh.maxDurationSeconds, 7200)
+            : 7200;
+
+          if (elapsedSeconds >= maxDurationSeconds) {
+            const updated = await VehicleTrackModel.findOneAndUpdate(
+              { _id: fresh._id, status: 'active' },
+              { $set: { status: 'expired', lastComputedAt: now } },
+              { new: true }
+            ).lean();
+
+            if (updated) {
+              app.io?.to(`mission:${missionId}`).emit('vehicle-track:expired', {
+                missionId,
+                trackId,
+                status: 'expired',
+              });
+            }
+
+            continue;
+          }
+
+          const label = typeof (fresh as any).label === 'string' ? ((fresh as any).label as string) : '';
+          const isTestTrack = /TEST/i.test(label);
+          // Les pistes road_graph (celles que tu crées côté UI) doivent rester à cadence rapide,
+          // même si on ne met plus "TEST" dans le label affiché.
+          const isFastTrack = isTestTrack || fresh.algorithm === 'road_graph';
+
+          const lastComputedAtMs = fresh.lastComputedAt instanceof Date ? fresh.lastComputedAt.getTime() : 0;
+          const refreshSeconds = isFastTrack
+            ? 20
+            : Number.isFinite(fresh.trafficRefreshSeconds)
+              ? Math.max(10, Math.min(3600, fresh.trafficRefreshSeconds))
+              : 60;
+
+          // Pour les pistes TEST, on veut que le premier calcul réel ne se produise
+          // qu'après ~20s d'écoulement, puis toutes les ~20s ensuite.
+          if (isFastTrack) {
+            // Pas encore de calcul : on attend au moins refreshSeconds d'elapsed avant de lancer TomTom.
+            if (!lastComputedAtMs && elapsedSeconds < refreshSeconds) {
+              continue;
+            }
+            // Calculs suivants : on respecte le délai minimum entre deux requêtes.
+            if (lastComputedAtMs && now.getTime() - lastComputedAtMs < refreshSeconds * 1000) {
+              continue;
+            }
+          } else {
+            if (lastComputedAtMs && now.getTime() - lastComputedAtMs < refreshSeconds * 1000) {
+              continue;
+            }
+          }
+
+          const origin = fresh.origin as any;
+          const lng = typeof origin?.lng === 'number' ? origin.lng : undefined;
+          const lat = typeof origin?.lat === 'number' ? origin.lat : undefined;
+
+          let geojson: any;
+          let meta: any;
+
+          if (isTestTrack) {
+            // Nouveau comportement pour les pistes TEST : on utilise uniquement
+            // TomTom Calculate Reachable Range pour produire une isochrone,
+            // avec un budget croissant en pas de 20 secondes (aligné sur le
+            // scheduler), afin d'avoir une forme monotone et une clé différente
+            // à chaque tick.
+            try {
+              const budgetSeconds = (() => {
+                const step = Math.max(1, refreshSeconds);
+                const maxSec = Number.isFinite(fresh.maxDurationSeconds)
+                  ? Math.max(1, fresh.maxDurationSeconds)
+                  : maxDurationSeconds;
+                // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
+                // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
+                const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
+
+                // Si un budget a déjà été calculé (ex: calcul immédiat à la création),
+                // on force l'avancement au palier suivant pour éviter 20 -> 20.
+                const prevBudget = (() => {
+                  const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
+                  if (typeof metaBudget === 'number' && Number.isFinite(metaBudget)) return metaBudget;
+                  const cacheElapsed = (fresh as any)?.cache?.elapsedSeconds;
+                  if (typeof cacheElapsed === 'number' && Number.isFinite(cacheElapsed)) return cacheElapsed;
+                  return null;
+                })();
+
+                let next = Math.max(step, stepped);
+                if (typeof prevBudget === 'number' && next <= prevBudget) {
+                  next = prevBudget + step;
+                }
+                return Math.min(maxSec, next);
+              })();
+
+              const result = await computeVehicleTomtomReachableRange({
+                lng,
+                lat,
+                elapsedSeconds: budgetSeconds,
+                vehicleType: fresh.vehicleType,
+                maxBudgetSeconds: budgetSeconds,
+                label,
+              });
+
+              if (!result.geojson?.features?.length) {
+                throw new Error(`TOMTOM_EMPTY_RESULT:${result.meta?.reason ?? 'UNKNOWN'}`);
+              }
+
+              geojson = result.geojson;
+              meta = {
+                ...result.meta,
+                provider: 'tomtom_reachable_range',
+                budgetSec: budgetSeconds,
+              };
+
+              // S'assurer que le GeoJSON embarque aussi le même budgetSec (utilisé côté front).
+              try {
+                if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
+                  geojson.features[0].properties.budgetSec = budgetSeconds;
+                }
+              } catch {
+                // ignore
+              }
+
+              // Historisation en base pour les traques TEST.
+              try {
+                await HuntIsochroneModel.create({
+                  trackId: fresh._id,
+                  missionId: fresh.missionId,
+                  ts: now,
+                  budgetSec: budgetSeconds,
+                  geojson,
+                  providerMeta: result.meta,
+                });
+              } catch (e) {
+                app.log.error(
+                  { missionId, trackId, label, err: e },
+                  'vehicleTrackScheduler hunt isochrone insert failed'
+                );
+              }
+
+              app.log.info(
+                {
+                  missionId,
+                  trackId,
+                  label,
+                  vehicleType: track.vehicleType,
+                  algorithm: track.algorithm,
+                  mode: 'tomtom_reachable_range',
+                  lng,
+                  lat,
+                  elapsedSeconds,
+                  budgetSec: budgetSeconds,
+                },
+                'vehicleTrackScheduler tomtom_reachable_range computed'
+              );
+            } catch (e) {
+              app.log.error(
+                {
+                  missionId,
+                  trackId,
+                  label,
+                  vehicleType: track.vehicleType,
+                  algorithm: track.algorithm,
+                  lng,
+                  lat,
+                  elapsedSeconds,
+                  err: e,
+                },
+                'vehicleTrackScheduler tomtom_reachable_range compute failed'
+              );
+
+              const fallback = await computeVehicleIsoline({
+                lng,
+                lat,
+                elapsedSeconds,
+                vehicleType: track.vehicleType,
+              });
+              geojson = fallback.geojson;
+              meta = {
+                ...fallback.meta,
+                provider: 'tomtom_reachable_range_fallback_circle',
+              };
+            }
+          } else if (fresh.algorithm === 'road_graph') {
+            // Legacy "tomtom_tiles" grid mode is disabled.
+            // For road_graph tracks we also use TomTom Reachable Range so the frontend
+            // always receives a polygon isochrone with a monotonically increasing budget.
+            try {
+              const budgetSeconds = (() => {
+                const step = Math.max(10, refreshSeconds);
+                const maxSec = Number.isFinite(fresh.maxDurationSeconds)
+                  ? Math.max(1, fresh.maxDurationSeconds)
+                  : maxDurationSeconds;
+                // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
+                // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
+                const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
+
+                const prevBudget = (() => {
+                  const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
+                  if (typeof metaBudget === 'number' && Number.isFinite(metaBudget)) return metaBudget;
+                  const cacheElapsed = (fresh as any)?.cache?.elapsedSeconds;
+                  if (typeof cacheElapsed === 'number' && Number.isFinite(cacheElapsed)) return cacheElapsed;
+                  return null;
+                })();
+
+                let next = Math.max(step, stepped);
+                if (typeof prevBudget === 'number' && next <= prevBudget) {
+                  next = prevBudget + step;
+                }
+                return Math.min(maxSec, next);
+              })();
+
+              const result = await computeVehicleTomtomReachableRange({
+                lng,
+                lat,
+                elapsedSeconds: budgetSeconds,
+                maxBudgetSeconds: budgetSeconds,
+                vehicleType: fresh.vehicleType,
+                label,
+              });
+
+              if (!result.geojson?.features?.length) {
+                throw new Error(`TOMTOM_EMPTY_RESULT:${result.meta?.reason ?? 'UNKNOWN'}`);
+              }
+
+              geojson = result.geojson;
+              meta = {
+                ...result.meta,
+                provider: 'tomtom_reachable_range',
+                budgetSec: budgetSeconds,
+              };
+
+              try {
+                if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
+                  geojson.features[0].properties.budgetSec = budgetSeconds;
+                }
+              } catch {
+                // ignore
+              }
+
+              app.log.info(
+                {
+                  missionId,
+                  trackId,
+                  label,
+                  vehicleType: track.vehicleType,
+                  algorithm: track.algorithm,
+                  mode: 'tomtom_reachable_range',
+                  lng,
+                  lat,
+                  elapsedSeconds,
+                  budgetSec: budgetSeconds,
+                },
+                'vehicleTrackScheduler tomtom_reachable_range computed'
+              );
+            } catch (e) {
+              app.log.error(
+                {
+                  missionId,
+                  trackId,
+                  label,
+                  vehicleType: track.vehicleType,
+                  algorithm: track.algorithm,
+                  lng,
+                  lat,
+                  elapsedSeconds,
+                  err: e,
+                },
+                'vehicleTrackScheduler tomtom_reachable_range compute failed'
+              );
+
+              const fallback = await computeVehicleIsoline({
+                lng,
+                lat,
+                elapsedSeconds,
+                vehicleType: track.vehicleType,
+              });
+              geojson = fallback.geojson;
+              meta = {
+                ...fallback.meta,
+                provider: 'tomtom_reachable_range_fallback_circle',
+              };
+            }
+          } else {
+            const fallback = await computeVehicleIsoline({
+              lng,
+              lat,
+              elapsedSeconds,
+              vehicleType: fresh.vehicleType,
+            });
+            geojson = fallback.geojson;
+            meta = fallback.meta;
+          }
+
           const updated = await VehicleTrackModel.findOneAndUpdate(
             { _id: fresh._id, status: 'active' },
-            { $set: { status: 'expired', lastComputedAt: now } },
+            {
+              $set: {
+                lastComputedAt: now,
+                cache: {
+                  computedAt: now,
+                  elapsedSeconds,
+                  payloadGeojson: geojson,
+                  meta,
+                },
+              },
+            },
             { new: true }
           ).lean();
 
           if (updated) {
-            app.io?.to(`mission:${missionId}`).emit('vehicle-track:expired', {
+            app.io?.to(`mission:${missionId}`).emit('vehicle-track:updated', {
               missionId,
               trackId,
-              status: 'expired',
-            });
-          }
-
-          continue;
-        }
-
-        const label = typeof (fresh as any).label === 'string' ? ((fresh as any).label as string) : '';
-        const isTestTrack = /TEST/i.test(label);
-        // Les pistes road_graph (celles que tu crées côté UI) doivent rester à cadence rapide,
-        // même si on ne met plus "TEST" dans le label affiché.
-        const isFastTrack = isTestTrack || fresh.algorithm === 'road_graph';
-
-        const lastComputedAtMs = fresh.lastComputedAt instanceof Date ? fresh.lastComputedAt.getTime() : 0;
-        const refreshSeconds = isFastTrack
-          ? 20
-          : Number.isFinite(fresh.trafficRefreshSeconds)
-            ? Math.max(10, Math.min(3600, fresh.trafficRefreshSeconds))
-            : 60;
-
-        // Pour les pistes TEST, on veut que le premier calcul réel ne se produise
-        // qu'après ~20s d'écoulement, puis toutes les ~20s ensuite.
-        if (isFastTrack) {
-          // Pas encore de calcul : on attend au moins refreshSeconds d'elapsed avant de lancer TomTom.
-          if (!lastComputedAtMs && elapsedSeconds < refreshSeconds) {
-            continue;
-          }
-          // Calculs suivants : on respecte le délai minimum entre deux requêtes.
-          if (lastComputedAtMs && now.getTime() - lastComputedAtMs < refreshSeconds * 1000) {
-            continue;
-          }
-        } else {
-          if (lastComputedAtMs && now.getTime() - lastComputedAtMs < refreshSeconds * 1000) {
-            continue;
-          }
-        }
-
-        const origin = fresh.origin as any;
-        const lng = typeof origin?.lng === 'number' ? origin.lng : undefined;
-        const lat = typeof origin?.lat === 'number' ? origin.lat : undefined;
-
-        let geojson: any;
-        let meta: any;
-
-        if (isTestTrack) {
-          // Nouveau comportement pour les pistes TEST : on utilise uniquement
-          // TomTom Calculate Reachable Range pour produire une isochrone,
-          // avec un budget croissant en pas de 20 secondes (aligné sur le
-          // scheduler), afin d'avoir une forme monotone et une clé différente
-          // à chaque tick.
-          try {
-            const budgetSeconds = (() => {
-              const step = Math.max(1, refreshSeconds);
-              const maxSec = Number.isFinite(fresh.maxDurationSeconds)
-                ? Math.max(1, fresh.maxDurationSeconds)
-                : maxDurationSeconds;
-              // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
-              // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
-              const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
-
-              // Si un budget a déjà été calculé (ex: calcul immédiat à la création),
-              // on force l'avancement au palier suivant pour éviter 20 -> 20.
-              const prevBudget = (() => {
-                const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
-                if (typeof metaBudget === 'number' && Number.isFinite(metaBudget)) return metaBudget;
-                const cacheElapsed = (fresh as any)?.cache?.elapsedSeconds;
-                if (typeof cacheElapsed === 'number' && Number.isFinite(cacheElapsed)) return cacheElapsed;
-                return null;
-              })();
-
-              let next = Math.max(step, stepped);
-              if (typeof prevBudget === 'number' && next <= prevBudget) {
-                next = prevBudget + step;
-              }
-              return Math.min(maxSec, next);
-            })();
-
-            const result = await computeVehicleTomtomReachableRange({
-              lng,
-              lat,
-              elapsedSeconds: budgetSeconds,
-              vehicleType: fresh.vehicleType,
-              maxBudgetSeconds: budgetSeconds,
-              label,
-            });
-
-            geojson = result.geojson;
-            meta = {
-              ...result.meta,
-              provider: 'tomtom_reachable_range',
-              budgetSec: budgetSeconds,
-            };
-
-            // S'assurer que le GeoJSON embarque aussi le même budgetSec (utilisé côté front).
-            try {
-              if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
-                geojson.features[0].properties.budgetSec = budgetSeconds;
-              }
-            } catch {
-              // ignore
-            }
-
-            // Historisation en base pour les traques TEST.
-            try {
-              await HuntIsochroneModel.create({
-                trackId: fresh._id,
-                missionId: fresh.missionId,
-                ts: now,
-                budgetSec: budgetSeconds,
-                geojson,
-                providerMeta: result.meta,
-              });
-            } catch (e) {
-              app.log.error(
-                { missionId, trackId, label, err: e },
-                'vehicleTrackScheduler hunt isochrone insert failed'
-              );
-            }
-
-            app.log.info(
-              {
-                missionId,
-                trackId,
-                label,
-                vehicleType: track.vehicleType,
-                algorithm: track.algorithm,
-                mode: 'tomtom_reachable_range',
-                lng,
-                lat,
-                elapsedSeconds,
-                budgetSec: budgetSeconds,
-              },
-              'vehicleTrackScheduler tomtom_reachable_range computed'
-            );
-          } catch (e) {
-            app.log.error(
-              {
-                missionId,
-                trackId,
-                label,
-                vehicleType: track.vehicleType,
-                algorithm: track.algorithm,
-                lng,
-                lat,
-                elapsedSeconds,
-                err: e,
-              },
-              'vehicleTrackScheduler tomtom_reachable_range compute failed'
-            );
-
-            const fallback = await computeVehicleIsoline({
-              lng,
-              lat,
-              elapsedSeconds,
-              vehicleType: track.vehicleType,
-            });
-            geojson = fallback.geojson;
-            meta = {
-              ...fallback.meta,
-              provider: 'tomtom_reachable_range_fallback_circle',
-            };
-          }
-        } else if (fresh.algorithm === 'road_graph') {
-          // Legacy "tomtom_tiles" grid mode is disabled.
-          // For road_graph tracks we also use TomTom Reachable Range so the frontend
-          // always receives a polygon isochrone with a monotonically increasing budget.
-          try {
-            const budgetSeconds = (() => {
-              const step = Math.max(10, refreshSeconds);
-              const maxSec = Number.isFinite(fresh.maxDurationSeconds)
-                ? Math.max(1, fresh.maxDurationSeconds)
-                : maxDurationSeconds;
-              // IMPORTANT: on prend le palier supérieur (ceil) pour éviter de publier
-              // une isochrone "en retard" quand le tick ou l'appel TomTom arrive tard.
-              const stepped = Math.ceil(simulatedElapsedSeconds / step) * step;
-
-              const prevBudget = (() => {
-                const metaBudget = (fresh as any)?.cache?.meta?.budgetSec;
-                if (typeof metaBudget === 'number' && Number.isFinite(metaBudget)) return metaBudget;
-                const cacheElapsed = (fresh as any)?.cache?.elapsedSeconds;
-                if (typeof cacheElapsed === 'number' && Number.isFinite(cacheElapsed)) return cacheElapsed;
-                return null;
-              })();
-
-              let next = Math.max(step, stepped);
-              if (typeof prevBudget === 'number' && next <= prevBudget) {
-                next = prevBudget + step;
-              }
-              return Math.min(maxSec, next);
-            })();
-
-            const result = await computeVehicleTomtomReachableRange({
-              lng,
-              lat,
-              elapsedSeconds: budgetSeconds,
-              maxBudgetSeconds: budgetSeconds,
-              vehicleType: fresh.vehicleType,
-              label,
-            });
-
-            geojson = result.geojson;
-            meta = {
-              ...result.meta,
-              provider: 'tomtom_reachable_range',
-              budgetSec: budgetSeconds,
-            };
-
-            try {
-              if (geojson?.features?.[0]?.properties && typeof geojson.features[0].properties === 'object') {
-                geojson.features[0].properties.budgetSec = budgetSeconds;
-              }
-            } catch {
-              // ignore
-            }
-
-            app.log.info(
-              {
-                missionId,
-                trackId,
-                label,
-                vehicleType: track.vehicleType,
-                algorithm: track.algorithm,
-                mode: 'tomtom_reachable_range',
-                lng,
-                lat,
-                elapsedSeconds,
-                budgetSec: budgetSeconds,
-              },
-              'vehicleTrackScheduler tomtom_reachable_range computed'
-            );
-          } catch (e) {
-            app.log.error(
-              {
-                missionId,
-                trackId,
-                label,
-                vehicleType: track.vehicleType,
-                algorithm: track.algorithm,
-                lng,
-                lat,
-                elapsedSeconds,
-                err: e,
-              },
-              'vehicleTrackScheduler tomtom_reachable_range compute failed'
-            );
-
-            const fallback = await computeVehicleIsoline({
-              lng,
-              lat,
-              elapsedSeconds,
-              vehicleType: track.vehicleType,
-            });
-            geojson = fallback.geojson;
-            meta = {
-              ...fallback.meta,
-              provider: 'tomtom_reachable_range_fallback_circle',
-            };
-          }
-        } else {
-          const fallback = await computeVehicleIsoline({
-            lng,
-            lat,
-            elapsedSeconds,
-            vehicleType: fresh.vehicleType,
-          });
-          geojson = fallback.geojson;
-          meta = fallback.meta;
-        }
-
-        const updated = await VehicleTrackModel.findOneAndUpdate(
-          { _id: fresh._id, status: 'active' },
-          {
-            $set: {
-              lastComputedAt: now,
+              status: updated.status,
               cache: {
-                computedAt: now,
+                computedAt: now.toISOString(),
                 elapsedSeconds,
                 payloadGeojson: geojson,
                 meta,
               },
-            },
-          },
-          { new: true }
-        ).lean();
-
-        if (updated) {
-          app.io?.to(`mission:${missionId}`).emit('vehicle-track:updated', {
-            missionId,
-            trackId,
-            status: updated.status,
-            cache: {
-              computedAt: now.toISOString(),
-              elapsedSeconds,
-              payloadGeojson: geojson,
-              meta,
-            },
-          });
+            });
+          }
+        } catch (e) {
+          const trackId = track._id?.toString?.();
+          const missionId = (track.missionId as mongoose.Types.ObjectId)?.toString?.();
+          app.log.error({ missionId, trackId, err: e }, 'vehicleTrackScheduler track processing failed, skipping');
+          continue;
         }
       }
     } catch (e) {

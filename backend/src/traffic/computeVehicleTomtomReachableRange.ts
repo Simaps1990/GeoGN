@@ -190,9 +190,15 @@ export async function computeVehicleTomtomReachableRange(
       lastHttpStatus = res.status;
       if (!res.ok) {
         // Si le mode est rejeté, on tente un fallback.
-        if (candidates.length > 1 && (res.status === 400 || res.status === 403)) {
+        // 400 = paramètre réellement invalide/non supporté pour ce profil : blacklist permanente.
+        if (candidates.length > 1 && res.status === 400) {
           rejected.add(travelMode);
           unsupportedTravelModesByProfile.set(profileKey, rejected);
+          continue;
+        }
+        // 403 peut être un simple quota/QPS temporaire : on retente le candidat suivant
+        // pour cet appel, sans jamais blacklister le profil de façon permanente.
+        if (candidates.length > 1 && res.status === 403) {
           continue;
         }
         break;
