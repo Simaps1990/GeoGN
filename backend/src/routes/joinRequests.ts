@@ -4,6 +4,7 @@ import { requireAuth } from '../plugins/auth.js';
 import { MissionModel } from '../models/mission.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { MissionJoinRequestModel } from '../models/missionJoinRequest.js';
+import { MissionInviteModel } from '../models/missionInvite.js';
 import { UserModel } from '../models/user.js';
 import { ContactModel } from '../models/contact.js';
 import { ZoneModel } from '../models/zone.js';
@@ -24,7 +25,7 @@ const MEMBER_COLOR_PALETTE = [
   '#000000',
 ];
 
-function isAllowedMemberColor(color: string) {
+export function isAllowedMemberColor(color: string) {
   return MEMBER_COLOR_PALETTE.includes(color.toLowerCase());
 }
 
@@ -34,7 +35,7 @@ function pickColor(used: Set<string>) {
   return source[Math.floor(Math.random() * source.length)] ?? '#3b82f6';
 }
 
-async function pickMissionMemberColor(missionId: mongoose.Types.ObjectId) {
+export async function pickMissionMemberColor(missionId: mongoose.Types.ObjectId) {
   const existing = await MissionMemberModel.find({ missionId, removedAt: null }).select({ color: 1 }).lean();
   const used = new Set(existing.map((m) => String((m as any).color ?? '').trim()).filter(Boolean));
   return pickColor(used);
@@ -45,7 +46,7 @@ function normalizeRole(role: any) {
   return null;
 }
 
-async function ensureContact(ownerUserId: mongoose.Types.ObjectId, contactUserId: mongoose.Types.ObjectId) {
+export async function ensureContact(ownerUserId: mongoose.Types.ObjectId, contactUserId: mongoose.Types.ObjectId) {
   try {
     await ContactModel.create({ ownerUserId, contactUserId, createdAt: new Date() });
   } catch (err: any) {
@@ -514,8 +515,42 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'NO_CHANGES' });
       }
 
+      const targetMemberObjectId = new mongoose.Types.ObjectId(memberUserId);
+
+      if (typeof update.role !== 'undefined' && update.role !== 'admin') {
+        const targetMember = await MissionMemberModel.findOne({ missionId, userId: targetMemberObjectId, removedAt: null }).lean();
+        if (!targetMember) {
+          return reply.code(404).send({ error: 'NOT_FOUND' });
+        }
+        // Dernier admin : empêcher qu'un changement de rôle laisse la mission
+        // sans aucun admin s'il reste d'autres membres actifs.
+        // Note : lecture-puis-écriture non transactionnelle (ce codebase n'utilise
+        // pas de transactions Mongo ailleurs) — une course très étroite reste
+        // possible entre ce comptage et l'écriture ci-dessous, tolérée au même
+        // titre que les autres races déjà acceptées dans ce fichier (ex: clés
+        // dupliquées gérées dans le flux d'acceptation).
+        if (targetMember.role === 'admin') {
+          const otherAdmins = await MissionMemberModel.countDocuments({
+            missionId,
+            userId: { $ne: targetMemberObjectId },
+            role: 'admin',
+            removedAt: null,
+          });
+          if (otherAdmins === 0) {
+            const otherMembers = await MissionMemberModel.countDocuments({
+              missionId,
+              userId: { $ne: targetMemberObjectId },
+              removedAt: null,
+            });
+            if (otherMembers > 0) {
+              return reply.code(400).send({ error: 'LAST_ADMIN' });
+            }
+          }
+        }
+      }
+
       const updated = await MissionMemberModel.findOneAndUpdate(
-        { missionId, userId: new mongoose.Types.ObjectId(memberUserId), removedAt: null },
+        { missionId, userId: targetMemberObjectId, removedAt: null },
         { $set: update },
         { new: true }
       ).lean();
@@ -566,7 +601,15 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         if (!selfMembership) {
           return reply.code(404).send({ error: 'NOT_FOUND' });
         }
-        // Empêcher le dernier admin de partir s'il reste d'autres membres actifs
+        // Empêcher le dernier admin de partir s'il reste d'autres membres actifs.
+        // Note : ce check-puis-write n'est pas transactionnel (pas de transactions
+        // Mongo ailleurs dans ce codebase) — deux admins qui partent en même temps
+        // peuvent tous les deux passer ce check avant que l'un des deux ne commite.
+        // Le comptage est déjà placé au plus près possible de l'écriture ci-dessous
+        // (aucun await entre la fin de ce bloc et le findOneAndUpdate quand on est
+        // dans cette branche) ; la course résiduelle, très étroite, est acceptée au
+        // même titre que d'autres races déjà tolérées dans ce fichier (ex: clés
+        // dupliquées gérées dans le flux d'acceptation d'une demande).
         if (selfMembership.role === 'admin') {
           const otherAdmins = await MissionMemberModel.countDocuments({ missionId, userId: { $ne: new mongoose.Types.ObjectId(req.userId) }, role: 'admin', removedAt: null });
           if (otherAdmins === 0) {
@@ -603,6 +646,15 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
       clearBufferedPosition(missionId, memberUserId);
       app.io?.to(`mission:${missionId}`).emit('position:clear', { missionId, userId: memberUserId });
 
+      // Éjecter le socket de la room mission:{missionId} : sans ça, le membre
+      // retiré continue de recevoir position:batch / mission:snapshot / etc.
+      // jusqu'à ce qu'il se déconnecte volontairement.
+      try {
+        await app.io?.in(`user:${memberUserId}`).socketsLeave(`mission:${missionId}`);
+      } catch {
+        // non bloquant
+      }
+
       // Invalider le cache socket du membre pour que la prochaine
       // position GPS re-vérifie le membership en DB.
       try {
@@ -612,6 +664,18 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
         }
       } catch {
         // non bloquant
+      }
+
+      // Révoquer toute invitation en attente pour ce membre sur cette mission :
+      // sinon une invite "pending" oubliée peut ressusciter le membre retiré
+      // (voir invites.ts) avec removedAt remis à null.
+      try {
+        await MissionInviteModel.updateMany(
+          { missionId, invitedUserId: memberUserId, status: 'pending' },
+          { $set: { status: 'revoked' } }
+        );
+      } catch (e: any) {
+        req.log.error('[members.remove] invite revocation failed', e);
       }
 
       // Purger toutes les attributions de carrés pour ce membre

@@ -6,6 +6,7 @@ import { MissionInviteModel } from '../models/missionInvite.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { MissionModel } from '../models/mission.js';
 import { UserModel } from '../models/user.js';
+import { isAllowedMemberColor, pickMissionMemberColor, ensureContact } from './joinRequests.js';
 
 type SendInviteBody = {
   invitedAppUserId: string;
@@ -137,23 +138,53 @@ export async function invitesRoutes(app: FastifyInstance) {
     const now = new Date();
     await MissionInviteModel.updateOne({ _id: invite._id }, { $set: { status: 'accepted' } });
 
+    // Le rôle et la couleur sont toujours forcés via $set (pas $setOnInsert) :
+    // si l'upsert matche un MissionMember soft-deleted laissé par un retrait
+    // précédent, on ne veut surtout pas hériter de son ancien rôle (ex: admin).
+    // Une invitation ne redonne jamais mieux que le rôle le plus bas.
+    const existingMember = await MissionMemberModel.findOne({
+      missionId: invite.missionId,
+      userId: invite.invitedUserId,
+    }).lean();
+    const existingColor = existingMember?.color ? String((existingMember as any).color).trim() : '';
+    const memberColor =
+      existingColor && isAllowedMemberColor(existingColor)
+        ? existingColor
+        : await pickMissionMemberColor(invite.missionId);
+
     await MissionMemberModel.updateOne(
       { missionId: invite.missionId, userId: invite.invitedUserId },
       {
         $setOnInsert: {
           missionId: invite.missionId,
           userId: invite.invitedUserId,
-          role: 'member',
-          color: '#3b82f6',
         },
         $set: {
           removedAt: null,
           joinedAt: now,
           isActive: true,
+          role: 'viewer',
+          color: memberColor,
         },
       },
       { upsert: true }
     );
+
+    app.io?.to(`mission:${invite.missionId}`).emit('member:updated', {
+      missionId: invite.missionId.toString(),
+      member: { userId: invite.invitedUserId.toString(), role: 'viewer', color: memberColor },
+    });
+
+    // Ajoute le contact dans les deux sens (inviteur <-> invité), comme dans
+    // le flux d'acceptation d'une demande de join (join-requests.ts).
+    try {
+      await Promise.all([
+        ensureContact(invite.invitedBy, invite.invitedUserId),
+        ensureContact(invite.invitedUserId, invite.invitedBy),
+      ]);
+    } catch (e: any) {
+      req.log.error('[invites.accept] contact sync failed', e);
+    }
 
     return reply.send({ ok: true });
   });
