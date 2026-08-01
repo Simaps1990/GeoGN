@@ -91,6 +91,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (attach && attach.accessToken && attach.refreshToken && attach.user) {
                   setTokens(attach.accessToken, attach.refreshToken);
                   try {
+                    // Même garde que le flux JWT : si un AUTRE utilisateur s'était
+                    // connecté sur cet appareil, on purge son cache mission avant
+                    // de basculer sur le compte SSO.
+                    const lastUserId = localStorage.getItem(LAST_USER_KEY);
+                    if (lastUserId && attach.user.id && lastUserId !== String(attach.user.id)) {
+                      clearCachedMissionState();
+                    }
                     if (attach.user.id) {
                       localStorage.setItem(LAST_USER_KEY, String(attach.user.id));
                     }
