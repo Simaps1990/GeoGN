@@ -1906,16 +1906,16 @@ export default function MapLibreMap() {
         // associé aux suivis pour éviter qu'une géométrie ancienne reste
         // accrochée dans la carte ou dans la mémoire React.
         if (!filtered.length) {
-          if (activeVehicleTrackId) {
+          if (activeVehicleTrackIdRef.current) {
             setActiveVehicleTrackId(null);
           }
-          if (Object.keys(vehicleTrackGeojsonById).length > 0) {
+          if (Object.keys(vehicleTrackGeojsonByIdRef.current).length > 0) {
             setVehicleTrackGeojsonById({});
           }
           return;
         }
 
-        const currentId = activeVehicleTrackId;
+        const currentId = activeVehicleTrackIdRef.current;
         // Ne pas "perdre" la piste active entre deux refresh : tant que la piste
         // existe encore côté API, on conserve l'ID. (Le status peut transiter,
         // et un reset à null fait disparaître la forme avant le prochain isochrone.)
@@ -1933,15 +1933,15 @@ export default function MapLibreMap() {
           // Aucune piste active trouvée : on s'assure de bien
           // réinitialiser l'ID actif pour éviter qu'une ancienne
           // piste supprimée ou stoppée ne revienne par erreur.
-          if (activeVehicleTrackId) {
+          if (activeVehicleTrackIdRef.current) {
             setActiveVehicleTrackId(null);
           }
         } else {
-          if (nextActiveId !== activeVehicleTrackId) {
+          if (nextActiveId !== activeVehicleTrackIdRef.current) {
             setActiveVehicleTrackId(nextActiveId);
           }
 
-          if (!vehicleTrackGeojsonById[nextActiveId]) {
+          if (!vehicleTrackGeojsonByIdRef.current[nextActiveId]) {
             try {
               const state = await getVehicleTrackState(missionIdAtCall, nextActiveId);
               if (cancelled) return;
@@ -1981,8 +1981,9 @@ export default function MapLibreMap() {
     vehicleTracksQuery.q,
     vehicleTracksQuery.limit,
     vehicleTracksQuery.offset,
-    activeVehicleTrackId,
-    vehicleTrackGeojsonById,
+    // activeVehicleTrackId / vehicleTrackGeojsonById sont *écrits* par cet effet et mis à
+    // jour par les événements socket à chaque tick d'isochrone: les garder en dépendances
+    // relançait un listVehicleTracks complet en boucle. Ils sont lus via leurs refs.
   ]);
 
   useEffect(() => {
