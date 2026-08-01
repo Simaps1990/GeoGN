@@ -133,6 +133,11 @@ export function computeIsNight(lastKnownWhen: string | null): boolean {
 }
 
 export function computeAgeFactor(age: number | null): number {
+  // Missing age is a genuinely neutral case (unknown, assume no penalty) — but
+  // negative, non-integer, or implausibly large ages (e.g. 130) are bad data,
+  // not "unknown", and must not fall through to the same 1.0 no-penalty
+  // default. Clamp into the table's own bounds instead so bad input still
+  // gets the most-plausible bucket rather than silently no penalty at all.
   if (age == null || !Number.isFinite(age)) return 1;
   const table = [
     { min: 0, max: 5, factor: 0.6 },
@@ -147,7 +152,8 @@ export function computeAgeFactor(age: number | null): number {
     { min: 80, max: 89, factor: 0.68 },
     { min: 90, max: 120, factor: 0.55 },
   ];
-  const row = table.find((r) => age >= r.min && age <= r.max);
+  const clampedAge = clamp(Math.trunc(age), 0, 120);
+  const row = table.find((r) => clampedAge >= r.min && clampedAge <= r.max);
   return row ? row.factor : 1;
 }
 
