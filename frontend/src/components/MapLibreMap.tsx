@@ -1068,11 +1068,9 @@ export default function MapLibreMap() {
 
     return () => {
       cancelled = true;
-
-      if (flushTimerRef.current !== null) {
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
+      // Ne toucher qu'au debounce de cette autocomplétion: `flushTimerRef` est le timer
+      // de flush des positions GPS en attente (geogn.pendingPos), le purger ici annulait
+      // l'envoi différé des positions hors-ligne à chaque frappe dans le champ adresse.
       window.clearTimeout(t);
     };
   }, [personDraft.lastKnownQuery, lastKnownSuggestionsOpen]);
