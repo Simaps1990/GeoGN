@@ -285,7 +285,7 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
             const startedAtMs = startedAt instanceof Date ? startedAt.getTime() : nowMs;
             const baseElapsed = originWhen ? Math.max(0, Math.floor((startedAtMs - originWhen.getTime()) / 1000)) : 0;
             const stepped = Math.floor(baseElapsed / step) * step;
-            const maxSec = 43_200;
+            const maxSec = maxDurationSeconds;
             return Math.min(maxSec, Math.max(40, stepped));
           })();
           const result = await computeVehicleTomtomReachableRange({
