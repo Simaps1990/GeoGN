@@ -1,6 +1,6 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { Suspense, lazy, useState } from 'react';
 import AppShell from './pages/AppShell';
 import { MissionProvider, useMission } from './contexts/MissionContext';
@@ -28,6 +28,20 @@ function MapGate() {
 
 function IndexRedirect() {
   return <Navigate to="/home" replace />;
+}
+
+function LegacyMissionRedirect() {
+  const { missionId } = useParams();
+  return <Navigate to={`/mission/${missionId}`} replace />;
+}
+
+function MissionLayoutRoute() {
+  const { missionId } = useParams();
+  return (
+    <GridViewProvider key={missionId}>
+      <MissionLayout />
+    </GridViewProvider>
+  );
 }
 
 function AppContent() {
@@ -81,9 +95,9 @@ function AppContent() {
           <Route path="*" element={<Navigate to="/map" replace />} />
         </Route>
 
-        <Route path="/m/:missionId/*" element={<Navigate to="/mission/:missionId" replace />} />
+        <Route path="/m/:missionId/*" element={<LegacyMissionRedirect />} />
 
-        <Route path="/mission/:missionId/*" element={<GridViewProvider><MissionLayout /></GridViewProvider>}>
+        <Route path="/mission/:missionId/*" element={<MissionLayoutRoute />}>
           <Route index element={<Navigate to="map" replace />} />
           <Route path="map" element={<MissionMapPage />} />
           <Route path="zones" element={<MissionZonesPage />} />
