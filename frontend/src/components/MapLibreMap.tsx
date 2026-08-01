@@ -90,6 +90,7 @@ import {
   computeHealthStatusFactor,
   computeIsNight,
   computeLocomotorInjuryFactor,
+  computeSystemicInjuryFactor,
   computeMedicationFactor,
   computeNightFactor,
   computeTerrainFactor,
@@ -1185,6 +1186,7 @@ export default function MapLibreMap() {
     const isNight = computeIsNight(personCase.lastKnown.when);
     const hasDeshydratation = cleanInj.some((inj) => inj.id === 'deshydratation');
     const hasLocomotor = cleanInj.some((inj) => inj.locations.some((loc) => isLocomotorLocation(loc)));
+    const systemicInjuryFactor = computeSystemicInjuryFactor(cleanInj, weather as SimpleWeather | null);
     const diseaseFactor = computeDiseaseFactor(personCase.diseases, weather as SimpleWeather | null);
     const weatherFactor = computeWeatherFactor(weather as SimpleWeather | null, isNight, hasDeshydratation);
     const nightFactor = computeNightFactor(isNight, weather as SimpleWeather | null, hasLocomotor);
@@ -1205,6 +1207,7 @@ export default function MapLibreMap() {
           ageFactor *
           healthFactor *
           computeLocomotorInjuryFactor(cleanInj) *
+          systemicInjuryFactor *
           diseaseFactor *
           weatherFactor *
           nightFactor *
@@ -1218,6 +1221,7 @@ export default function MapLibreMap() {
         mobilityBaseKmh *
         ageFactor *
         healthFactor *
+        systemicInjuryFactor *
         diseaseFactor *
         weatherFactor *
         nightFactor *

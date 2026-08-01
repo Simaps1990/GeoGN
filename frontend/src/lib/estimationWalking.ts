@@ -254,12 +254,6 @@ export function computeLocomotorInjuryFactor(
       case 'hematome':
         factors.push(0.85);
         break;
-      case 'hypothermie':
-        factors.push(0.6);
-        break;
-      case 'deshydratation':
-        factors.push(0.75);
-        break;
       default:
         break;
     }
@@ -273,9 +267,44 @@ export function computeLocomotorInjuryFactor(
   return clamp(combined, 0.2, 1);
 }
 
-export function computeDiseaseFactor(diseases: string[] | null | undefined, _weather: SimpleWeather | null): number {
+// Hypothermia and dehydration slow someone down regardless of which body part
+// they were tagged on in the UI — unlike fractures/sprains/etc. they are not
+// locomotor injuries, so they don't belong in computeLocomotorInjuryFactor's
+// location-gated loop above (a leg-tagged case there was getting hit while an
+// identical chest-tagged case wasn't).
+export function computeSystemicInjuryFactor(
+  injuries: { id: InjuryId; locations: BodyPartId[] }[],
+  weather: SimpleWeather | null
+): number {
+  if (!Array.isArray(injuries) || injuries.length === 0) return 1;
+
+  const t = typeof weather?.temperatureC === 'number' ? weather!.temperatureC! : null;
+  const factors: number[] = [];
+
+  if (injuries.some((inj) => inj.id === 'hypothermie')) {
+    factors.push(0.6);
+  }
+  if (injuries.some((inj) => inj.id === 'deshydratation')) {
+    // computeWeatherFactor already applies a dehydration-specific penalty at
+    // t >= 32°C — avoid stacking a second penalty for the same signal there.
+    const alreadyCountedByWeather = t !== null && t >= 32;
+    if (!alreadyCountedByWeather) factors.push(0.75);
+  }
+
+  if (!factors.length) return 1;
+
+  const minF = Math.min(...factors);
+  const n = factors.length;
+  const combined = minF * Math.pow(0.95, n - 1);
+  return clamp(combined, 0.2, 1);
+}
+
+export function computeDiseaseFactor(diseases: string[] | null | undefined, weather: SimpleWeather | null): number {
   const ids = cleanDiseases(diseases || []);
   if (!ids.length) return 1;
+
+  const t = typeof weather?.temperatureC === 'number' ? weather!.temperatureC! : null;
+  const r = typeof weather?.precipitationMm === 'number' ? weather!.precipitationMm! : null;
 
   const mapBase: Record<DiseaseId, number> = {
     diabete: 0.9,
@@ -292,6 +321,16 @@ export function computeDiseaseFactor(diseases: string[] | null | undefined, _wea
   const factors: number[] = [];
   for (const id of ids) {
     let f = mapBase[id];
+    // Cold-dry air is asthma's classic trigger and computeWeatherFactor never
+    // penalizes cold on its own (only rain/wind at t<=10), so this must stand
+    // on its own regardless of what the weather factor is doing.
+    if (id === 'asthme') {
+      const cold = t !== null && t <= 10;
+      const rain = r !== null && r > 0;
+      if (cold || rain) {
+        f = 0.75;
+      }
+    }
     factors.push(f);
   }
 
@@ -341,11 +380,18 @@ export function computeWeatherFactor(
 
 export function computeNightFactor(
   isNight: boolean,
-  _weather: SimpleWeather | null,
+  weather: SimpleWeather | null,
   hasLocomotorInjury: boolean
 ): number {
   if (!isNight) return 1;
-  let f = 0.85;
+  const t = weather?.temperatureC;
+  const r = weather?.precipitationMm;
+  const rain = typeof r === 'number' && r > 0;
+  // computeWeatherFactor already penalizes rain when t <= 10 — only add this
+  // extra rain penalty outside that range (or with temperature unknown),
+  // where rain would otherwise go entirely unaccounted for.
+  const rainCountedElsewhere = typeof t === 'number' && t <= 10;
+  let f = rain && !rainCountedElsewhere ? 0.75 : 0.85;
   if (hasLocomotorInjury) f *= 0.9;
   return f;
 }
