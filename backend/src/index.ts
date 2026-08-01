@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { connectMongo } from './db.js';
 import { isAllowedOrigin } from './corsOrigins.js';
 import './models/index.js';
@@ -30,6 +31,11 @@ await app.register(cors, {
     return cb(null, isAllowedOrigin(origin));
   },
   credentials: true,
+});
+
+await app.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
 });
 
 // OIDC / Keycloak BFF SSO (cookies + server-side tokens)

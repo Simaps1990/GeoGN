@@ -31,47 +31,63 @@ type ChangePasswordBody = {
   newPassword: string;
 };
 
+const AUTH_RATE_LIMIT = { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 6;
+
 export async function authRoutes(app: FastifyInstance) {
-  app.post<{ Body: RegisterBody }>('/auth/register', async (req: FastifyRequest<{ Body: RegisterBody }>, reply: FastifyReply) => {
-    const { email, password, displayName } = req.body;
+  app.post<{ Body: RegisterBody }>(
+    '/auth/register',
+    AUTH_RATE_LIMIT,
+    async (req: FastifyRequest<{ Body: RegisterBody }>, reply: FastifyReply) => {
+      const { email, password, displayName } = req.body;
 
-    const existing = await UserModel.findOne({ email }).lean();
-    if (existing) {
-      return reply.code(409).send({ error: 'EMAIL_ALREADY_USED' });
+      if (typeof email !== 'string' || !EMAIL_RE.test(email)) {
+        return reply.code(400).send({ error: 'INVALID_EMAIL' });
+      }
+      if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+        return reply.code(400).send({ error: 'PASSWORD_TOO_SHORT' });
+      }
+
+      const existing = await UserModel.findOne({ email }).lean();
+      if (existing) {
+        return reply.code(409).send({ error: 'EMAIL_ALREADY_USED' });
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      let appUserId = generateAppUserId();
+      // Retry a few times in the unlikely event of collision
+      for (let i = 0; i < 5; i++) {
+        const collision = await UserModel.findOne({ appUserId }).lean();
+        if (!collision) break;
+        appUserId = generateAppUserId();
+      }
+
+      const user = await UserModel.create({
+        appUserId,
+        displayName,
+        email,
+        passwordHash,
+        createdAt: new Date(),
+      });
+
+      const accessToken = signAccessToken(user._id.toString());
+      const refreshToken = signRefreshToken(user._id.toString());
+
+      return reply.send({
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id.toString(),
+          appUserId: user.appUserId,
+          displayName: user.displayName,
+          email: user.email,
+        },
+      });
     }
-
-    const passwordHash = await hashPassword(password);
-
-    let appUserId = generateAppUserId();
-    // Retry a few times in the unlikely event of collision
-    for (let i = 0; i < 5; i++) {
-      const collision = await UserModel.findOne({ appUserId }).lean();
-      if (!collision) break;
-      appUserId = generateAppUserId();
-    }
-
-    const user = await UserModel.create({
-      appUserId,
-      displayName,
-      email,
-      passwordHash,
-      createdAt: new Date(),
-    });
-
-    const accessToken = signAccessToken(user._id.toString());
-    const refreshToken = signRefreshToken(user._id.toString());
-
-    return reply.send({
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id.toString(),
-        appUserId: user.appUserId,
-        displayName: user.displayName,
-        email: user.email,
-      },
-    });
-  });
+  );
 
 	// Attache la session Keycloak (BFF) à un utilisateur applicatif et émet les JWT
 	// comme pour /auth/login. Utilisé après un login SSO pour que les autorisations
@@ -138,7 +154,7 @@ export async function authRoutes(app: FastifyInstance) {
 		});
 	});
 
-  app.post<{ Body: LoginBody }>('/auth/login', async (req: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
+  app.post<{ Body: LoginBody }>('/auth/login', AUTH_RATE_LIMIT, async (req: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
     const { email, password } = req.body;
 
     const user = await UserModel.findOne({ email });
@@ -166,7 +182,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post<{ Body: RefreshBody }>('/auth/refresh', async (req: FastifyRequest<{ Body: RefreshBody }>, reply: FastifyReply) => {
+  app.post<{ Body: RefreshBody }>('/auth/refresh', AUTH_RATE_LIMIT, async (req: FastifyRequest<{ Body: RefreshBody }>, reply: FastifyReply) => {
     const { refreshToken } = req.body;
 
     let payload: { sub: string };
@@ -243,6 +259,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post<{ Body: ChangePasswordBody }>(
     '/me/password',
+    AUTH_RATE_LIMIT,
     async (req: FastifyRequest<{ Body: ChangePasswordBody }>, reply: FastifyReply) => {
       try {
         requireAuth(req);
