@@ -362,7 +362,11 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
     ) => {
       try {
         requireAuth(req);
+      } catch (e: any) {
+        return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
+      }
 
+      try {
         const { missionId, requestId } = req.params;
         if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(requestId)) {
           return reply.code(400).send({ error: 'INVALID_ID' });
