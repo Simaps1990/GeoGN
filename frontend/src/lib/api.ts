@@ -248,6 +248,15 @@ async function rawFetch(path: string, init?: FetchOptions) {
 
 let inFlightRefresh: Promise<string | null> | null = null;
 
+// Timestamp of the last successful refresh, so other refresh-triggering paths
+// (the socket's connect_error handler) can skip firing their own redundant
+// refresh when one just succeeded moments ago via a different path.
+let lastRefreshAt = 0;
+
+export function getLastRefreshTime(): number {
+  return lastRefreshAt;
+}
+
 // The auth-sensitive routes (including /auth/refresh itself) are rate-limited.
 // Every concurrent 401 used to fire its own refresh call; sharing one in-flight
 // request means N simultaneous 401s cost one call instead of N.
@@ -273,6 +282,7 @@ export async function refreshTokens() {
 
     const data = (await res.json()) as RefreshResponse;
     setTokens(data.accessToken, data.refreshToken);
+    lastRefreshAt = Date.now();
     return data.accessToken;
   })();
 

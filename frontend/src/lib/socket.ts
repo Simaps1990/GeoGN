@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import * as parser from 'socket.io-msgpack-parser';
-import { getAccessToken, getApiBaseUrl, refreshTokens } from './api';
+import { getAccessToken, getApiBaseUrl, getLastRefreshTime, refreshTokens } from './api';
 
 let socket: Socket | null = null;
 let lastToken: string | null = null;
@@ -12,6 +12,11 @@ let lastRefreshAttemptMs = 0;
 // retry re-triggers a refresh call and the rate limit never gets a quiet
 // window to reset — a permanent lockout instead of a transient one.
 const REFRESH_COOLDOWN_MS = 15_000;
+// Separate from (and shorter than) REFRESH_COOLDOWN_MS above: this only
+// covers the case where apiFetch's 401 handler already refreshed the token
+// moments ago and the socket's own reconnect logic hasn't caught up yet —
+// not the repeated-retry lockout the cooldown above guards against.
+const RECENT_REFRESH_WINDOW_MS = 5_000;
 
 export function getSocket() {
   const baseUrl = getApiBaseUrl();
@@ -39,8 +44,13 @@ export function getSocket() {
         lastRefreshAttemptMs = Date.now();
         refreshing = true;
         try {
-          // Try to refresh tokens directly
-          const newToken = await refreshTokens();
+          // Another path (apiFetch's 401 handler) may have just refreshed the
+          // token moments ago — reuse it instead of firing our own redundant
+          // refresh call. Truly concurrent calls are already deduped inside
+          // refreshTokens() itself; this only catches the close-but-not-quite-
+          // concurrent case.
+          const recentlyRefreshed = Date.now() - getLastRefreshTime() < RECENT_REFRESH_WINDOW_MS;
+          const newToken = recentlyRefreshed ? getAccessToken() : await refreshTokens();
           // If successful, update token and reconnect
           if (newToken && newToken !== lastToken) {
             socket.auth = { token: newToken };

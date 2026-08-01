@@ -318,12 +318,15 @@ export async function zonesRoutes(app: FastifyInstance) {
         update.grid = { rows: body.grid.rows, cols: body.grid.cols, orientation: body.grid.orientation };
       }
 
-      // Si la grille change de dimensions (ou est supprimée), les gridCellId existants
-      // ("C3", ...) ont été calculés pour l'ancienne grille et peuvent soit ne plus
-      // correspondre à aucune case, soit -pire- correspondre à une case différente sur le
-      // terrain. On ne tente pas de les remapper : on efface gridCellId (l'assignation
-      // redevient une assignation "zone entière", ce qui est déjà le format accepté
-      // ailleurs dans ce fichier pour une assignation sans case).
+      // Si la grille change de dimensions/orientation (ou est supprimée), les gridCellId
+      // existants ("C3", ...) ont été calculés pour l'ancienne grille. Un simple contrôle de
+      // bornes (isGridCellIdWithinGrid) ne suffit pas à décider quoi garder : "C3" peut rester
+      // structurellement valide dans la nouvelle grille (ex. 12x12 -> 10x10) tout en désignant
+      // un endroit différent sur le terrain -> le garder serait une assignation silencieusement
+      // fausse, plus dangereuse qu'une case orpheline (12x12 -> 4x4). On ne tente donc aucun
+      // remapping : dès que les dimensions/orientation changent réellement, tout gridCellId
+      // existant est effacé sans condition (l'assignation redevient une assignation "zone
+      // entière", format déjà accepté ailleurs dans ce fichier pour une assignation sans case).
       const currentGrid = (existingZone as any).grid as ZoneGrid | undefined;
       const newGrid: ZoneGrid | null = unset.grid ? null : (update.grid as ZoneGrid | undefined) ?? null;
       const gridIsChanging =
@@ -340,7 +343,6 @@ export async function zonesRoutes(app: FastifyInstance) {
         let clearedCount = 0;
         const sanitized = existingAssignments.map((a) => {
           if (!a.gridCellId) return a;
-          if (newGrid && isGridCellIdWithinGrid(a.gridCellId, newGrid.rows, newGrid.cols)) return a;
           clearedCount++;
           return { userId: a.userId, assignedAt: a.assignedAt, assignedByUserId: a.assignedByUserId };
         });

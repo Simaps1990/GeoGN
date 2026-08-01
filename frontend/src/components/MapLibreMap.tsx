@@ -2623,25 +2623,6 @@ export default function MapLibreMap() {
     };
   }, [selectedMissionId, mission, historyWindowSeconds]);
 
-  useEffect(() => {
-    if (!selectedMissionId) return;
-    const socket = getSocket();
-    const onMemberUpdated = (msg: any) => {
-      if (!msg || msg.missionId !== selectedMissionId) return;
-      const userId = msg?.member?.userId;
-      if (!userId) return;
-      const color = msg?.member?.color;
-      if (typeof color === 'string' && color.trim()) {
-        setMemberColors((prev) => ({ ...prev, [userId]: color.trim() }));
-      }
-    };
-
-    socket.on('member:updated', onMemberUpdated);
-    return () => {
-      socket.off('member:updated', onMemberUpdated);
-    };
-  }, [selectedMissionId]);
-
   // Au chargement de la carte pour une mission, centrer automatiquement sur ma position (une seule fois).
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -2679,26 +2660,6 @@ export default function MapLibreMap() {
       () => {}
     );
   }, [mapReady, selectedMissionId, lastPos]);
-
-  useEffect(() => {
-    if (!selectedMissionId) return;
-    const socket = getSocket();
-
-    const onMemberUpdated = (msg: any) => {
-      if (!msg || msg.missionId !== selectedMissionId) return;
-      const userId = msg?.member?.userId;
-      if (!userId) return;
-      const color = msg?.member?.color;
-      if (typeof color === 'string' && color.trim()) {
-        setMemberColors((prev) => ({ ...prev, [userId]: color.trim() }));
-      }
-    };
-
-    socket.on('member:updated', onMemberUpdated);
-    return () => {
-      socket.off('member:updated', onMemberUpdated);
-    };
-  }, [selectedMissionId]);
 
   // Garder otherColorsRef synchronisé avec les couleurs de membres de mission
   // afin d'utiliser uniquement la couleur attribuée dans les contacts de la mission.
