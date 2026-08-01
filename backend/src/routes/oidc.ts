@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
+import fp from 'fastify-plugin';
 import crypto from 'crypto';
 import { createRequire } from 'module';
 
@@ -99,7 +100,7 @@ function getOrCreateSessionId(req: FastifyRequest, reply: FastifyReply): string 
   return sessionId;
 }
 
-export async function oidcPlugin(app: FastifyInstance) {
+async function oidcPlugin(app: FastifyInstance) {
   const sessionSecret = process.env.BFF_SESSION_SECRET;
   if (!sessionSecret) {
     throw new Error('Missing BFF_SESSION_SECRET');
@@ -234,3 +235,8 @@ export async function oidcPlugin(app: FastifyInstance) {
   app.post('/api/logout', handleLogout as any);
   app.get('/api/logout', handleLogout as any);
 }
+
+// fastify-plugin lifts this out of Fastify's encapsulation so the cookie parser
+// registered above is visible on the root instance too — authRoutes() is called
+// on the root app and needs req.cookies for /auth/oidc/attach.
+export default fp(oidcPlugin);

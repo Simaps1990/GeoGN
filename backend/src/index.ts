@@ -14,7 +14,7 @@ import { poisRoutes } from './routes/pois.js';
 import { personCasesRoutes } from './routes/personCases.js';
 import { zonesRoutes } from './routes/zones.js';
 import { vehicleTracksRoutes } from './routes/vehicleTracks.js';
-import { oidcPlugin } from './routes/oidc.js';
+import oidcPlugin from './routes/oidc.js';
 import { setupSocket } from './socket.js';
 import { startVehicleTrackScheduler } from './vehicleTrackScheduler.js';
 

@@ -77,6 +77,18 @@ export function validateCircle(circle: unknown): GeometryValidationError | null 
   return null;
 }
 
+// Label format is "<col letter><row number>", e.g. "C3" (col 'C' = index 2, row 3 = index 2).
+// Matches the encoder in frontend/src/components/MapLibreMap.tsx
+// (`${String.fromCharCode('A'.charCodeAt(0) + col)}${row + 1}`) and the decoder already used
+// below for POST /zones/:zoneId/assignments.
+export function isGridCellIdWithinGrid(gridCellId: string, rows: number, cols: number): boolean {
+  const m = gridCellId.match(/^([A-Z])(\d+)$/);
+  if (!m) return false;
+  const col = m[1].charCodeAt(0) - 65;
+  const row = parseInt(m[2], 10) - 1;
+  return col >= 0 && col < cols && row >= 0 && row < rows;
+}
+
 async function getMembership(userId: string, missionId: string) {
   return MissionMemberModel.findOne({ missionId, userId, removedAt: null }).lean();
 }
@@ -268,6 +280,13 @@ export async function zonesRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
+      const existingZone = await ZoneModel.findOne({ _id: zoneId, missionId })
+        .select({ grid: 1, assignments: 1 })
+        .lean();
+      if (!existingZone) {
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
       const body = req.body as any;
       const update: any = { updatedAt: new Date() };
 
@@ -297,6 +316,38 @@ export async function zonesRoutes(app: FastifyInstance) {
       if (body.grid === null) unset.grid = 1;
       if (body.grid && typeof body.grid.rows === 'number' && typeof body.grid.cols === 'number') {
         update.grid = { rows: body.grid.rows, cols: body.grid.cols, orientation: body.grid.orientation };
+      }
+
+      // Si la grille change de dimensions (ou est supprimée), les gridCellId existants
+      // ("C3", ...) ont été calculés pour l'ancienne grille et peuvent soit ne plus
+      // correspondre à aucune case, soit -pire- correspondre à une case différente sur le
+      // terrain. On ne tente pas de les remapper : on efface gridCellId (l'assignation
+      // redevient une assignation "zone entière", ce qui est déjà le format accepté
+      // ailleurs dans ce fichier pour une assignation sans case).
+      const currentGrid = (existingZone as any).grid as ZoneGrid | undefined;
+      const newGrid: ZoneGrid | null = unset.grid ? null : (update.grid as ZoneGrid | undefined) ?? null;
+      const gridIsChanging =
+        currentGrid !== undefined &&
+        (unset.grid ||
+          (update.grid &&
+            (currentGrid.rows !== newGrid!.rows ||
+              currentGrid.cols !== newGrid!.cols ||
+              (currentGrid.orientation ?? undefined) !== (newGrid!.orientation ?? undefined))));
+
+      let assignmentsChanged = false;
+      if (gridIsChanging) {
+        const existingAssignments = (existingZone.assignments ?? []) as any[];
+        let clearedCount = 0;
+        const sanitized = existingAssignments.map((a) => {
+          if (!a.gridCellId) return a;
+          if (newGrid && isGridCellIdWithinGrid(a.gridCellId, newGrid.rows, newGrid.cols)) return a;
+          clearedCount++;
+          return { userId: a.userId, assignedAt: a.assignedAt, assignedByUserId: a.assignedByUserId };
+        });
+        if (clearedCount > 0) {
+          update.assignments = sanitized;
+          assignmentsChanged = true;
+        }
       }
 
       const updateDoc: any = { $set: update };
@@ -331,6 +382,23 @@ export async function zonesRoutes(app: FastifyInstance) {
         missionId,
         zone: { ...dto, createdAt: dto.createdAt.toISOString(), updatedAt: dto.updatedAt.toISOString() },
       });
+
+      // zone:updated ne transporte pas assignments : si le changement de grille a invalidé
+      // des gridCellId, on émet aussi l'événement dédié déjà utilisé par les routes
+      // d'assignation ci-dessous pour que les clients connectés se mettent à jour.
+      if (assignmentsChanged) {
+        const assignmentsDto = (zone.assignments ?? []).map((a: any) => ({
+          userId: a.userId.toString(),
+          assignedAt: a.assignedAt.toISOString(),
+          assignedByUserId: a.assignedByUserId.toString(),
+          gridCellId: a.gridCellId ?? null,
+        }));
+        app.io?.to(`mission:${missionId}`).emit('zone:assignments:changed', {
+          missionId,
+          zoneId: zone._id.toString(),
+          assignments: assignmentsDto,
+        });
+      }
 
       return reply.send(dto);
     }

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidLngLat, isValidRingShape, validateCircle, validatePolygon } from './zones.js';
+import {
+  isValidLngLat,
+  isValidRingShape,
+  validateCircle,
+  validatePolygon,
+  isGridCellIdWithinGrid,
+} from './zones.js';
 
 test('isValidLngLat accepts in-range finite pairs and rejects everything else', () => {
   assert.equal(isValidLngLat(2.35, 48.85), true);
@@ -51,4 +57,27 @@ test('validateCircle rejects bad centers and non-positive radii', () => {
     error: 'INVALID_CIRCLE_RADIUS',
   });
   assert.equal(validateCircle({ center: { lng: 2, lat: 48 }, radiusMeters: 500 }), null);
+});
+
+test('isGridCellIdWithinGrid accepts cells inside the grid and rejects malformed or out-of-bounds labels', () => {
+  // "C3" -> col 'C' = index 2, row 3 = index 2
+  assert.equal(isGridCellIdWithinGrid('C3', 12, 12), true);
+  // Same label "C3" still parses to the same indices under a 4x4 grid, but index 2 is
+  // out of bounds for both rows and cols there -> must be rejected (shrink case).
+  assert.equal(isGridCellIdWithinGrid('C3', 4, 4), false);
+  // A label that stays structurally valid ("C3" -> col 2, row 2) under a different-sized
+  // grid (12x12 -> 10x10) is still considered "in bounds" by this helper: this is exactly
+  // why the caller must only trust this when it also knows the label was recomputed for
+  // stale geometry, which is why the route clears gridCellId on any dimension change,
+  // not just ones that push a label out of bounds.
+  assert.equal(isGridCellIdWithinGrid('C3', 10, 10), true);
+  // Row/col at the edge of the grid.
+  assert.equal(isGridCellIdWithinGrid('A1', 1, 1), true);
+  assert.equal(isGridCellIdWithinGrid('B1', 1, 1), false);
+  assert.equal(isGridCellIdWithinGrid('A2', 1, 1), false);
+  // Malformed labels.
+  assert.equal(isGridCellIdWithinGrid('3C', 12, 12), false);
+  assert.equal(isGridCellIdWithinGrid('c3', 12, 12), false);
+  assert.equal(isGridCellIdWithinGrid('', 12, 12), false);
+  assert.equal(isGridCellIdWithinGrid('AA1', 26, 26), false);
 });

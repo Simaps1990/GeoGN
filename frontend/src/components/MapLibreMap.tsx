@@ -6258,6 +6258,10 @@ export default function MapLibreMap() {
       setPersonCase(msg.case as ApiPersonCase);
 
       const created = msg?.created === true;
+      // Une nouvelle fiche repart avec la heatmap visible : la suppression de la fiche
+      // précédente a mis le toggle à false (cf. onConfirmDeletePersonCase) et rien ne le
+      // remettait à true, la heatmap restait donc invisible pour le reste de la session.
+      if (created) setShowEstimationHeatmap(true);
       const actorUserId = typeof msg?.actorUserId === 'string' ? msg.actorUserId : null;
       if (created && actorUserId) {
         const rawName = typeof msg.actorDisplayName === 'string' ? msg.actorDisplayName : null;
