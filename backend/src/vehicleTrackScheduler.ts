@@ -22,10 +22,28 @@ export function startVehicleTrackScheduler(app: FastifyInstance) {
   // This avoids the frontend reloading cached payloads for stale "active" tracks.
   void (async () => {
     try {
-      const res = await VehicleTrackModel.updateMany(
-        { status: 'active', startedAt: { $lt: schedulerBootTime } },
-        { $set: { status: 'stopped', cache: undefined } }
-      );
+      const staleFilter = { status: 'active', startedAt: { $lt: schedulerBootTime } };
+
+      // updateMany() ne renvoie pas les documents affectés : on les récupère d'abord
+      // pour pouvoir notifier les clients connectés (sinon ils gardent l'isochrone
+      // en cache affichée comme "active" jusqu'à un refetch manuel complet).
+      const staleTracks = await VehicleTrackModel.find(staleFilter).select({ missionId: 1 }).lean();
+
+      const res = await VehicleTrackModel.updateMany(staleFilter, {
+        $set: { status: 'stopped', cache: undefined },
+      });
+
+      // Même event/payload que la bascule "plusieurs pistes actives pour une même
+      // mission" plus bas dans ce fichier (status passé à 'stopped', cache vidé).
+      for (const t of staleTracks) {
+        const missionIdStr = (t.missionId as mongoose.Types.ObjectId).toString();
+        app.io?.to(`mission:${missionIdStr}`).emit('vehicle-track:updated', {
+          missionId: missionIdStr,
+          trackId: t._id.toString(),
+          status: 'stopped',
+        });
+      }
+
       app.log.info(
         {
           matched: (res as any).matchedCount ?? (res as any).n ?? undefined,
