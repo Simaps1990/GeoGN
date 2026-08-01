@@ -46,6 +46,19 @@ import { isTestTrack, useVehicleTrack } from '../hooks/useVehicleTrack';
 import { getSocket } from '../lib/socket';
 import { haversineMeters, roundCoord, shouldEmitPosition } from '../lib/gpsFilter.js';
 import {
+  clipGridColumn,
+  clipGridRow,
+  formatGridCellId,
+  getZoneBbox,
+  getZoneGridFrame,
+  gridCellBounds,
+  gridColumnLetter,
+  isCellInGrid,
+  isPointInZone,
+  parseGridCellId,
+  pickGridCell,
+} from '../lib/zoneGeometry.js';
+import {
   createPoi,
   createZone,
   deletePoi,
@@ -199,133 +212,22 @@ function getPolygonCenter(coords: [number, number][]): { lng: number; lat: numbe
   return { lng: x / coords.length, lat: y / coords.length };
 }
 
-function isPointInZone(lng: number, lat: number, z: ApiZone) {
-  if (z.type === 'circle' && z.circle) {
-    const { center, radiusMeters } = z.circle;
-    const metersPerDegLat = 111_320;
-    const metersPerDegLng = 111_320 * Math.cos((center.lat * Math.PI) / 180);
-    const dx = (lng - center.lng) * metersPerDegLng;
-    const dy = (lat - center.lat) * metersPerDegLat;
-    const distSq = dx * dx + dy * dy;
-    return distSq <= radiusMeters * radiusMeters;
-  }
-
-  if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-    const ring = z.polygon.coordinates[0];
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0];
-      const yi = ring[i][1];
-      const xj = ring[j][0];
-      const yj = ring[j][1];
-
-      const intersects = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-      if (intersects) inside = !inside;
-    }
-    return inside;
-  }
-
-  return false;
-}
-
-function getZoneBbox(z: ApiZone) {
-  if (z.type === 'circle' && z.circle) {
-    const { lng, lat } = z.circle.center;
-    const metersPerDegLat = 111_320;
-    const metersPerDegLng = 111_320 * Math.cos((lat * Math.PI) / 180);
-    const dLat = z.circle.radiusMeters / metersPerDegLat;
-    const dLng = z.circle.radiusMeters / metersPerDegLng;
-    return { minLng: lng - dLng, minLat: lat - dLat, maxLng: lng + dLng, maxLat: lat + dLat };
-  }
-
-  if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-    const ring = z.polygon.coordinates[0];
-    let minLng = Infinity;
-    let minLat = Infinity;
-    let maxLng = -Infinity;
-    let maxLat = -Infinity;
-    for (const p of ring) {
-      minLng = Math.min(minLng, p[0]);
-      minLat = Math.min(minLat, p[1]);
-      maxLng = Math.max(maxLng, p[0]);
-      maxLat = Math.max(maxLat, p[1]);
-    }
-    return { minLng, minLat, maxLng, maxLat };
-  }
-
-  return null;
-}
-
 function getGridCellSelection(lng: number, lat: number, z: ApiZone) {
-  if (!z.grid?.rows || !z.grid?.cols) return null;
-  if ((z.grid as any)?.orientation === 'diag45') return null;
-  const bbox = getZoneBbox(z);
-  if (!bbox) return null;
-  if (lng < bbox.minLng || lng > bbox.maxLng || lat < bbox.minLat || lat > bbox.maxLat) return null;
-  const rows = Math.max(1, z.grid.rows);
-  const cols = Math.max(1, Math.min(26, z.grid.cols));
-  const dx = (bbox.maxLng - bbox.minLng) / cols;
-  const dy = (bbox.maxLat - bbox.minLat) / rows;
-  const col = Math.min(cols - 1, Math.max(0, Math.floor((lng - bbox.minLng) / dx)));
-  const row = Math.min(rows - 1, Math.max(0, Math.floor((lat - bbox.minLat) / dy)));
-  const text = `${String.fromCharCode('A'.charCodeAt(0) + col)}${row + 1}`;
-  const minLng = bbox.minLng + col * dx;
-  const maxLng = minLng + dx;
-  const minLat = bbox.minLat + row * dy;
-  const maxLat = minLat + dy;
+  const frame = getZoneGridFrame(z);
+  if (!frame) return null;
+  const cell = pickGridCell(frame, lng, lat);
+  if (!cell) return null;
+  const bounds = gridCellBounds(frame, cell.row, cell.col);
+  if (!bounds) return null;
+  const text = formatGridCellId(cell.row, cell.col);
   return {
     id: `${z.id}:grid:${text}`,
     text,
     geometry: {
       type: 'Polygon',
-      coordinates: [[
-        [minLng, minLat],
-        [maxLng, minLat],
-        [maxLng, maxLat],
-        [minLng, maxLat],
-        [minLng, minLat],
-      ]],
+      coordinates: [bounds.ring],
     },
   };
-}
-
-function closeRing(ring: number[][]) {
-  if (ring.length === 0) return ring;
-  const first = ring[0];
-  const last = ring[ring.length - 1];
-  if (first[0] === last[0] && first[1] === last[1]) return ring;
-  return [...ring, first];
-}
-
-function clipVerticalLineToPolygon(lng: number, ringInput: number[][]) {
-  const ring = closeRing(ringInput);
-  const ys: number[] = [];
-  const eps = 1e-12;
-
-  for (let i = 0; i < ring.length - 1; i++) {
-    const [x1, y1] = ring[i];
-    const [x2, y2] = ring[i + 1];
-    const dx = x2 - x1;
-    if (Math.abs(dx) < eps) {
-      if (Math.abs(lng - x1) < eps) {
-        ys.push(y1, y2);
-      }
-      continue;
-    }
-    const t = (lng - x1) / dx;
-    if (t < -eps || t > 1 + eps) continue;
-    const y = y1 + t * (y2 - y1);
-    ys.push(y);
-  }
-
-  ys.sort((a, b) => a - b);
-  const segments: [number, number][] = [];
-  for (let i = 0; i + 1 < ys.length; i += 2) {
-    const a = ys[i];
-    const b = ys[i + 1];
-    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) > eps) segments.push([a, b]);
-  }
-  return segments;
 }
 
 function getZoneLabelPoint(z: ApiZone) {
@@ -365,37 +267,6 @@ function pickZoneLabelColor(zoneColor: string | undefined | null) {
   // If too light, keep a dark readable label.
   if (L > 0.75) return '#111827';
   return c;
-}
-
-function clipHorizontalLineToPolygon(lat: number, ringInput: number[][]) {
-  const ring = closeRing(ringInput);
-  const xs: number[] = [];
-  const eps = 1e-12;
-
-  for (let i = 0; i < ring.length - 1; i++) {
-    const [x1, y1] = ring[i];
-    const [x2, y2] = ring[i + 1];
-    const dy = y2 - y1;
-    if (Math.abs(dy) < eps) {
-      if (Math.abs(lat - y1) < eps) {
-        xs.push(x1, x2);
-      }
-      continue;
-    }
-    const t = (lat - y1) / dy;
-    if (t < -eps || t > 1 + eps) continue;
-    const x = x1 + t * (x2 - x1);
-    xs.push(x);
-  }
-
-  xs.sort((a, b) => a - b);
-  const segments: [number, number][] = [];
-  for (let i = 0; i + 1 < xs.length; i += 2) {
-    const a = xs[i];
-    const b = xs[i + 1];
-    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) > eps) segments.push([a, b]);
-  }
-  return segments;
 }
 
 // Source unique de vérité pour les propriétés attachées aux features de la source `pois`:
@@ -3792,354 +3663,74 @@ export default function MapLibreMap() {
       const features: any[] = [];
 
       for (const z of zones) {
-        if (!z.grid?.rows || !z.grid?.cols) continue;
-        const bbox = getZoneBbox(z);
-        if (!bbox) continue;
+        // Toute la géométrie de la grille (et donc la correspondance case <-> terrain)
+        // vient de `zoneGeometry`: `vertical` et `diag45` partagent le même repère,
+        // seule la définition de l'espace grille change.
+        const frame = getZoneGridFrame(z);
+        if (!frame) continue;
+        const { rows, cols } = frame;
 
-        const rows = Math.max(1, z.grid.rows);
-        const cols = Math.max(1, Math.min(26, z.grid.cols));
-
-        const gridOrientation = (z.grid as any)?.orientation === 'diag45' ? 'diag45' : 'vertical';
-
-        const dx = (bbox.maxLng - bbox.minLng) / cols;
-        const dy = (bbox.maxLat - bbox.minLat) / rows;
-
-        const metersPerDegLat = 111_320;
-        const metersPerDegLng = 111_320 * Math.cos((((z.type === 'circle' && z.circle) ? z.circle.center.lat : (bbox.minLat + bbox.maxLat) / 2) * Math.PI) / 180);
-
-        // Centre utilisé pour la rotation (et le repère en mètres)
-        const centerLng = z.type === 'circle' && z.circle ? z.circle.center.lng : (bbox.minLng + bbox.maxLng) / 2;
-        const centerLat = z.type === 'circle' && z.circle ? z.circle.center.lat : (bbox.minLat + bbox.maxLat) / 2;
-
-        const rotateMeters = (x: number, y: number, angleRad: number) => {
-          const c = Math.cos(angleRad);
-          const s = Math.sin(angleRad);
-          return { x: x * c - y * s, y: x * s + y * c };
-        };
-
-        const toMeters = (lng: number, lat: number, centerLng: number, centerLat: number) => {
-          return {
-            x: (lng - centerLng) * metersPerDegLng,
-            y: (lat - centerLat) * metersPerDegLat,
-          };
-        };
-
-        const toLngLat = (x: number, y: number, centerLng: number, centerLat: number) => {
-          return {
-            lng: centerLng + x / metersPerDegLng,
-            lat: centerLat + y / metersPerDegLat,
-          };
-        };
-
-        const addRotatedSegments = (
-          kind: 'line' | 'label' | 'cell',
-          axis: 'x' | 'y' | null,
-          text: string | null,
-          a: { x: number; y: number },
-          b: { x: number; y: number } | null
-        ) => {
-          if (kind === 'line') {
-            if (!b) return;
-            const pa = toLngLat(a.x, a.y, centerLng, centerLat);
-            const pb = toLngLat(b.x, b.y, centerLng, centerLat);
-            features.push({
-              type: 'Feature',
-              properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
-              geometry: { type: 'LineString', coordinates: [[pa.lng, pa.lat], [pb.lng, pb.lat]] },
-            });
-            return;
-          }
-          const p = toLngLat(a.x, a.y, centerLng, centerLat);
-          if (kind === 'cell') {
-            features.push({
-              type: 'Feature',
-              properties: { kind: 'cell', zoneId: z.id, text },
-              geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-            });
-            return;
-          }
+        const pushLine = (u1: number, v1: number, u2: number, v2: number) => {
+          const a = frame.toLngLat(u1, v1);
+          const b = frame.toLngLat(u2, v2);
           features.push({
             type: 'Feature',
-            properties: { kind: 'label', axis, zoneId: z.id, text, rows, cols },
+            properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
+            geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+          });
+        };
+
+        // lignes verticales (séparateurs de colonnes)
+        for (let c = 1; c < cols; c++) {
+          const u = frame.minU + c * frame.cellU;
+          for (const [v1, v2] of clipGridColumn(frame, u)) pushLine(u, v1, u, v2);
+        }
+
+        // lignes horizontales (séparateurs de lignes)
+        for (let r = 1; r < rows; r++) {
+          const v = frame.minV + r * frame.cellV;
+          for (const [u1, u2] of clipGridRow(frame, v)) pushLine(u1, v, u2, v);
+        }
+
+        // libellés de colonnes (bord bas): A, B, C...
+        for (let c = 0; c < cols; c++) {
+          const u = frame.minU + (c + 0.5) * frame.cellU;
+          const segs = clipGridColumn(frame, u);
+          if (!segs.length) continue;
+          const bottom = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+          const p = frame.toLngLat(u, bottom);
+          features.push({
+            type: 'Feature',
+            properties: { kind: 'label', axis: 'x', zoneId: z.id, text: gridColumnLetter(c), rows, cols },
             geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
           });
-        };
-
-        if (gridOrientation === 'diag45') {
-          const angle = Math.PI / 4;
-          const inv = -angle;
-
-          const ringMetersRot: [number, number][] | null =
-            z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length
-              ? z.polygon.coordinates[0].map((p) => {
-                  const m = toMeters(p[0], p[1], centerLng, centerLat);
-                  const r = rotateMeters(m.x, m.y, inv);
-                  return [r.x, r.y];
-                })
-              : null;
-
-          const clipV = (x: number) => {
-            if (z.type === 'circle' && z.circle) {
-              const R = z.circle.radiusMeters;
-              if (Math.abs(x) >= R) return [] as [number, number][];
-              const y = Math.sqrt(R * R - x * x);
-              return [[-y, y]] as [number, number][];
-            }
-            if (ringMetersRot) {
-              return clipVerticalLineToPolygon(x, ringMetersRot);
-            }
-            return [] as [number, number][];
-          };
-
-          const clipH = (y: number) => {
-            if (z.type === 'circle' && z.circle) {
-              const R = z.circle.radiusMeters;
-              if (Math.abs(y) >= R) return [] as [number, number][];
-              const x = Math.sqrt(R * R - y * y);
-              return [[-x, x]] as [number, number][];
-            }
-            if (ringMetersRot) {
-              return clipHorizontalLineToPolygon(y, ringMetersRot);
-            }
-            return [] as [number, number][];
-          };
-
-          // bbox dans l'espace tourné (en mètres)
-          let minX = 0;
-          let maxX = 0;
-          let minY = 0;
-          let maxY = 0;
-
-          if (z.type === 'circle' && z.circle) {
-            const R = z.circle.radiusMeters;
-            minX = -R;
-            maxX = R;
-            minY = -R;
-            maxY = R;
-          } else if (ringMetersRot && ringMetersRot.length) {
-            minX = Math.min(...ringMetersRot.map((p) => p[0]));
-            maxX = Math.max(...ringMetersRot.map((p) => p[0]));
-            minY = Math.min(...ringMetersRot.map((p) => p[1]));
-            maxY = Math.max(...ringMetersRot.map((p) => p[1]));
-          } else {
-            continue;
-          }
-
-          const dxm = (maxX - minX) / cols;
-          const dym = (maxY - minY) / rows;
-
-          const fromRotMeters = (x: number, y: number) => {
-            const r = rotateMeters(x, y, angle);
-            return { x: r.x, y: r.y };
-          };
-
-          // lignes verticales (dans repère tourné)
-          for (let c = 1; c < cols; c++) {
-            const x = minX + c * dxm;
-            const segs = clipV(x);
-            for (const [a, b] of segs) {
-              const p1 = fromRotMeters(x, a);
-              const p2 = fromRotMeters(x, b);
-              addRotatedSegments('line', null, null, p1, p2);
-            }
-          }
-
-          // lignes horizontales (dans repère tourné)
-          for (let r = 1; r < rows; r++) {
-            const y = minY + r * dym;
-            const segs = clipH(y);
-            for (const [a, b] of segs) {
-              const p1 = fromRotMeters(a, y);
-              const p2 = fromRotMeters(b, y);
-              addRotatedSegments('line', null, null, p1, p2);
-            }
-          }
-
-          // labels colonnes (bas dans repère tourné)
-          for (let c = 0; c < cols; c++) {
-            const x = minX + (c + 0.5) * dxm;
-            const segs = clipV(x);
-            if (!segs.length) continue;
-            const bottom = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
-            const p = fromRotMeters(x, bottom);
-            const letter = String.fromCharCode('A'.charCodeAt(0) + c);
-            addRotatedSegments('label', 'x', letter, p, null);
-          }
-
-          // labels lignes (gauche dans repère tourné)
-          for (let r = 0; r < rows; r++) {
-            const y = minY + (r + 0.5) * dym;
-            const segs = clipH(y);
-            if (!segs.length) continue;
-            const left = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
-            const p = fromRotMeters(left, y);
-            const num = String(rows - r);
-            addRotatedSegments('label', 'y', num, p, null);
-          }
-
-          // labels cellules
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const x = minX + (c + 0.5) * dxm;
-              const y = minY + (r + 0.5) * dym;
-              const p = fromRotMeters(x, y);
-              if (!isPointInZone(centerLng + p.x / metersPerDegLng, centerLat + p.y / metersPerDegLat, z)) continue;
-              const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
-              const rowNumber = rows - r;
-              const text = `${colLetter}${rowNumber}`;
-              addRotatedSegments('cell', null, text, p, null);
-            }
-          }
-
-          continue;
         }
 
-        const getBottomBoundaryAtX = (x: number) => {
-          if (z.type === 'circle' && z.circle) {
-            const dxm = (x - z.circle.center.lng) * metersPerDegLng;
-            if (Math.abs(dxm) >= z.circle.radiusMeters) return null;
-            const dym = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dxm * dxm);
-            return z.circle.center.lat - dym / metersPerDegLat;
-          }
-          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-            const segs = clipVerticalLineToPolygon(x, z.polygon.coordinates[0]);
-            if (segs.length === 0) return null;
-            return Math.min(...segs.map((s) => Math.min(s[0], s[1])));
-          }
-          return null;
-        };
-
-        const getLeftBoundaryAtY = (y: number) => {
-          if (z.type === 'circle' && z.circle) {
-            const dym = (y - z.circle.center.lat) * metersPerDegLat;
-            if (Math.abs(dym) >= z.circle.radiusMeters) return null;
-            const dxm = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dym * dym);
-            return z.circle.center.lng - dxm / metersPerDegLng;
-          }
-          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-            const segs = clipHorizontalLineToPolygon(y, z.polygon.coordinates[0]);
-            if (segs.length === 0) return null;
-            return Math.min(...segs.map((s) => Math.min(s[0], s[1])));
-          }
-          return null;
-        };
-
-        const addVerticalSegments = (x: number) => {
-          if (z.type === 'circle' && z.circle) {
-            const metersPerDegLat = 111_320;
-            const metersPerDegLng = 111_320 * Math.cos((z.circle.center.lat * Math.PI) / 180);
-            const dxm = (x - z.circle.center.lng) * metersPerDegLng;
-            if (Math.abs(dxm) >= z.circle.radiusMeters) return;
-            const dym = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dxm * dxm);
-            const y1 = z.circle.center.lat - dym / metersPerDegLat;
-            const y2 = z.circle.center.lat + dym / metersPerDegLat;
-            features.push({
-              type: 'Feature',
-              properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
-              geometry: { type: 'LineString', coordinates: [[x, y1], [x, y2]] },
-            });
-            return;
-          }
-          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-            const ring = z.polygon.coordinates[0];
-            const segs = clipVerticalLineToPolygon(x, ring);
-            for (const [a, b] of segs) {
-              features.push({
-                type: 'Feature',
-                properties: { kind: 'line', zoneId: z.id, color: z.color, rows, cols },
-                geometry: { type: 'LineString', coordinates: [[x, a], [x, b]] },
-              });
-            }
-          }
-        };
-
-        const addHorizontalSegments = (y: number) => {
-          if (z.type === 'circle' && z.circle) {
-            const metersPerDegLat = 111_320;
-            const metersPerDegLng = 111_320 * Math.cos((z.circle.center.lat * Math.PI) / 180);
-            const dym = (y - z.circle.center.lat) * metersPerDegLat;
-            if (Math.abs(dym) >= z.circle.radiusMeters) return;
-            const dxm = Math.sqrt(z.circle.radiusMeters * z.circle.radiusMeters - dym * dym);
-            const x1 = z.circle.center.lng - dxm / metersPerDegLng;
-            const x2 = z.circle.center.lng + dxm / metersPerDegLng;
-            features.push({
-              type: 'Feature',
-              properties: { kind: 'line', zoneId: z.id, color: z.color },
-              geometry: { type: 'LineString', coordinates: [[x1, y], [x2, y]] },
-            });
-            return;
-          }
-          if (z.type === 'polygon' && z.polygon?.coordinates?.[0]?.length) {
-            const ring = z.polygon.coordinates[0];
-            const segs = clipHorizontalLineToPolygon(y, ring);
-            for (const [a, b] of segs) {
-              features.push({
-                type: 'Feature',
-                properties: { kind: 'line', zoneId: z.id, color: z.color },
-                geometry: { type: 'LineString', coordinates: [[a, y], [b, y]] },
-              });
-            }
-          }
-        };
-
-        // vertical lines
-        for (let c = 1; c < cols; c++) {
-          const x = bbox.minLng + c * dx;
-          addVerticalSegments(x);
-        }
-
-        // horizontal lines
-        for (let r = 1; r < rows; r++) {
-          const y = bbox.minLat + r * dy;
-          addHorizontalSegments(y);
-        }
-
-        // column labels (bottom): A, B, C...
-        for (let c = 0; c < cols; c++) {
-          const x = bbox.minLng + (c + 0.5) * dx;
-          const bottom = getBottomBoundaryAtX(x);
-          if (bottom == null) continue;
-          const y = bottom;
-          const letter = String.fromCharCode('A'.charCodeAt(0) + c);
-          features.push({
-            type: 'Feature',
-            properties: { kind: 'label', axis: 'x', zoneId: z.id, text: letter, rows, cols },
-            geometry: { type: 'Point', coordinates: [x, y] },
-          });
-        }
-
-        // row labels (left): 1.. (bottom->top)
+        // libellés de lignes (bord gauche): 1.. (dans le sens des `row` croissants)
         for (let r = 0; r < rows; r++) {
-          const y = bbox.minLat + (r + 0.5) * dy;
-          const left = getLeftBoundaryAtY(y);
-          if (left == null) continue;
-          const x = left;
-          const num = String(r + 1);
+          const v = frame.minV + (r + 0.5) * frame.cellV;
+          const segs = clipGridRow(frame, v);
+          if (!segs.length) continue;
+          const left = Math.min(...segs.map((s) => Math.min(s[0], s[1])));
+          const p = frame.toLngLat(left, v);
           features.push({
             type: 'Feature',
-            properties: { kind: 'label', axis: 'y', zoneId: z.id, text: num, rows, cols },
-            geometry: { type: 'Point', coordinates: [x, y] },
+            properties: { kind: 'label', axis: 'y', zoneId: z.id, text: String(r + 1), rows, cols },
+            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
           });
         }
 
-        // cell labels (center): A1, B2, etc.
+        // libellés de cases (centre): A1, B2, etc.
         // On les génère toujours; la taille est ensuite adaptée via text-size
         // en fonction de la densité (rows*cols) et du zoom.
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
-            const x = bbox.minLng + (c + 0.5) * dx;
-            const y = bbox.minLat + (r + 0.5) * dy;
-
-            if (!isPointInZone(x, y, z)) continue;
-
-            const colLetter = String.fromCharCode('A'.charCodeAt(0) + c);
-            const rowNumber = r + 1;
-            const text = `${colLetter}${rowNumber}`;
-
+            const p = frame.cellToLngLat(c + 0.5, r + 0.5);
+            if (!isPointInZone(p.lng, p.lat, z)) continue;
             features.push({
               type: 'Feature',
-              properties: { kind: 'cell', zoneId: z.id, text, rows, cols },
-              geometry: { type: 'Point', coordinates: [x, y] },
+              properties: { kind: 'cell', zoneId: z.id, text: formatGridCellId(r, c), rows, cols },
+              geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
             });
           }
         }
@@ -6114,28 +5705,19 @@ export default function MapLibreMap() {
           }
         }
       }
-      if (z.grid?.rows && z.grid?.cols) {
-        const bbox = getZoneBbox(z);
-        if (bbox) {
-          const rows = Math.max(1, z.grid.rows);
-          const cols = Math.max(1, Math.min(26, z.grid.cols));
-          const dx = (bbox.maxLng - bbox.minLng) / cols;
-          const dy = (bbox.maxLat - bbox.minLat) / rows;
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const text = `${String.fromCharCode('A'.charCodeAt(0) + c)}${r + 1}`;
+      {
+        const frame = getZoneGridFrame(z);
+        if (frame) {
+          for (let r = 0; r < frame.rows; r++) {
+            for (let c = 0; c < frame.cols; c++) {
+              const text = formatGridCellId(r, c);
               if (!selectedZoneIds.includes(`${z.id}:grid:${text}`)) continue;
-              const minLng = bbox.minLng + c * dx;
-              const maxLng = minLng + dx;
-              const minLat = bbox.minLat + r * dy;
-              const maxLat = minLat + dy;
+              const bounds = gridCellBounds(frame, r, c);
+              if (!bounds) continue;
               selectedFeatures.push({
                 type: 'Feature',
                 properties: { id: z.id, gridCell: text },
-                geometry: {
-                  type: 'Polygon',
-                  coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]],
-                },
+                geometry: { type: 'Polygon', coordinates: [bounds.ring] },
               });
             }
           }
@@ -6171,34 +5753,19 @@ export default function MapLibreMap() {
         if (assignments) {
           const userAssignments = assignments.filter((a) => a.userId === user.id && a.gridCellId);
           if (userAssignments.length > 0) {
-            const bbox = getZoneBbox(z);
-            if (bbox) {
-              const rows = Math.max(1, z.grid.rows);
-              const cols = Math.max(1, Math.min(26, z.grid.cols));
-              const dx = (bbox.maxLng - bbox.minLng) / cols;
-              const dy = (bbox.maxLat - bbox.minLat) / rows;
-
+            const frame = getZoneGridFrame(z);
+            if (frame) {
               for (const assignment of userAssignments) {
                 if (!assignment.gridCellId) continue;
-                const match = assignment.gridCellId.match(/^([A-Z])(\d+)$/);
-                if (match) {
-                  const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
-                  const row = parseInt(match[2], 10) - 1;
-                  if (col >= 0 && col < cols && row >= 0 && row < rows) {
-                    const minLng = bbox.minLng + col * dx;
-                    const maxLng = bbox.minLng + (col + 1) * dx;
-                    const minLat = bbox.minLat + row * dy;
-                    const maxLat = bbox.minLat + (row + 1) * dy;
-                    highlightedFeatures.push({
-                      type: 'Feature',
-                      properties: { id: z.id, gridCellId: assignment.gridCellId },
-                      geometry: {
-                        type: 'Polygon',
-                        coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]],
-                      },
-                    });
-                  }
-                }
+                const cell = parseGridCellId(assignment.gridCellId);
+                if (!cell) continue;
+                const bounds = gridCellBounds(frame, cell.row, cell.col);
+                if (!bounds) continue;
+                highlightedFeatures.push({
+                  type: 'Feature',
+                  properties: { id: z.id, gridCellId: assignment.gridCellId },
+                  geometry: { type: 'Polygon', coordinates: [bounds.ring] },
+                });
               }
             }
           }
@@ -6224,48 +5791,31 @@ export default function MapLibreMap() {
             const memberColor = memberColors[assignment.userId] ?? '#3b82f6';
 
             // If assignment has gridCellId, position label at that cell's center
-            if (cellKey && z.grid?.rows && z.grid?.cols) {
-              const bbox = getZoneBbox(z);
-              if (bbox) {
-                const rows = Math.max(1, z.grid.rows);
-                const cols = Math.max(1, Math.min(26, z.grid.cols));
-                const dx = (bbox.maxLng - bbox.minLng) / cols;
-                const dy = (bbox.maxLat - bbox.minLat) / rows;
-
-                const match = cellKey.match(/^([A-Z])(\d+)$/);
-                if (match) {
-                  const col = match[1].charCodeAt(0) - 'A'.charCodeAt(0);
-                  const row = parseInt(match[2], 10) - 1;
-                  if (col >= 0 && col < cols && row >= 0 && row < rows) {
-                    const squareSizeLng = dx * 0.08;
-                    const squareSizeLat = dy * 0.08;
-                    const gapLng = dx * 0.035;
-                    const baseLng = bbox.minLng + (col + 0.85) * dx;
-                    const baseLat = bbox.minLat + (row + 0.85) * dy;
-                    const squareLng = baseLng - i * (squareSizeLng + gapLng);
-                    const squareLat = baseLat;
-                    const minSquareLng = squareLng - squareSizeLng / 2;
-                    const maxSquareLng = squareLng + squareSizeLng / 2;
-                    const minSquareLat = squareLat - squareSizeLat / 2;
-                    const maxSquareLat = squareLat + squareSizeLat / 2;
-                    labelsFeatures.push({
-                      type: 'Feature',
-                      properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
-                      geometry: {
-                        type: 'Polygon',
-                        coordinates: [[
-                          [minSquareLng, minSquareLat],
-                          [maxSquareLng, minSquareLat],
-                          [maxSquareLng, maxSquareLat],
-                          [minSquareLng, maxSquareLat],
-                          [minSquareLng, minSquareLat],
-                        ]],
-                      },
-                    });
-                  }
-                }
-              }
-            } else {
+            const cellFrame = cellKey ? getZoneGridFrame(z) : null;
+            const cell = cellKey && cellFrame ? parseGridCellId(cellKey) : null;
+            if (cellFrame && cell && isCellInGrid(cellFrame, cell.row, cell.col)) {
+              // Petit carré positionné en unités de case (0.08 de case de côté, 0.035 d'écart),
+              // puis projeté sur le terrain: il suit donc la rotation d'une grille diag45.
+              const half = 0.04;
+              const centerCol = cell.col + 0.85 - i * (0.08 + 0.035);
+              const centerRow = cell.row + 0.85;
+              const corners: [number, number][] = (
+                [
+                  [centerCol - half, centerRow - half],
+                  [centerCol + half, centerRow - half],
+                  [centerCol + half, centerRow + half],
+                  [centerCol - half, centerRow + half],
+                ] as [number, number][]
+              ).map(([c, r]) => {
+                const p = cellFrame.cellToLngLat(c, r);
+                return [p.lng, p.lat] as [number, number];
+              });
+              labelsFeatures.push({
+                type: 'Feature',
+                properties: { zoneId: z.id, memberName, memberColor, userId: assignment.userId },
+                geometry: { type: 'Polygon', coordinates: [[...corners, corners[0]]] },
+              });
+            } else if (!cellKey || !cellFrame) {
               // Fallback: position at zone center with vertical offset
               const center = z.type === 'circle' && z.circle
                 ? z.circle.center
