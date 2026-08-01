@@ -141,8 +141,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const u = await login(email, password);
-    clearCachedMissionState();
     try {
+      const lastUserId = localStorage.getItem(LAST_USER_KEY);
+      // Only wipe mission state (including the offline pendingActions queue) when a
+      // DIFFERENT user is signing in — re-authenticating after a session expiry must
+      // not discard this same user's still-unsynced offline edits.
+      if (lastUserId && lastUserId !== u.id) {
+        clearCachedMissionState();
+      }
       localStorage.removeItem(EXPLICIT_LOGOUT_KEY);
       localStorage.setItem(LAST_USER_KEY, u.id);
     } catch {

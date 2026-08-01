@@ -31,8 +31,9 @@ function IndexRedirect() {
 }
 
 function LegacyMissionRedirect() {
-  const { missionId } = useParams();
-  return <Navigate to={`/mission/${missionId}`} replace />;
+  const { missionId, '*': rest } = useParams();
+  const suffix = rest ? `/${rest}` : '';
+  return <Navigate to={`/mission/${missionId}${suffix}`} replace />;
 }
 
 function MissionLayoutRoute() {

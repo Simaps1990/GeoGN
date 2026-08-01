@@ -6,6 +6,12 @@ let socket: Socket | null = null;
 let lastToken: string | null = null;
 let lastBaseUrl: string | null = null;
 let refreshing: boolean = false;
+let lastRefreshAttemptMs = 0;
+// /auth/refresh is rate-limited (5/min). Socket.IO retries connect_error on its
+// own backoff (as often as every ~1s) forever, so without a cooldown here each
+// retry re-triggers a refresh call and the rate limit never gets a quiet
+// window to reset — a permanent lockout instead of a transient one.
+const REFRESH_COOLDOWN_MS = 15_000;
 
 export function getSocket() {
   const baseUrl = getApiBaseUrl();
@@ -26,9 +32,11 @@ export function getSocket() {
     // Handle connection errors due to expired token
     socket.on('connect_error', async (error) => {
       if (refreshing || !socket) return;
-      
+
       const errorMessage = error.message?.toLowerCase() || '';
       if (errorMessage.includes('unauthorized') || errorMessage.includes('jwt') || errorMessage.includes('expired')) {
+        if (Date.now() - lastRefreshAttemptMs < REFRESH_COOLDOWN_MS) return;
+        lastRefreshAttemptMs = Date.now();
         refreshing = true;
         try {
           // Try to refresh tokens directly
