@@ -31,6 +31,8 @@ type PersonCaseBody = {
   injuries?: { id: string; locations?: string[] }[];
   diseasesFreeText?: string;
   injuriesFreeText?: string;
+  terrain?: 'route' | 'foret' | 'montagne' | 'marais';
+  medications?: string[];
 };
 
 async function requireAdminMembership(userId: string, missionId: string) {
@@ -77,6 +79,8 @@ function toDto(doc: any) {
       : [],
     diseasesFreeText: typeof doc.diseasesFreeText === 'string' ? doc.diseasesFreeText : '',
     injuriesFreeText: typeof doc.injuriesFreeText === 'string' ? doc.injuriesFreeText : '',
+    terrain: doc.terrain ?? null,
+    medications: Array.isArray(doc.medications) ? doc.medications : [],
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
@@ -285,6 +289,15 @@ export async function personCasesRoutes(app: FastifyInstance) {
             .filter(Boolean)
         : [];
 
+      const terrain = ['route', 'foret', 'montagne', 'marais'].includes(body?.terrain) ? body.terrain : undefined;
+
+      const medications = Array.isArray(body?.medications)
+        ? body.medications
+            .map((x: any) => (typeof x === 'string' ? x.trim() : ''))
+            .filter((x: string) => !!x)
+        : [];
+
+      const unset: any = {};
       const update: any = {
         updatedAt: new Date(),
         lastKnown: {
@@ -295,28 +308,48 @@ export async function personCasesRoutes(app: FastifyInstance) {
           lat,
           when,
         },
-        nextClue,
         mobility,
-        age,
         sex,
         healthStatus,
         diseases,
         injuries,
         diseasesFreeText: typeof body.diseasesFreeText === 'string' ? body.diseasesFreeText.trim() : '',
         injuriesFreeText: typeof body.injuriesFreeText === 'string' ? body.injuriesFreeText.trim() : '',
+        medications,
       };
 
+      if (age === undefined) {
+        unset.age = '';
+      } else {
+        update.age = age;
+      }
+
+      if (nextClue === undefined) {
+        unset.nextClue = '';
+      } else {
+        update.nextClue = nextClue;
+      }
+
+      if (terrain === undefined) {
+        unset.terrain = '';
+      } else {
+        update.terrain = terrain;
+      }
+
       const now = new Date();
+      const updateOps: any = {
+        $set: update,
+        $setOnInsert: {
+          missionId: new mongoose.Types.ObjectId(missionId),
+          createdBy: new mongoose.Types.ObjectId(req.userId),
+          createdAt: now,
+        },
+      };
+      if (Object.keys(unset).length > 0) updateOps.$unset = unset;
+
       const doc = await PersonCaseModel.findOneAndUpdate(
         { missionId },
-        {
-          $set: update,
-          $setOnInsert: {
-            missionId: new mongoose.Types.ObjectId(missionId),
-            createdBy: new mongoose.Types.ObjectId(req.userId),
-            createdAt: now,
-          },
-        },
+        updateOps,
         { new: true, upsert: true }
       ).lean();
 
