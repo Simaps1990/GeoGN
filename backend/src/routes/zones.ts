@@ -373,6 +373,11 @@ export async function zonesRoutes(app: FastifyInstance) {
         if (!zone.grid?.rows || !zone.grid?.cols) {
           return reply.code(400).send({ error: 'ZONE_HAS_NO_GRID' });
         }
+        // Les grilles diag45 utilisent une géométrie/numérotation différente du décodage
+        // axis-aligned utilisé côté rendu → une assignation par carré pointerait au mauvais endroit.
+        if ((zone.grid as any)?.orientation === 'diag45') {
+          return reply.code(400).send({ error: 'GRID_ORIENTATION_NOT_ASSIGNABLE' });
+        }
         const m = gridCellId.match(/^([A-Z])(\d+)$/)!;
         const col = m[1].charCodeAt(0) - 65;
         const row = parseInt(m[2], 10) - 1;
@@ -455,16 +460,13 @@ export async function zonesRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'FORBIDDEN' });
       }
 
-      if (zone.grid?.rows && zone.grid?.cols && !gridCellId) {
-        return reply.code(400).send({ error: 'GRID_CELL_ID_REQUIRED' });
-      }
       if (!zone.grid && gridCellId) {
         return reply.code(400).send({ error: 'ZONE_HAS_NO_GRID' });
       }
 
       const pullRes = await ZoneModel.updateOne(
         { _id: zoneId },
-        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId), ...(gridCellId ? { gridCellId } : {}) } } }
+        { $pull: { assignments: { userId: new mongoose.Types.ObjectId(userId), ...(gridCellId ? { gridCellId } : { gridCellId: { $exists: false } }) } } }
       );
 
       const updated = await ZoneModel.findById(zoneId).lean();
