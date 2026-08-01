@@ -23,7 +23,10 @@ if (!mongoUri) {
   throw new Error('Missing MONGO_URI');
 }
 
-const app = Fastify({ logger: true });
+// Render (and any reverse-proxy host) puts the real client IP in X-Forwarded-For;
+// without this, @fastify/rate-limit's default req.ip key-generator sees the proxy's
+// IP for every request, so all users share one rate-limit bucket.
+const app = Fastify({ logger: true, trustProxy: true });
 
 await app.register(cors, {
   origin: (origin, cb) => {
