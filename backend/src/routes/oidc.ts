@@ -122,7 +122,15 @@ async function oidcPlugin(app: FastifyInstance) {
     const state = gens.state();
 
     const existing = sessionStore.get(sessionId) ?? {};
-    sessionStore.set(sessionId, { ...existing, codeVerifier, state });
+    // expiresAt court sur l'entrée pré-callback : sans lui, un login abandonné
+    // (onglet fermé, réseau coupé) laisse une entrée que la purge périodique
+    // ignore pour toujours. Le callback réécrit une entrée à 8 h.
+    sessionStore.set(sessionId, {
+      ...existing,
+      codeVerifier,
+      state,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
 
     const backendBaseUrl = process.env.BACKEND_BASE_URL!;
 
