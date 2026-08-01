@@ -14,7 +14,7 @@ const HuntIsochroneSchema = new Schema<HuntIsochroneDoc>(
   {
     trackId: { type: Schema.Types.ObjectId, required: true, index: true },
     missionId: { type: Schema.Types.ObjectId, required: true, index: true },
-    ts: { type: Date, required: true, default: () => new Date(), index: true },
+    ts: { type: Date, required: true, default: () => new Date() },
     budgetSec: { type: Number, required: true },
     geojson: { type: Schema.Types.Mixed, required: true },
     providerMeta: { type: Schema.Types.Mixed, required: false },

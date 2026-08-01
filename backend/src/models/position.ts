@@ -32,7 +32,7 @@ const PositionSchema = new Schema<PositionDoc>(
     speed: { type: Number, required: false },
     heading: { type: Number, required: false },
     accuracy: { type: Number, required: false },
-    createdAt: { type: Date, required: true, default: () => new Date(), index: true },
+    createdAt: { type: Date, required: true, default: () => new Date() },
   },
   { collection: 'positions' }
 );
