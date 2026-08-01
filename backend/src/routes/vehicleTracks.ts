@@ -5,6 +5,7 @@ import { MissionModel } from '../models/mission.js';
 import { MissionMemberModel } from '../models/missionMember.js';
 import { UserModel } from '../models/user.js';
 import { VehicleTrackModel } from '../models/vehicleTrack.js';
+import { HuntIsochroneModel } from '../models/huntIsochrone.js';
 import { computeVehicleTomtomReachableRange } from '../traffic/computeVehicleTomtomReachableRange.js';
 
 async function requireAdminMembership(userId: string, missionId: string) {
@@ -531,6 +532,18 @@ export async function vehicleTracksRoutes(app: FastifyInstance) {
 
       if (!res.deletedCount) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+
+      // Nettoyage best-effort des isochrones (HuntIsochrone) liées à cette piste :
+      // ce sont des artefacts de calcul temporaires (déjà purgés par TTL), pas des
+      // enregistrements à valeur d'audit, donc leur suppression physique ici suit
+      // le même précédent que la purge hors-ligne de personCases.ts. Une éventuelle
+      // erreur ne doit pas faire échouer la réponse : la piste est déjà supprimée,
+      // et les isochrones orphelines expireront de toute façon via leur index TTL.
+      try {
+        await HuntIsochroneModel.deleteMany({ trackId: new mongoose.Types.ObjectId(trackId) });
+      } catch (e) {
+        app.log.error({ missionId, trackId, err: e }, 'vehicleTracks delete: HuntIsochrone cleanup failed');
       }
 
       app.io?.to(`mission:${missionId}`).emit('vehicle-track:deleted', {
