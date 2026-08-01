@@ -316,15 +316,16 @@ export async function joinRequestsRoutes(app: FastifyInstance) {
     // On ne répare que les demandes "accepted" pour lesquelles AUCUN MissionMember n'a
     // jamais été créé (cas où l'accept a crashé en cours). Si un MissionMember existe
     // avec removedAt non null (admin a viré le user), on NE répare PAS : c'est intentionnel.
-    const repairs: mongoose.Types.ObjectId[] = [];
-    for (const r of reqsRaw) {
-      if ((r as any).status !== 'accepted') continue;
-      const memberAny = await MissionMemberModel.findOne({
-        missionId,
-        userId: (r as any).requestedBy,
-      }).lean();
-      if (!memberAny) repairs.push((r as any)._id);
-    }
+    const acceptedReqs = reqsRaw.filter((r) => (r as any).status === 'accepted');
+    const acceptedRequesterIds = acceptedReqs.map((r) => (r as any).requestedBy);
+    const membersForAccepted = await MissionMemberModel.find({
+      missionId,
+      userId: { $in: acceptedRequesterIds },
+    }).select({ userId: 1 }).lean();
+    const memberUserIds = new Set(membersForAccepted.map((m) => m.userId.toString()));
+    const repairs = acceptedReqs
+      .filter((r) => !memberUserIds.has((r as any).requestedBy.toString()))
+      .map((r) => (r as any)._id);
 
     if (repairs.length) {
       await MissionJoinRequestModel.updateMany(
