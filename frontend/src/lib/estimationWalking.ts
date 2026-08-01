@@ -117,6 +117,10 @@ export function clamp(n: number, min: number, max: number): number {
 }
 
 export function computeIsNight(lastKnownWhen: string | null): boolean {
+  // NOTE: uses the operator's browser timezone, not the search zone's — GeoGN
+  // currently has no zone-timezone lookup. For most French SAR operations
+  // within mainland France this is a 1-hour-or-less discrepancy at most; flag
+  // if this app is ever used outside a single timezone region.
   if (!lastKnownWhen) return false;
   const d = new Date(lastKnownWhen);
   if (Number.isNaN(d.getTime())) return false;
