@@ -84,6 +84,27 @@ export type ApiZone = {
   updatedAt: string;
 };
 
+export type ApiBaptismAxis = {
+  axisId: string;
+  color: string;
+  name: string | null;
+  suggestions: string[];
+  geometry: { type: 'LineString'; coordinates: [number, number][] };
+  bearing: number;
+};
+
+export type ApiBaptism = {
+  id: string;
+  missionId: string;
+  icon: 'person' | 'car' | 'house';
+  point: { lng: number; lat: number };
+  displayMode: 'colors' | 'tion' | 'both';
+  axes: ApiBaptismAxis[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ApiVehicleTrackOrigin = {
   type: 'address' | 'poi';
   query: string;
@@ -969,4 +990,63 @@ export async function updateZone(
     throw new Error(body?.error ?? 'UPDATE_ZONE_FAILED');
   }
   return (await res.json()) as ApiZone;
+}
+
+export async function getBaptism(missionId: string): Promise<ApiBaptism | null> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'GET_BAPTISM_FAILED');
+  }
+  return (await res.json()) as ApiBaptism;
+}
+
+export async function putBaptism(
+  missionId: string,
+  input: {
+    icon: 'person' | 'car' | 'house';
+    point: { lng: number; lat: number };
+    displayMode: 'colors' | 'tion' | 'both';
+    axes: ApiBaptismAxis[];
+  }
+): Promise<ApiBaptism> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'PUT_BAPTISM_FAILED');
+  }
+  return (await res.json()) as ApiBaptism;
+}
+
+export async function patchBaptism(
+  missionId: string,
+  input: {
+    displayMode?: 'colors' | 'tion' | 'both';
+    axisId?: string;
+    name?: string | null;
+    color?: string;
+    remove?: boolean;
+  }
+): Promise<ApiBaptism> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'PATCH_BAPTISM_FAILED');
+  }
+  return (await res.json()) as ApiBaptism;
+}
+
+export async function deleteBaptism(missionId: string): Promise<void> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'DELETE_BAPTISM_FAILED');
+  }
 }
