@@ -66,6 +66,7 @@ async function getMembership(userId: string, missionId: string) {
   return MissionMemberModel.findOne({
     userId: new mongoose.Types.ObjectId(userId),
     missionId: new mongoose.Types.ObjectId(missionId),
+    removedAt: null,
   }).lean();
 }
 
@@ -208,6 +209,7 @@ export async function baptismsRoutes(app: FastifyInstance) {
         const axis = b.axes.find((a) => a.axisId === body.axisId);
         if (!axis) return reply.code(404).send({ error: 'AXIS_NOT_FOUND' });
         if (body.remove === true) {
+          if (b.axes.length === 1) return reply.code(400).send({ error: 'MIN_AXES' });
           b.axes = b.axes.filter((a) => a.axisId !== body.axisId);
         } else {
           if (body.name !== undefined) {
@@ -243,7 +245,8 @@ export async function baptismsRoutes(app: FastifyInstance) {
       if (!mongoose.Types.ObjectId.isValid(missionId)) return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
       const mem = await getMembership(req.userId, missionId);
       if (!mem || (mem as any).role === 'viewer') return reply.code(403).send({ error: 'FORBIDDEN' });
-      await BaptismModel.deleteOne({ missionId });
+      const result = await BaptismModel.deleteOne({ missionId });
+      if (result.deletedCount === 0) return reply.code(404).send({ error: 'NOT_FOUND' });
       app.io?.to(`mission:${missionId}`).emit('baptism:deleted', { missionId });
       return reply.send({ ok: true });
     }
