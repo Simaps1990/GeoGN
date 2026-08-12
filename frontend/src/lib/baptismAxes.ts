@@ -1,0 +1,294 @@
+export type BaptismIcon = 'person' | 'car' | 'house';
+
+export type OverpassWay = {
+  type: 'way';
+  id: number;
+  tags?: Record<string, string>;
+  nodes: number[];
+  geometry: { lat: number; lon: number }[];
+};
+
+export type BaptismAxisResult = {
+  axisId: string;
+  color: string;
+  name: null;
+  suggestions: string[];
+  geometry: { type: 'LineString'; coordinates: [number, number][] };
+  bearing: number;
+};
+
+export type WalkedAxis = {
+  coords: [number, number][];
+  lengthMeters: number;
+  endType: 'intersection' | 'deadend' | 'cap';
+  firstWayTags: Record<string, string>;
+};
+
+export const AXIS_PALETTE = [
+  '#e6194B', '#4363d8', '#3cb44b', '#ffe119', '#f58231',
+  '#911eb4', '#f032e6', '#42d4f4', '#bfef45', '#9A6324',
+];
+
+const CAR_HIGHWAYS = new Set([
+  'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential',
+  'service', 'living_street', 'track',
+  'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
+]);
+const FOOT_EXTRA = new Set(['footway', 'path', 'cycleway', 'bridleway', 'steps', 'pedestrian']);
+
+export function isWayAllowed(icon: BaptismIcon, highway: string | undefined): boolean {
+  if (!highway) return false;
+  if (CAR_HIGHWAYS.has(highway)) return true;
+  return icon !== 'car' && FOOT_EXTRA.has(highway);
+}
+
+const R = 6371000;
+const VERTEX_SNAP_EPS_METERS = 5;
+const CAP_METERS = 1500;
+const MIN_AXIS_METERS = 10;
+
+export function distMeters(a: [number, number], b: [number, number]): number {
+  const dx = ((b[0] - a[0]) * Math.PI / 180) * Math.cos(((a[1] + b[1]) / 2) * Math.PI / 180) * R;
+  const dy = ((b[1] - a[1]) * Math.PI / 180) * R;
+  return Math.hypot(dx, dy);
+}
+
+export function bearingDeg(a: [number, number], b: [number, number]): number {
+  const f1 = (a[1] * Math.PI) / 180;
+  const f2 = (b[1] * Math.PI) / 180;
+  const dl = ((b[0] - a[0]) * Math.PI) / 180;
+  const y = Math.sin(dl) * Math.cos(f2);
+  const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+export function destinationPoint(origin: [number, number], bearing: number, meters: number): [number, number] {
+  const d = meters / R;
+  const th = (bearing * Math.PI) / 180;
+  const f1 = (origin[1] * Math.PI) / 180;
+  const l1 = (origin[0] * Math.PI) / 180;
+  const f2 = Math.asin(Math.sin(f1) * Math.cos(d) + Math.cos(f1) * Math.sin(d) * Math.cos(th));
+  const l2 = l1 + Math.atan2(Math.sin(th) * Math.sin(d) * Math.cos(f1), Math.cos(d) - Math.sin(f1) * Math.sin(f2));
+  return [((l2 * 180) / Math.PI + 540) % 360 - 180, (f2 * 180) / Math.PI];
+}
+
+type Graph = {
+  ways: Map<number, OverpassWay>;
+  degree: Map<number, number>;
+  occurrences: Map<number, { wayId: number; idx: number }[]>;
+};
+
+function buildGraph(ways: OverpassWay[], icon: BaptismIcon): Graph {
+  const g: Graph = { ways: new Map(), degree: new Map(), occurrences: new Map() };
+  for (const w of ways) {
+    if (
+      w?.type !== 'way' ||
+      !Array.isArray(w.nodes) ||
+      !Array.isArray(w.geometry) ||
+      w.nodes.length !== w.geometry.length ||
+      w.nodes.length < 2 ||
+      !isWayAllowed(icon, w.tags?.highway)
+    )
+      continue;
+    g.ways.set(w.id, w);
+    w.nodes.forEach((n, i) => {
+      const inc = (i > 0 ? 1 : 0) + (i < w.nodes.length - 1 ? 1 : 0);
+      g.degree.set(n, (g.degree.get(n) ?? 0) + inc);
+      const occ = g.occurrences.get(n) ?? [];
+      occ.push({ wayId: w.id, idx: i });
+      g.occurrences.set(n, occ);
+    });
+  }
+  return g;
+}
+
+function wayCoord(w: OverpassWay, i: number): [number, number] {
+  return [w.geometry[i].lon, w.geometry[i].lat];
+}
+
+type Snap = { wayId: number; segIdx: number; t: number; point: [number, number] };
+
+function snapToRoads(g: Graph, p: [number, number]): Snap | null {
+  let best: Snap | null = null;
+  let bestDist = Infinity;
+  const cosLat = Math.cos((p[1] * Math.PI) / 180);
+  for (const w of g.ways.values()) {
+    for (let i = 0; i < w.geometry.length - 1; i++) {
+      const a = wayCoord(w, i);
+      const b = wayCoord(w, i + 1);
+      const ax = (a[0] - p[0]) * cosLat, ay = a[1] - p[1];
+      const bx = (b[0] - p[0]) * cosLat, by = b[1] - p[1];
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2));
+      const q: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const d = distMeters(p, q);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { wayId: w.id, segIdx: i, t, point: q };
+      }
+    }
+  }
+  return best;
+}
+
+type WalkStart = { wayId: number; fromIdx: number; dir: 1 | -1; startPoint: [number, number] };
+
+function walkOne(g: Graph, start: WalkStart): WalkedAxis {
+  const coords: [number, number][] = [start.startPoint];
+  let length = 0;
+  let { wayId, fromIdx, dir } = start;
+  let w = g.ways.get(wayId)!;
+  const firstWayTags = w.tags ?? {};
+  let guard = 0;
+
+  let idx = fromIdx;
+  while (guard++ < 10000) {
+    const nextIdx = idx + dir;
+    if (nextIdx < 0 || nextIdx >= w.nodes.length) break;
+    const c = wayCoord(w, nextIdx);
+    const prev = coords[coords.length - 1];
+    if (c[0] !== prev[0] || c[1] !== prev[1]) {
+      length += distMeters(prev, c);
+      coords.push(c);
+    }
+    if (length >= CAP_METERS) return { coords, lengthMeters: length, endType: 'cap', firstWayTags };
+
+    const nodeId = w.nodes[nextIdx];
+    const deg = g.degree.get(nodeId) ?? 0;
+    if (deg >= 3) return { coords, lengthMeters: length, endType: 'intersection', firstWayTags };
+
+    const atWayEnd = nextIdx === 0 || nextIdx === w.nodes.length - 1;
+    if (atWayEnd) {
+      if (deg <= 1) return { coords, lengthMeters: length, endType: 'deadend', firstWayTags };
+      const occ = (g.occurrences.get(nodeId) ?? []).filter((o) => !(o.wayId === wayId && o.idx === nextIdx));
+      const next = occ[0];
+      if (!next) return { coords, lengthMeters: length, endType: 'deadend', firstWayTags };
+      const nw = g.ways.get(next.wayId)!;
+      wayId = next.wayId;
+      w = nw;
+      idx = next.idx;
+      dir = next.idx === 0 ? 1 : -1;
+      continue;
+    }
+    idx = nextIdx;
+  }
+  return { coords, lengthMeters: length, endType: 'deadend', firstWayTags };
+}
+
+function pointAlong(coords: [number, number][], meters: number): [number, number] {
+  let acc = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = distMeters(coords[i], coords[i + 1]);
+    if (acc + d >= meters && d > 0) {
+      const t = (meters - acc) / d;
+      return [
+        coords[i][0] + (coords[i + 1][0] - coords[i][0]) * t,
+        coords[i][1] + (coords[i + 1][1] - coords[i][1]) * t,
+      ];
+    }
+    acc += d;
+  }
+  return coords[coords.length - 1];
+}
+
+export function computeAxesFromWays(
+  ways: OverpassWay[],
+  point: [number, number],
+  icon: BaptismIcon
+): { axes: BaptismAxisResult[]; walked: WalkedAxis[] } {
+  const g = buildGraph(ways, icon);
+  if (g.ways.size === 0) return { axes: [], walked: [] };
+  const snap = snapToRoads(g, point);
+  if (!snap) return { axes: [], walked: [] };
+
+  const starts: WalkStart[] = [];
+  const w = g.ways.get(snap.wayId)!;
+
+  const vertexCandidates: { idx: number }[] = [{ idx: snap.segIdx }, { idx: snap.segIdx + 1 }];
+  let intersectionVertex: number | null = null;
+  for (const { idx } of vertexCandidates) {
+    const c = wayCoord(w, idx);
+    if (distMeters(snap.point, c) <= VERTEX_SNAP_EPS_METERS && (g.degree.get(w.nodes[idx]) ?? 0) >= 3) {
+      intersectionVertex = idx;
+      break;
+    }
+  }
+
+  if (intersectionVertex !== null) {
+    const nodeId = w.nodes[intersectionVertex];
+    const origin = wayCoord(w, intersectionVertex);
+    const seen = new Set<string>();
+    for (const occ of g.occurrences.get(nodeId) ?? []) {
+      const ow = g.ways.get(occ.wayId)!;
+      for (const dir of [1, -1] as const) {
+        const ni = occ.idx + dir;
+        if (ni < 0 || ni >= ow.nodes.length) continue;
+        const edgeKey = `${occ.wayId}:${Math.min(occ.idx, ni)}`;
+        if (seen.has(edgeKey)) continue;
+        seen.add(edgeKey);
+        starts.push({ wayId: occ.wayId, fromIdx: occ.idx, dir, startPoint: origin });
+      }
+    }
+  } else {
+    starts.push({ wayId: snap.wayId, fromIdx: snap.segIdx + 1, dir: -1, startPoint: snap.point });
+    starts.push({ wayId: snap.wayId, fromIdx: snap.segIdx, dir: 1, startPoint: snap.point });
+  }
+
+  const walked = starts
+    .map((s) => walkOne(g, s))
+    .filter((wa) => wa.coords.length >= 2 && wa.lengthMeters >= MIN_AXIS_METERS);
+
+  const withBearing = walked.map((wa) => ({
+    wa,
+    bearing: bearingDeg(wa.coords[0], pointAlong(wa.coords, Math.min(30, wa.lengthMeters))),
+  }));
+  withBearing.sort((a, b) => a.bearing - b.bearing);
+
+  const axes: BaptismAxisResult[] = withBearing.map((x, i) => ({
+    axisId: `a${i}`,
+    color: AXIS_PALETTE[i % AXIS_PALETTE.length],
+    name: null,
+    suggestions: [],
+    geometry: { type: 'LineString', coordinates: x.wa.coords },
+    bearing: Math.round(x.bearing * 10) / 10 % 360,
+  }));
+
+  return { axes, walked: withBearing.map((x) => x.wa) };
+}
+
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+];
+
+export async function fetchOverpass(query: string): Promise<any> {
+  for (const url of OVERPASS_MIRRORS) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch {
+      // essayer le miroir suivant
+    }
+  }
+  throw new Error('OVERPASS_UNAVAILABLE');
+}
+
+export async function computeBaptismAxes(
+  point: { lng: number; lat: number },
+  icon: BaptismIcon
+): Promise<{ axes: BaptismAxisResult[]; walked: WalkedAxis[] }> {
+  for (const radius of [250, 500]) {
+    const q = `[out:json][timeout:25];way(around:${radius},${point.lat},${point.lng})[highway];out geom;`;
+    const json = await fetchOverpass(q);
+    const result = computeAxesFromWays((json?.elements ?? []) as OverpassWay[], [point.lng, point.lat], icon);
+    if (result.axes.length > 0) return result;
+  }
+  throw new Error('NO_ROAD_NEARBY');
+}
