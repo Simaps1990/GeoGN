@@ -98,11 +98,16 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
         displayMode: baptism?.displayMode ?? 'colors',
         axes,
       });
-      setBaptism(saved);
-      setDraft(null);
-      return true;
+      if (missionRef.current === missionId) {
+        setBaptism(saved);
+        setDraft(null);
+        return true;
+      }
+      return false;
     } catch (e: any) {
-      setComputeError(e?.message === 'NO_ROAD_NEARBY' ? 'NO_ROAD_NEARBY' : 'OVERPASS_UNAVAILABLE');
+      if (missionRef.current === missionId) {
+        setComputeError(e?.message === 'NO_ROAD_NEARBY' ? 'NO_ROAD_NEARBY' : 'OVERPASS_UNAVAILABLE');
+      }
       return false;
     } finally {
       setComputing(false);
@@ -113,7 +118,9 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     const missionId = missionRef.current;
     if (!missionId) return;
     const updated = await patchBaptism(missionId, input);
-    setBaptism(updated);
+    if (missionRef.current === missionId) {
+      setBaptism(updated);
+    }
   }, []);
 
   const renameAxis = useCallback((axisId: string, name: string | null) => patch({ axisId, name }), [patch]);
@@ -125,7 +132,9 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     const missionId = missionRef.current;
     if (!missionId) return;
     await deleteBaptism(missionId);
-    setBaptism(null);
+    if (missionRef.current === missionId) {
+      setBaptism(null);
+    }
   }, []);
 
   return {
