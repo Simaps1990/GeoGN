@@ -12,7 +12,7 @@ import { createPoi, createZone, updatePoi, type ApiPoi, type ApiZone } from '../
 // obligerait à dupliquer l'outil actif, le handler de clic carte et la validation:
 // le hook prend donc les deux, comme le composant le faisait.
 
-export type DraftTool = 'none' | 'poi' | 'zone_circle' | 'zone_polygon';
+export type DraftTool = 'none' | 'poi' | 'zone_circle' | 'zone_polygon' | 'baptism';
 
 export type UseMapDraftParams = {
   mapInstanceRef: React.MutableRefObject<MapLibreMapInstance | null>;

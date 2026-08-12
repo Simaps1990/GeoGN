@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 type ValidationModalProps = {
   open: boolean;
   cancelDraft: () => void;
-  activeTool: 'none' | 'poi' | 'zone_circle' | 'zone_polygon';
+  activeTool: 'none' | 'poi' | 'zone_circle' | 'zone_polygon' | 'baptism';
   draftTitle: string;
   setDraftTitle: (v: string) => void;
   poiColorOptions: string[];

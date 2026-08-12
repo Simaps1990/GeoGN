@@ -44,6 +44,8 @@ import { useGridView } from '../contexts/GridViewContext';
 import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { isTestTrack, useVehicleTrack } from '../hooks/useVehicleTrack';
 import { useMapDraft } from '../hooks/useMapDraft';
+import { useBaptism } from '../hooks/useBaptism';
+import { AXIS_PALETTE, destinationPoint, type BaptismIcon } from '../lib/baptismAxes';
 import {
   formatElapsedSince,
   formatHoursToHM,
@@ -207,6 +209,15 @@ function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
   };
 }
 
+const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
+
+function makeBaptismEl(icon: BaptismIcon, dashed: boolean): HTMLDivElement {
+  const el = document.createElement('div');
+  el.textContent = BAPTISM_EMOJI[icon];
+  el.style.cssText = `font-size:20px;line-height:1;background:#fff;border-radius:9999px;padding:6px;border:2px ${dashed ? 'dashed #6b7280' : 'solid #111827'};box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer;`;
+  return el;
+}
+
 export default function MapLibreMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMapInstance | null>(null);
@@ -247,6 +258,8 @@ export default function MapLibreMap() {
   const scaleControlElRef = useRef<HTMLElement | null>(null);
 
   const poiMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const baptismMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const baptismDraftMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   const otherColorsRef = useRef<Record<string, string>>({});
   const otherTracesRef = useRef<Record<string, { lng: number; lat: number; t: number }[]>>({});
@@ -423,6 +436,10 @@ export default function MapLibreMap() {
   const { selectedMissionId } = useMission();
   const { mode, selectedZoneIds, highlightedZoneIds, toggle, toggleSelection, resetBadge } = useGridView();
   const { assignmentsByZoneId, refetch: refetchAssignments } = useZoneAssignments(selectedMissionId);
+  const baptismApi = useBaptism({ selectedMissionId });
+  const [editingAxisId, setEditingAxisId] = useState<string | null>(null);
+  const [baptismMenuOpen, setBaptismMenuOpen] = useState(false);
+  const [baptismPanelOpen, setBaptismPanelOpen] = useState(false);
   // Déclaré ici (et non avec les autres états de toast plus bas) parce que useVehicleTrack
   // en a besoin et que ses valeurs de retour sont lues plus haut dans le rendu.
   const [activityToast, setActivityToast] = useState<string | null>(null);
@@ -1895,6 +1912,33 @@ export default function MapLibreMap() {
     currentUserId: user?.id ?? null,
   });
 
+  // Baptême terrain: annule aussi le brouillon baptême quand la toolbar bascule sur un
+  // autre outil (POI/zone) ou coupe l'outil courant, sinon le marqueur de brouillon et
+  // les axes resteraient affichés alors que activeTool n'est déjà plus 'baptism'.
+  const cancelAnyDraft = useCallback(() => {
+    if (activeTool === 'baptism') baptismApi.cancelDraft();
+    cancelDraft();
+  }, [activeTool, baptismApi, cancelDraft]);
+
+  const onStartBaptism = useCallback(
+    async (icon: BaptismIcon) => {
+      if (baptismApi.baptism) {
+        const ok = await confirmDialog({
+          title: 'Remplacer le baptême actuel ?',
+          message: 'Un baptême existe déjà pour cette mission. Le repositionner remplacera ses axes.',
+          confirmText: 'Remplacer',
+          cancelText: 'Annuler',
+          variant: 'danger',
+        });
+        if (!ok) return;
+      }
+      cancelDraft();
+      baptismApi.startPlacing(icon);
+      setActiveTool('baptism');
+    },
+    [baptismApi, cancelDraft, confirmDialog, setActiveTool]
+  );
+
   // Dernier style réellement appliqué à la carte (à la création ou via setStyle),
   // pour éviter un setStyle redondant au premier rendu.
   const appliedStyleRef = useRef<unknown>(null);
@@ -2448,6 +2492,92 @@ export default function MapLibreMap() {
       map.addSource('cameras', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
 
+    if (!map.getSource('baptism-axes')) {
+      map.addSource('baptism-axes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource('baptism-tion')) {
+      map.addSource('baptism-tion', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+
+    if (!map.getLayer('baptism-chevrons')) {
+      map.addLayer({
+        id: 'baptism-chevrons',
+        type: 'symbol',
+        source: 'baptism-axes',
+        layout: {
+          'symbol-placement': 'line',
+          'symbol-spacing': 45,
+          'text-field': '>',
+          'text-size': 22,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-keep-upright': false,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-rotation-alignment': 'map',
+        },
+        paint: {
+          'text-color': ['get', 'color'],
+          'text-halo-color': '#1f2937',
+          'text-halo-width': 1.5,
+        },
+      });
+    }
+
+    if (!map.getLayer('baptism-tion-casing')) {
+      map.addLayer({
+        id: 'baptism-tion-casing',
+        type: 'line',
+        source: 'baptism-tion',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': '#ffffff', 'line-width': 6 },
+      });
+    }
+    if (!map.getLayer('baptism-tion-arrow')) {
+      map.addLayer({
+        id: 'baptism-tion-arrow',
+        type: 'line',
+        source: 'baptism-tion',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': '#111827', 'line-width': 3 },
+      });
+    }
+    if (!map.getLayer('baptism-tion-head')) {
+      map.addLayer({
+        id: 'baptism-tion-head',
+        type: 'symbol',
+        source: 'baptism-tion',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          'text-field': '>',
+          'text-size': 24,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-rotate': ['get', 'rotation'],
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#111827', 'text-halo-color': '#ffffff', 'text-halo-width': 2 },
+      });
+    }
+    if (!map.getLayer('baptism-tion-label')) {
+      map.addLayer({
+        id: 'baptism-tion-label',
+        type: 'symbol',
+        source: 'baptism-tion',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-size': 13,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#111827', 'text-halo-color': '#ffffff', 'text-halo-width': 2 },
+      });
+    }
+
     // Couches du brouillon (POI et zone en cours de placement), à cet emplacement
     // précis pour ne pas changer l'ordre d'empilement.
     ensureDraftLayers(map);
@@ -2830,12 +2960,153 @@ export default function MapLibreMap() {
     }
   }
 
+  // Baptême terrain: pousse les axes (chevrons) et les flèches/labels TION vers leurs
+  // sources selon le mode d'affichage. Appelée par l'effet de sync ci-dessous ET
+  // directement après un rebuild de style (onLoad / setStyle), comme resyncAllOverlays.
+  function resyncBaptismOverlays(map: MapLibreMapInstance) {
+    const axesSrc = map.getSource('baptism-axes') as GeoJSONSource | undefined;
+    const tionSrc = map.getSource('baptism-tion') as GeoJSONSource | undefined;
+    if (!axesSrc || !tionSrc) return;
+
+    const b = baptismApi.baptism;
+    const showChevrons = !!b && (b.displayMode === 'colors' || b.displayMode === 'both');
+    const showTion = !!b && (b.displayMode === 'tion' || b.displayMode === 'both');
+
+    axesSrc.setData({
+      type: 'FeatureCollection',
+      features: showChevrons
+        ? b!.axes.map((a) => ({
+            type: 'Feature' as const,
+            properties: { axisId: a.axisId, color: a.color },
+            geometry: a.geometry,
+          }))
+        : [],
+    });
+
+    const tionFeatures: GeoJSON.Feature[] = [];
+    if (showTion && b) {
+      for (const a of b.axes) {
+        const origin: [number, number] = [b.point.lng, b.point.lat];
+        const tip = destinationPoint(origin, a.bearing, 120);
+        tionFeatures.push({
+          type: 'Feature',
+          properties: { axisId: a.axisId },
+          geometry: { type: 'LineString', coordinates: [origin, tip] },
+        });
+        tionFeatures.push({
+          type: 'Feature',
+          properties: {
+            axisId: a.axisId,
+            rotation: (a.bearing - 90 + 360) % 360,
+            label: a.name ? `TION ${a.name}` : 'TION ?',
+          },
+          geometry: { type: 'Point', coordinates: tip },
+        });
+      }
+    }
+    tionSrc.setData({ type: 'FeatureCollection', features: tionFeatures });
+  }
+
+  // Resynchro des sources baptism dès que les données changent (mêmes deps que
+  // le pendant zones: [zones, mapReady]). Le cas "sources recréées par un rebuild
+  // de style" est couvert séparément par les appels directs dans onLoad/onStyleData.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+    resyncBaptismOverlays(map);
+  }, [baptismApi.baptism, mapReady]);
+
+  // Marqueur du point de baptême sauvegardé (icône pleine). Tap simple -> ouvre le
+  // panneau baptême (mode d'affichage + suppression). Pas de tap long (cf. brief).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+    baptismMarkerRef.current?.remove();
+    baptismMarkerRef.current = null;
+    const b = baptismApi.baptism;
+    if (b) {
+      const el = makeBaptismEl(b.icon, false);
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        setBaptismPanelOpen(true);
+        setEditingAxisId(null);
+      });
+      baptismMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([b.point.lng, b.point.lat])
+        .addTo(map);
+    }
+    return () => {
+      baptismMarkerRef.current?.remove();
+      baptismMarkerRef.current = null;
+    };
+  }, [baptismApi.baptism, mapReady]);
+
+  // Marqueur de brouillon (icône pointillée, déplaçable) pendant le placement.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+    baptismDraftMarkerRef.current?.remove();
+    baptismDraftMarkerRef.current = null;
+    const d = baptismApi.draft;
+    if (d?.point) {
+      const marker = new maplibregl.Marker({ element: makeBaptismEl(d.icon, true), draggable: true })
+        .setLngLat([d.point.lng, d.point.lat])
+        .addTo(map);
+      marker.on('dragend', () => {
+        const p = marker.getLngLat();
+        baptismApi.placeAt(p.lng, p.lat);
+      });
+      baptismDraftMarkerRef.current = marker;
+    }
+    return () => {
+      baptismDraftMarkerRef.current?.remove();
+      baptismDraftMarkerRef.current = null;
+    };
+  }, [baptismApi.draft, mapReady]);
+
+  // Routage du clic carte pour l'outil baptême: place uniquement le point de
+  // brouillon (pas de POI/zone/popup). Le handler de useMapDraft ne fait déjà rien
+  // pour activeTool === 'baptism' (aucun de ses `if` ne matche), donc pas de risque
+  // de double création: on ajoute juste ici l'action propre au baptême.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+    const onBaptismClick = (e: maplibregl.MapMouseEvent) => {
+      if (activeToolRef.current !== 'baptism') return;
+      baptismApi.placeAt(e.lngLat.lng, e.lngLat.lat);
+    };
+    map.on('click', onBaptismClick);
+    return () => {
+      map.off('click', onBaptismClick);
+    };
+  }, [mapReady, baptismApi.placeAt]);
+
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     if (!mapReady) return;
 
     const onZoneClick = (e: maplibregl.MapMouseEvent) => {
+      // Baptême terrain: un tap sur un chevron/flèche/label TION ouvre l'éditeur d'axe.
+      // Vérifié avant le mode grille car l'édition d'axe doit marcher hors mode grille.
+      // Ignoré pendant un placement en cours (activeTool === 'baptism'): sinon un tap qui
+      // vise juste à poser/déplacer le point de brouillon peut aussi retomber sur un
+      // chevron de l'ancien baptême (toujours affiché tant que confirmDraft n'a pas
+      // remplacé baptismApi.baptism) et ouvrir l'éditeur d'axe par erreur.
+      if (activeToolRef.current !== 'baptism') {
+        const baptismHits = map.queryRenderedFeatures(e.point, {
+          layers: ['baptism-chevrons', 'baptism-tion-label', 'baptism-tion-arrow'].filter((l) => !!map.getLayer(l)),
+        });
+        if (baptismHits.length > 0) {
+          const axisId = baptismHits[0].properties?.axisId as string | undefined;
+          if (axisId) {
+            setEditingAxisId(axisId);
+            setBaptismPanelOpen(false);
+            return;
+          }
+        }
+      }
+
       if (mode === 'off') return;
 
       const features = map.queryRenderedFeatures(e.point, { layers: ['zones-fill', 'zones-outline', 'zones-grid-lines'] });
@@ -2939,6 +3210,7 @@ export default function MapLibreMap() {
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
       resyncDraftOverlays(map);
+      resyncBaptismOverlays(map);
       syncHeatmapVisibility(map);
       setMapReady(true);
     };
@@ -3072,6 +3344,7 @@ export default function MapLibreMap() {
       applyGridLabelStyle(map);
       resyncAllOverlays(map);
       resyncDraftOverlays(map);
+      resyncBaptismOverlays(map);
       applyMyDynamicPaint(map);
 
       try {
@@ -4455,9 +4728,12 @@ export default function MapLibreMap() {
         canEditMap={canEditMap}
         role={role}
         activeTool={activeTool}
-        cancelDraft={cancelDraft}
+        cancelDraft={cancelAnyDraft}
         setZoneMenuOpen={setZoneMenuOpen}
         zoneMenuOpen={zoneMenuOpen}
+        baptismMenuOpen={baptismMenuOpen}
+        setBaptismMenuOpen={setBaptismMenuOpen}
+        onStartBaptism={onStartBaptism}
         setDraftColor={setDraftColor}
         setDraftIcon={setDraftIcon}
         setDraftComment={setDraftComment}
@@ -4773,6 +5049,124 @@ export default function MapLibreMap() {
           </div>
         </div>
       ) : null}
+
+      {baptismApi.draft?.point && (
+        <div className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-xl bg-white p-3 shadow-xl">
+          {baptismApi.computeError ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-red-600">
+                {baptismApi.computeError === 'NO_ROAD_NEARBY'
+                  ? 'Aucune route trouvée à proximité (500 m).'
+                  : 'Overpass indisponible. Vérifie ta connexion.'}
+              </span>
+              <button type="button" className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white" onClick={() => void baptismApi.confirmDraft()}>
+                Réessayer
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">Placer le point puis valider</span>
+              <button
+                type="button"
+                className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                onClick={() => {
+                  baptismApi.cancelDraft();
+                  setActiveTool('none');
+                }}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={baptismApi.computing}
+                className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+                onClick={() => {
+                  void baptismApi.confirmDraft().then((ok) => {
+                    if (ok) setActiveTool('none');
+                  });
+                }}
+              >
+                {baptismApi.computing ? 'Calcul…' : 'Valider'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {editingAxisId && baptismApi.baptism && (() => {
+        const axis = baptismApi.baptism.axes.find((a) => a.axisId === editingAxisId);
+        if (!axis) return null;
+        return (
+          <div className="absolute right-3 top-16 z-20 w-64 rounded-xl bg-white p-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold">Axe {axis.name ? `TION ${axis.name}` : ''}</span>
+              <button type="button" onClick={() => setEditingAxisId(null)} className="text-gray-500">✕</button>
+            </div>
+            <input
+              type="text"
+              defaultValue={axis.name ?? ''}
+              placeholder="Nom (ex. AUCHAN)"
+              className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                void baptismApi.renameAxis(axis.axisId, v ? v : null);
+              }}
+            />
+            <div className="mb-2 flex flex-wrap gap-1">
+              {AXIS_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className="h-6 w-6 rounded-full border-2"
+                  style={{ backgroundColor: c, borderColor: c === axis.color ? '#111827' : 'transparent' }}
+                  onClick={() => void baptismApi.recolorAxis(axis.axisId, c)}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
+              onClick={() => {
+                void baptismApi.removeAxis(axis.axisId);
+                setEditingAxisId(null);
+              }}
+            >
+              Supprimer cet axe
+            </button>
+          </div>
+        );
+      })()}
+
+      {baptismPanelOpen && baptismApi.baptism && (
+        <div className="absolute right-3 top-16 z-20 w-64 rounded-xl bg-white p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold">Baptême terrain</span>
+            <button type="button" onClick={() => setBaptismPanelOpen(false)} className="text-gray-500">✕</button>
+          </div>
+          <div className="mb-2 grid grid-cols-3 gap-1">
+            {(['colors', 'tion', 'both'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`rounded-lg px-2 py-1.5 text-xs ${baptismApi.baptism!.displayMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                onClick={() => void baptismApi.setDisplayMode(m)}
+              >
+                {m === 'colors' ? 'Couleurs' : m === 'tion' ? 'TION' : 'Les deux'}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
+            onClick={() => {
+              void baptismApi.removeBaptism();
+              setBaptismPanelOpen(false);
+            }}
+          >
+            Supprimer le baptême
+          </button>
+        </div>
+      )}
     </div>
   );
 }

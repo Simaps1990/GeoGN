@@ -1,21 +1,25 @@
 import { memo, type Dispatch, type SetStateAction } from 'react';
 import type { Map as MapLibreMapInstance } from 'maplibre-gl';
 import {
+  Car,
   Cctv,
   CircleDot,
   CircleDotDashed,
   Compass,
   Crosshair,
   Grid3x3,
+  Home,
   Layers,
   MapPin,
   Navigation2,
   PawPrint,
   Ruler,
   Settings,
+  Signpost,
   Spline,
   Tag,
   Timer,
+  User,
 } from 'lucide-react';
 import type { ApiPersonCase } from '../lib/api';
 
@@ -26,16 +30,20 @@ type MapRightToolbarProps = {
 
   canEditMap: boolean;
   role: 'admin' | 'member' | 'viewer' | null;
-  activeTool: 'none' | 'poi' | 'zone_circle' | 'zone_polygon';
+  activeTool: 'none' | 'poi' | 'zone_circle' | 'zone_polygon' | 'baptism';
   cancelDraft: () => void;
 
   setZoneMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   zoneMenuOpen: boolean;
 
+  baptismMenuOpen: boolean;
+  setBaptismMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
+  onStartBaptism: (icon: 'person' | 'car' | 'house') => void;
+
   setDraftColor: (v: string) => void;
   setDraftIcon: (v: string) => void;
   setDraftComment: (v: string) => void;
-  setActiveTool: Dispatch<SetStateAction<'none' | 'poi' | 'zone_circle' | 'zone_polygon'>>;
+  setActiveTool: Dispatch<SetStateAction<'none' | 'poi' | 'zone_circle' | 'zone_polygon' | 'baptism'>>;
 
   settingsMenuOpen: boolean;
   setSettingsMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
@@ -94,6 +102,9 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   cancelDraft,
   setZoneMenuOpen,
   zoneMenuOpen,
+  baptismMenuOpen,
+  setBaptismMenuOpen,
+  onStartBaptism,
   setDraftColor,
   setDraftIcon,
   setDraftComment,
@@ -281,6 +292,65 @@ export const MapRightToolbar = memo(function MapRightToolbar({
           </div>
         </div>
       ) : null}
+
+      {canEditMap && (
+        <div className="relative">
+          <button
+            type="button"
+            title="Baptême terrain"
+            onClick={() => {
+              if (activeTool === 'baptism') {
+                cancelDraft();
+                setBaptismMenuOpen(false);
+                return;
+              }
+              setBaptismMenuOpen((v) => !v);
+            }}
+            className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+              baptismMenuOpen || activeTool === 'baptism' ? 'ring-1 ring-inset ring-blue-500/25' : ''
+            }`}
+          >
+            <Signpost className={baptismMenuOpen || activeTool === 'baptism' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
+          </button>
+          {baptismMenuOpen && (
+            <div className="absolute right-full top-0 mr-2 flex flex-col gap-2 rounded-2xl bg-white/90 p-1.5 shadow backdrop-blur">
+              <button
+                type="button"
+                title="Personne"
+                onClick={() => {
+                  onStartBaptism('person');
+                  setBaptismMenuOpen(false);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
+              >
+                <User className="text-gray-600" size={20} />
+              </button>
+              <button
+                type="button"
+                title="Voiture"
+                onClick={() => {
+                  onStartBaptism('car');
+                  setBaptismMenuOpen(false);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
+              >
+                <Car className="text-gray-600" size={20} />
+              </button>
+              <button
+                type="button"
+                title="Domicile"
+                onClick={() => {
+                  onStartBaptism('house');
+                  setBaptismMenuOpen(false);
+                }}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
+              >
+                <Home className="text-gray-600" size={20} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="relative">
         {(() => {
