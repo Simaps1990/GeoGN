@@ -13,6 +13,7 @@ import { joinRequestsRoutes } from './routes/joinRequests.js';
 import { poisRoutes } from './routes/pois.js';
 import { personCasesRoutes } from './routes/personCases.js';
 import { zonesRoutes } from './routes/zones.js';
+import { baptismsRoutes } from './routes/baptisms.js';
 import { vehicleTracksRoutes } from './routes/vehicleTracks.js';
 import oidcPlugin from './routes/oidc.js';
 import { setupSocket } from './socket.js';
@@ -65,6 +66,7 @@ await joinRequestsRoutes(app);
 await poisRoutes(app);
 await personCasesRoutes(app);
 await zonesRoutes(app);
+await baptismsRoutes(app);
 await vehicleTracksRoutes(app);
 
 app.get('/health', async () => ({ ok: true }));
