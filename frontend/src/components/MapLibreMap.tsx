@@ -2047,6 +2047,13 @@ export default function MapLibreMap() {
     safeMoveToTop('cameras');
     safeMoveToTop('cameras-labels');
 
+    // Baptême terrain: chevrons/flèches/labels TION au-dessus des autres overlays
+    safeMoveToTop('baptism-chevrons');
+    safeMoveToTop('baptism-tion-casing');
+    safeMoveToTop('baptism-tion-arrow');
+    safeMoveToTop('baptism-tion-head');
+    safeMoveToTop('baptism-tion-label');
+
     // Toujours au-dessus de tout le reste (POI, zones, traces, labels, caméras, etc.)
     safeMoveToTop('me-dot');
   }
@@ -3087,23 +3094,25 @@ export default function MapLibreMap() {
     if (!mapReady) return;
 
     const onZoneClick = (e: maplibregl.MapMouseEvent) => {
+      // Baptême terrain: pendant un placement en cours, ce handler (édition d'axe ET
+      // sélection grille) doit rester entièrement inerte — le clic est dédié à
+      // poser/déplacer le point de brouillon (cf. l'effet onBaptismClick dédié).
+      // Sans ce retour anticipé, un tap qui vise juste le brouillon peut aussi retomber
+      // sur une feature zone/grille (toggleSelection) ou un chevron de l'ancien baptême
+      // (toujours affiché tant que confirmDraft n'a pas remplacé baptismApi.baptism).
+      if (activeToolRef.current === 'baptism') return;
+
       // Baptême terrain: un tap sur un chevron/flèche/label TION ouvre l'éditeur d'axe.
       // Vérifié avant le mode grille car l'édition d'axe doit marcher hors mode grille.
-      // Ignoré pendant un placement en cours (activeTool === 'baptism'): sinon un tap qui
-      // vise juste à poser/déplacer le point de brouillon peut aussi retomber sur un
-      // chevron de l'ancien baptême (toujours affiché tant que confirmDraft n'a pas
-      // remplacé baptismApi.baptism) et ouvrir l'éditeur d'axe par erreur.
-      if (activeToolRef.current !== 'baptism') {
-        const baptismHits = map.queryRenderedFeatures(e.point, {
-          layers: ['baptism-chevrons', 'baptism-tion-label', 'baptism-tion-arrow'].filter((l) => !!map.getLayer(l)),
-        });
-        if (baptismHits.length > 0) {
-          const axisId = baptismHits[0].properties?.axisId as string | undefined;
-          if (axisId) {
-            setEditingAxisId(axisId);
-            setBaptismPanelOpen(false);
-            return;
-          }
+      const baptismHits = map.queryRenderedFeatures(e.point, {
+        layers: ['baptism-chevrons', 'baptism-tion-label', 'baptism-tion-arrow'].filter((l) => !!map.getLayer(l)),
+      });
+      if (baptismHits.length > 0) {
+        const axisId = baptismHits[0].properties?.axisId as string | undefined;
+        if (axisId) {
+          setEditingAxisId(axisId);
+          setBaptismPanelOpen(false);
+          return;
         }
       }
 
