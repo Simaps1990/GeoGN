@@ -16,6 +16,7 @@ export type UseBaptismResult = {
   draft: BaptismDraftState | null;
   computing: boolean;
   computeError: string | null;
+  mutationError: string | null;
   startPlacing: (icon: BaptismIcon) => void;
   placeAt: (lng: number, lat: number) => void;
   cancelDraft: () => void;
@@ -32,13 +33,20 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const [draft, setDraft] = useState<BaptismDraftState | null>(null);
   const [computing, setComputing] = useState(false);
   const [computeError, setComputeError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const missionRef = useRef(selectedMissionId);
   missionRef.current = selectedMissionId;
+  // Baptême terrain: identité du brouillon courant, lue par confirmDraft après ses
+  // awaits pour détecter une annulation (cancelDraft met draft à null) survenue
+  // pendant le calcul Overpass ou le PUT, et abandonner sans ressusciter l'état.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   useEffect(() => {
     setBaptism(null);
     setDraft(null);
     setComputeError(null);
+    setMutationError(null);
     if (!selectedMissionId) return;
     let cancelled = false;
     getBaptism(selectedMissionId)
@@ -92,21 +100,22 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     setComputeError(null);
     try {
       const { axes } = await computeBaptismAxes(d.point, d.icon);
+      // Annulé (cancelDraft) pendant le calcul : ne pas envoyer le PUT.
+      if (draftRef.current !== d) return false;
       const saved = await putBaptism(missionId, {
         icon: d.icon,
         point: d.point,
         displayMode: baptism?.displayMode ?? 'colors',
         axes,
       });
-      if (missionRef.current === missionId) {
-        setBaptism(saved);
-        setDraft(null);
-        return true;
-      }
-      return false;
+      // Annulé pendant le PUT, ou mission changée entretemps : ne pas ressusciter l'état.
+      if (draftRef.current !== d || missionRef.current !== missionId) return false;
+      setBaptism(saved);
+      setDraft(null);
+      return true;
     } catch (e: any) {
       if (missionRef.current === missionId) {
-        setComputeError(e?.message === 'NO_ROAD_NEARBY' ? 'NO_ROAD_NEARBY' : 'OVERPASS_UNAVAILABLE');
+        setComputeError(e?.message || 'OVERPASS_UNAVAILABLE');
       }
       return false;
     } finally {
@@ -117,9 +126,14 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const patch = useCallback(async (input: Parameters<typeof patchBaptism>[1]) => {
     const missionId = missionRef.current;
     if (!missionId) return;
-    const updated = await patchBaptism(missionId, input);
-    if (missionRef.current === missionId) {
-      setBaptism(updated);
+    try {
+      const updated = await patchBaptism(missionId, input);
+      if (missionRef.current === missionId) {
+        setBaptism(updated);
+        setMutationError(null);
+      }
+    } catch (e: any) {
+      if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
     }
   }, []);
 
@@ -131,9 +145,14 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const removeBaptism = useCallback(async () => {
     const missionId = missionRef.current;
     if (!missionId) return;
-    await deleteBaptism(missionId);
-    if (missionRef.current === missionId) {
-      setBaptism(null);
+    try {
+      await deleteBaptism(missionId);
+      if (missionRef.current === missionId) {
+        setBaptism(null);
+        setMutationError(null);
+      }
+    } catch (e: any) {
+      if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
     }
   }, []);
 
@@ -142,6 +161,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     draft,
     computing,
     computeError,
+    mutationError,
     startPlacing,
     placeAt,
     cancelDraft,

@@ -48,6 +48,9 @@ const R = 6371000;
 const VERTEX_SNAP_EPS_METERS = 5;
 const CAP_METERS = 1500;
 const MIN_AXIS_METERS = 10;
+// Limites miroir du backend (validateAxis/validateAxes) : au-delà, le PUT est rejeté.
+const MAX_AXIS_COORDS = 500;
+const MAX_AXES = 20;
 
 export function distMeters(a: [number, number], b: [number, number]): number {
   const dx = ((b[0] - a[0]) * Math.PI / 180) * Math.cos(((a[1] + b[1]) / 2) * Math.PI / 180) * R;
@@ -178,6 +181,20 @@ function walkOne(g: Graph, start: WalkStart): WalkedAxis {
   return { coords, lengthMeters: length, endType: 'deadend', firstWayTags };
 }
 
+// Réduit une polyligne dense (ex. tracé GPS) à `max` sommets max : garde le premier,
+// le dernier, et des points intermédiaires régulièrement espacés dans la liste.
+function decimateCoords(coords: [number, number][], max: number): [number, number][] {
+  if (coords.length <= max) return coords;
+  const lastIdx = coords.length - 1;
+  const innerCount = max - 2;
+  const out: [number, number][] = [coords[0]];
+  for (let i = 1; i <= innerCount; i++) {
+    out.push(coords[Math.round((i * lastIdx) / (innerCount + 1))]);
+  }
+  out.push(coords[lastIdx]);
+  return out;
+}
+
 function pointAlong(coords: [number, number][], meters: number): [number, number] {
   let acc = 0;
   for (let i = 0; i < coords.length - 1; i++) {
@@ -246,17 +263,18 @@ export function computeAxesFromWays(
     bearing: bearingDeg(wa.coords[0], pointAlong(wa.coords, Math.min(30, wa.lengthMeters))),
   }));
   withBearing.sort((a, b) => a.bearing - b.bearing);
+  const capped = withBearing.slice(0, MAX_AXES);
 
-  const axes: BaptismAxisResult[] = withBearing.map((x, i) => ({
+  const axes: BaptismAxisResult[] = capped.map((x, i) => ({
     axisId: `a${i}`,
     color: AXIS_PALETTE[i % AXIS_PALETTE.length],
     name: null,
     suggestions: [],
-    geometry: { type: 'LineString', coordinates: x.wa.coords },
+    geometry: { type: 'LineString', coordinates: decimateCoords(x.wa.coords, MAX_AXIS_COORDS) },
     bearing: Math.round(x.bearing * 10) / 10 % 360,
   }));
 
-  return { axes, walked: withBearing.map((x) => x.wa) };
+  return { axes, walked: capped.map((x) => x.wa) };
 }
 
 const OVERPASS_MIRRORS = [
@@ -272,6 +290,7 @@ export async function fetchOverpass(query: string): Promise<any> {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();

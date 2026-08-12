@@ -127,3 +127,21 @@ test('filtrage par icône sur un croisement route/sentier', () => {
 test('aucune route : résultat vide', () => {
   assert.equal(computeAxesFromWays([], [2, 48], 'car').axes.length, 0);
 });
+
+test('way dense (tracé GPS) : la géométrie renvoyée est décimée à 500 sommets max, et la liste d’axes plafonnée à 20', () => {
+  const nodes: number[] = [];
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= 550; i++) {
+    nodes.push(5000 + i);
+    pts.push([2 + i * 0.00002, 48]); // ~1.5 m entre sommets, ~825 m au total (< CAP_METERS)
+  }
+  const DENSE = [way(1, nodes, pts)];
+  const { axes } = computeAxesFromWays(DENSE, [2.00001, 48], 'car');
+  assert.ok(axes.length > 0, 'au moins un axe attendu');
+  axes.forEach((a) => {
+    assert.ok(a.geometry.coordinates.length <= 500, `${a.geometry.coordinates.length} sommets > 500`);
+  });
+  // Vérifie que la décimation a effectivement réduit un axe qui comptait >500 sommets bruts.
+  assert.ok(axes.some((a) => a.geometry.coordinates.length === 500));
+  assert.ok(axes.length <= 20);
+});

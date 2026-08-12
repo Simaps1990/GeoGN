@@ -5062,12 +5062,24 @@ export default function MapLibreMap() {
       {baptismApi.draft?.point && (
         <div className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-xl bg-white p-3 shadow-xl">
           {baptismApi.computeError ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-red-600">
                 {baptismApi.computeError === 'NO_ROAD_NEARBY'
                   ? 'Aucune route trouvée à proximité (500 m).'
-                  : 'Overpass indisponible. Vérifie ta connexion.'}
+                  : baptismApi.computeError === 'OVERPASS_UNAVAILABLE'
+                    ? 'Overpass indisponible. Vérifie ta connexion.'
+                    : `Échec de l'enregistrement (${baptismApi.computeError}).`}
               </span>
+              <button
+                type="button"
+                className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                onClick={() => {
+                  baptismApi.cancelDraft();
+                  setActiveTool('none');
+                }}
+              >
+                Annuler
+              </button>
               <button type="button" className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white" onClick={() => void baptismApi.confirmDraft()}>
                 Réessayer
               </button>
@@ -5106,88 +5118,107 @@ export default function MapLibreMap() {
         const axis = baptismApi.baptism.axes.find((a) => a.axisId === editingAxisId);
         if (!axis) return null;
         return (
-          <div className="absolute right-3 top-16 z-20 w-64 rounded-xl bg-white p-3 shadow-xl">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-semibold">Axe {axis.name ? `TION ${axis.name}` : ''}</span>
-              <button type="button" onClick={() => setEditingAxisId(null)} className="text-gray-500">✕</button>
-            </div>
-            <input
-              type="text"
-              defaultValue={axis.name ?? ''}
-              placeholder="Nom (ex. AUCHAN)"
-              className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                void baptismApi.renameAxis(axis.axisId, v ? v : null);
-              }}
-            />
-            {axis.suggestions.length > 0 && (
+          <div key={axis.axisId} className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
+            <div className="rounded-xl bg-white p-3 shadow-xl">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold">Axe {axis.name ? `TION ${axis.name}` : ''}</span>
+                <button type="button" onClick={() => setEditingAxisId(null)} className="text-gray-500">✕</button>
+              </div>
+              {baptismApi.mutationError && (
+                <p className="mb-2 text-xs text-red-600">
+                  {baptismApi.mutationError === 'MIN_AXES'
+                    ? 'Dernier axe : supprime le baptême pour tout effacer.'
+                    : baptismApi.mutationError}
+                </p>
+              )}
+              <input
+                type="text"
+                defaultValue={axis.name ?? ''}
+                placeholder="Nom (ex. AUCHAN)"
+                maxLength={40}
+                className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  void baptismApi.renameAxis(axis.axisId, v ? v : null);
+                }}
+              />
+              {axis.suggestions.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {axis.suggestions.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`rounded-full px-2 py-1 text-xs ${axis.name === s ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                      onClick={() => void baptismApi.renameAxis(axis.axisId, s)}
+                    >
+                      TION {s}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="mb-2 flex flex-wrap gap-1">
-                {axis.suggestions.map((s) => (
+                {AXIS_PALETTE.map((c) => (
                   <button
-                    key={s}
+                    key={c}
                     type="button"
-                    className={`rounded-full px-2 py-1 text-xs ${axis.name === s ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
-                    onClick={() => void baptismApi.renameAxis(axis.axisId, s)}
-                  >
-                    TION {s}
-                  </button>
+                    className="h-6 w-6 rounded-full border-2"
+                    style={{ backgroundColor: c, borderColor: c === axis.color ? '#111827' : 'transparent' }}
+                    onClick={() => void baptismApi.recolorAxis(axis.axisId, c)}
+                  />
                 ))}
               </div>
+              <button
+                type="button"
+                className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
+                onClick={() => {
+                  void baptismApi.removeAxis(axis.axisId);
+                  setEditingAxisId(null);
+                }}
+              >
+                Supprimer cet axe
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {baptismPanelOpen && baptismApi.baptism && (
+        <div className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
+          <div className="rounded-xl bg-white p-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold">Baptême terrain</span>
+              <button type="button" onClick={() => setBaptismPanelOpen(false)} className="text-gray-500">✕</button>
+            </div>
+            {baptismApi.mutationError && (
+              <p className="mb-2 text-xs text-red-600">
+                {baptismApi.mutationError === 'MIN_AXES'
+                  ? 'Dernier axe : supprime le baptême pour tout effacer.'
+                  : baptismApi.mutationError}
+              </p>
             )}
             <div className="mb-2 flex flex-wrap gap-1">
-              {AXIS_PALETTE.map((c) => (
+              {(['colors', 'tion', 'both'] as const).map((m) => (
                 <button
-                  key={c}
+                  key={m}
                   type="button"
-                  className="h-6 w-6 rounded-full border-2"
-                  style={{ backgroundColor: c, borderColor: c === axis.color ? '#111827' : 'transparent' }}
-                  onClick={() => void baptismApi.recolorAxis(axis.axisId, c)}
-                />
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${baptismApi.baptism!.displayMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                  onClick={() => void baptismApi.setDisplayMode(m)}
+                >
+                  {m === 'colors' ? 'Couleurs' : m === 'tion' ? 'TION' : 'Les deux'}
+                </button>
               ))}
             </div>
             <button
               type="button"
               className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
               onClick={() => {
-                void baptismApi.removeAxis(axis.axisId);
-                setEditingAxisId(null);
+                void baptismApi.removeBaptism();
+                setBaptismPanelOpen(false);
               }}
             >
-              Supprimer cet axe
+              Supprimer le baptême
             </button>
           </div>
-        );
-      })()}
-
-      {baptismPanelOpen && baptismApi.baptism && (
-        <div className="absolute right-3 top-16 z-20 w-64 rounded-xl bg-white p-3 shadow-xl">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold">Baptême terrain</span>
-            <button type="button" onClick={() => setBaptismPanelOpen(false)} className="text-gray-500">✕</button>
-          </div>
-          <div className="mb-2 grid grid-cols-3 gap-1">
-            {(['colors', 'tion', 'both'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`rounded-lg px-2 py-1.5 text-xs ${baptismApi.baptism!.displayMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
-                onClick={() => void baptismApi.setDisplayMode(m)}
-              >
-                {m === 'colors' ? 'Couleurs' : m === 'tion' ? 'TION' : 'Les deux'}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
-            onClick={() => {
-              void baptismApi.removeBaptism();
-              setBaptismPanelOpen(false);
-            }}
-          >
-            Supprimer le baptême
-          </button>
         </div>
       )}
     </div>
