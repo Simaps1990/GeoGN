@@ -71,3 +71,17 @@ test('fallbackAxisName : ref, puis name, puis cardinal', () => {
   assert.equal(fallbackAxisName({ name: 'Rue des Lilas' }, 45), 'RUE DES LILAS');
   assert.equal(fallbackAxisName({}, 45), 'NORD-EST');
 });
+
+test('les noms trop longs sont tronqués à 40 caractères (limite backend)', () => {
+  const origin: [number, number] = [2, 48];
+  const candidates: NamedCandidate[] = [
+    { name: 'Centre Hospitalier Universitaire de Poitiers', point: [2.005, 48.0001], tier: 1 },
+  ];
+  assert.deepEqual(rankAxisSuggestions(90, origin, candidates), [
+    'CENTRE HOSPITALIER UNIVERSITAIRE DE POIT',
+  ]);
+  assert.equal(
+    fallbackAxisName({ name: 'Avenue du General Leclerc de Hauteclocque' }, 45),
+    'AVENUE DU GENERAL LECLERC DE HAUTECLOCQU'
+  );
+});

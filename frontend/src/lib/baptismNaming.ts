@@ -61,7 +61,7 @@ export function rankAxisSuggestions(
   const seen = new Set<string>();
   const names: string[] = [];
   for (const { c } of scored) {
-    const up = c.name.toUpperCase();
+    const up = c.name.toUpperCase().slice(0, 40);
     if (seen.has(up)) continue;
     seen.add(up);
     names.push(up);
@@ -71,7 +71,7 @@ export function rankAxisSuggestions(
 }
 
 export function fallbackAxisName(firstWayTags: Record<string, string>, bearing: number): string {
-  if (firstWayTags.ref) return firstWayTags.ref.toUpperCase();
-  if (firstWayTags.name) return firstWayTags.name.toUpperCase();
+  if (firstWayTags.ref) return firstWayTags.ref.toUpperCase().slice(0, 40);
+  if (firstWayTags.name) return firstWayTags.name.toUpperCase().slice(0, 40);
   return cardinalName(bearing);
 }
