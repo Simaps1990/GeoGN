@@ -5121,6 +5121,20 @@ export default function MapLibreMap() {
                 void baptismApi.renameAxis(axis.axisId, v ? v : null);
               }}
             />
+            {axis.suggestions.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {axis.suggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`rounded-full px-2 py-1 text-xs ${axis.name === s ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                    onClick={() => void baptismApi.renameAxis(axis.axisId, s)}
+                  >
+                    TION {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mb-2 flex flex-wrap gap-1">
               {AXIS_PALETTE.map((c) => (
                 <button

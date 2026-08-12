@@ -1,3 +1,5 @@
+import { buildPoiQuery, parseOverpassPois, rankAxisSuggestions, fallbackAxisName } from './baptismNaming';
+
 export type BaptismIcon = 'person' | 'car' | 'house';
 
 export type OverpassWay = {
@@ -11,7 +13,7 @@ export type OverpassWay = {
 export type BaptismAxisResult = {
   axisId: string;
   color: string;
-  name: null;
+  name: string | null;
   suggestions: string[];
   geometry: { type: 'LineString'; coordinates: [number, number][] };
   bearing: number;
@@ -288,7 +290,24 @@ export async function computeBaptismAxes(
     const q = `[out:json][timeout:25];way(around:${radius},${point.lat},${point.lng})[highway];out geom;`;
     const json = await fetchOverpass(q);
     const result = computeAxesFromWays((json?.elements ?? []) as OverpassWay[], [point.lng, point.lat], icon);
-    if (result.axes.length > 0) return result;
+    if (result.axes.length === 0) continue;
+
+    let candidates: ReturnType<typeof parseOverpassPois> = [];
+    try {
+      const poisJson = await fetchOverpass(buildPoiQuery(point.lat, point.lng));
+      candidates = parseOverpassPois(poisJson);
+    } catch {
+      // non bloquant : on retombe sur le repli (ref/nom de route, cardinal)
+    }
+    const origin: [number, number] = [point.lng, point.lat];
+    const named = result.axes.map((a, i) => {
+      const suggestions = rankAxisSuggestions(a.bearing, origin, candidates);
+      const fallback = fallbackAxisName(result.walked[i]?.firstWayTags ?? {}, a.bearing);
+      const all = [...suggestions];
+      if (!all.includes(fallback)) all.push(fallback);
+      return { ...a, suggestions: all.slice(0, 5), name: all[0] ?? null };
+    });
+    return { axes: named, walked: result.walked };
   }
   throw new Error('NO_ROAD_NEARBY');
 }
