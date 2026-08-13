@@ -124,7 +124,7 @@ export default function MissionMapPage() {
           {baptismArmed && !baptismPlaced ? (
             <div className="flex h-12 items-center justify-center gap-2 px-2">
               <div className="flex h-12 min-w-0 flex-1 items-center justify-center rounded-2xl border bg-white/90 px-3 text-sm font-medium text-gray-800 shadow backdrop-blur">
-                <span className="truncate">Touche la carte pour placer le point</span>
+                <span className="truncate">Touche la carte</span>
               </div>
               <button
                 type="button"
