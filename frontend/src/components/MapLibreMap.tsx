@@ -3389,11 +3389,24 @@ export default function MapLibreMap() {
     };
 
     const onStyleData = () => {
+      // Baptême terrain : indépendant du chargement des tuiles raster du fond de carte.
+      // L'event 'load' de MapLibre attend que les tuiles de la vue initiale aient fini
+      // de charger (succès OU échec) — sur un réseau terrain dégradé où elles restent
+      // throttlées/en échec en boucle (retries), 'load' peut être retardé de dizaines de
+      // secondes, voire ne jamais survenir. Les couches/sources baptême, elles, n'ont besoin
+      // que du document de style (mutable dès `isStyleLoaded()`), pas des images de tuile :
+      // on les crée et on les peuple dès que le style est utilisable, sans attendre 'load'.
+      // `ensureOverlays`/`resyncBaptismOverlays` sont tous deux idempotents (no-op si déjà
+      // à jour), donc les rappeler à chaque 'styledata' (avant et après le vrai mapReady)
+      // est sans risque et garantit un resync avec les baptêmes courants à chaque fois.
+      if (map.isStyleLoaded()) {
+        ensureOverlays(map);
+        resyncBaptismOverlays(map);
+      }
       if (!mapReadyRef.current) return;
       // Après un changement de style (setStyle), toutes les couches custom sont perdues.
       // On recrée donc les overlays (zones, POI, estimation, etc.), on remet l'ordre,
       // puis on réapplique la visibilité de la heatmap.
-      ensureOverlays(map);
       enforceLayerOrder(map);
       applyGridLabelStyle(map);
       syncHeatmapVisibility(map);
