@@ -52,7 +52,8 @@ export function rankAxisSuggestions(
   axisBearing: number,
   origin: [number, number],
   candidates: NamedCandidate[],
-  coneDeg = 35
+  coneDeg = 35,
+  exclude?: Set<string>
 ): string[] {
   const scored = candidates
     .filter((c) => angleDiffDeg(bearingDeg(origin, c.point), axisBearing) <= coneDeg)
@@ -63,11 +64,22 @@ export function rankAxisSuggestions(
   for (const { c } of scored) {
     const up = c.name.toUpperCase().slice(0, 40);
     if (seen.has(up)) continue;
+    if (exclude?.has(up) || exclude?.has(stripRoadWords(up))) continue;
     seen.add(up);
     names.push(up);
     if (names.length === 3) break;
   }
   return names;
+}
+
+// Noms interdits issus de la voie d'origine (celle sur laquelle on se trouve) :
+// son nom et son ref ne doivent jamais baptiser un axe — deux axes qui partent
+// le long de la même rue porteraient sinon exactement le même TION.
+export function forbiddenOriginNames(originTags: Record<string, string>): Set<string> {
+  const out = new Set<string>();
+  if (originTags.ref) out.add(originTags.ref.toUpperCase().slice(0, 40));
+  if (originTags.name) out.add(stripRoadWords(originTags.name).slice(0, 40));
+  return out;
 }
 
 // Annonce radio : « TION TRÔNE », pas « TION AVENUE DU TRÔNE » — on retire le type
@@ -92,8 +104,18 @@ export function stripRoadWords(name: string): string {
   return rest.length > 0 ? rest : up;
 }
 
-export function fallbackAxisName(firstWayTags: Record<string, string>, bearing: number): string {
-  if (firstWayTags.ref) return firstWayTags.ref.toUpperCase().slice(0, 40);
-  if (firstWayTags.name) return stripRoadWords(firstWayTags.name).slice(0, 40);
+export function fallbackAxisName(
+  firstWayTags: Record<string, string>,
+  bearing: number,
+  forbidden?: Set<string>
+): string {
+  if (firstWayTags.ref) {
+    const ref = firstWayTags.ref.toUpperCase().slice(0, 40);
+    if (!forbidden?.has(ref)) return ref;
+  }
+  if (firstWayTags.name) {
+    const name = stripRoadWords(firstWayTags.name).slice(0, 40);
+    if (!forbidden?.has(name)) return name;
+  }
   return cardinalName(bearing);
 }

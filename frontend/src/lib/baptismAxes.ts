@@ -1,4 +1,4 @@
-import { parseOverpassPois, rankAxisSuggestions, fallbackAxisName } from './baptismNaming';
+import { parseOverpassPois, rankAxisSuggestions, fallbackAxisName, forbiddenOriginNames } from './baptismNaming';
 import { fetchOverpassRoads, fetchOverpassPois } from './api';
 
 export type BaptismIcon = 'person' | 'car' | 'house';
@@ -270,14 +270,17 @@ export function computeAxesFromWays(
   ways: OverpassWay[],
   point: [number, number],
   icon: BaptismIcon
-): { axes: BaptismAxisResult[]; walked: WalkedAxis[] } {
+): { axes: BaptismAxisResult[]; walked: WalkedAxis[]; originTags: Record<string, string> } {
   const g = buildGraph(ways, icon);
-  if (g.ways.size === 0) return { axes: [], walked: [] };
+  if (g.ways.size === 0) return { axes: [], walked: [], originTags: {} };
   const snap = snapToRoads(g, point);
-  if (!snap) return { axes: [], walked: [] };
+  if (!snap) return { axes: [], walked: [], originTags: {} };
 
   const starts: WalkStart[] = [];
   const w = g.ways.get(snap.wayId)!;
+  // La voie sur laquelle on se trouve : son nom/ref est exclu du nommage TION
+  // (deux axes qui partent le long de la même rue porteraient sinon le même nom).
+  const originTags = w.tags ?? {};
 
   const vertexCandidates: { idx: number }[] = [{ idx: snap.segIdx }, { idx: snap.segIdx + 1 }];
   let intersectionVertex: number | null = null;
@@ -365,7 +368,7 @@ export function computeAxesFromWays(
     bearing: Math.round(x.bearing * 10) / 10 % 360,
   }));
 
-  return { axes, walked: capped.map((x) => x.wa) };
+  return { axes, walked: capped.map((x) => x.wa), originTags };
 }
 
 // Un miroir Overpass surchargé répond parfois HTTP 200 avec un corps d'erreur
@@ -397,9 +400,10 @@ export async function computeBaptismAxes(
 
     const candidates = parseOverpassPois({ elements: await poisPromise });
     const origin: [number, number] = [point.lng, point.lat];
+    const forbidden = forbiddenOriginNames(result.originTags);
     const named = result.axes.map((a, i) => {
-      const suggestions = rankAxisSuggestions(a.bearing, origin, candidates);
-      const fallback = fallbackAxisName(result.walked[i]?.firstWayTags ?? {}, a.bearing);
+      const suggestions = rankAxisSuggestions(a.bearing, origin, candidates, undefined, forbidden);
+      const fallback = fallbackAxisName(result.walked[i]?.firstWayTags ?? {}, a.bearing, forbidden);
       const all = [...suggestions];
       if (!all.includes(fallback)) all.push(fallback);
       return { ...a, suggestions: all.slice(0, 5), name: all[0] ?? null };

@@ -109,3 +109,24 @@ test('fallbackAxisName applique stripRoadWords au nom de voie mais pas au ref', 
   assert.equal(fallbackAxisName({ name: 'Avenue du Trône' }, 0), 'TRÔNE');
   assert.equal(fallbackAxisName({ ref: 'D45', name: 'Rue des Lilas' }, 0), 'D45');
 });
+
+test('la voie d’origine ne baptise jamais un axe (exclusion nom + ref)', async () => {
+  const { forbiddenOriginNames, fallbackAxisName, rankAxisSuggestions } = await import('./baptismNaming.js');
+  const forbidden = forbiddenOriginNames({ name: 'Rue Pache', ref: 'D53' });
+  assert.ok(forbidden.has('PACHE'));
+  assert.ok(forbidden.has('D53'));
+
+  // Repli : l'axe qui reste sur la voie d'origine bascule sur le cardinal…
+  assert.equal(fallbackAxisName({ name: 'Rue Pache' }, 45, forbidden), 'NORD-EST');
+  assert.equal(fallbackAxisName({ ref: 'D53' }, 90, forbidden), 'EST');
+  // …mais une autre voie garde son nom.
+  assert.equal(fallbackAxisName({ name: 'Boulevard Voltaire' }, 45, forbidden), 'VOLTAIRE');
+
+  // Suggestions : un candidat homonyme de la voie d'origine est écarté.
+  const origin = [2, 48] as [number, number];
+  const candidates = [
+    { name: 'Pache', point: [2.005, 48.0001] as [number, number], tier: 1 as const },
+    { name: 'Auchan', point: [2.006, 48.0001] as [number, number], tier: 1 as const },
+  ];
+  assert.deepEqual(rankAxisSuggestions(90, origin, candidates, undefined, forbidden), ['AUCHAN']);
+});
