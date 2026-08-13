@@ -264,7 +264,7 @@ function pointAlong(coords: [number, number][], meters: number): [number, number
 // partent du même pixel se lisent comme UN trait continu traversant l'icône.
 // On mange `meters` en tête de chemin — au plus un tiers de sa longueur, pour
 // ne pas vider les axes courts.
-export const TION_START_GAP_METERS = 15;
+export const TION_START_GAP_METERS = 6;
 export function trimPathStartMeters(coords: [number, number][], meters: number): [number, number][] {
   if (coords.length < 2) return coords;
   let total = 0;
