@@ -993,17 +993,16 @@ export async function updateZone(
   return (await res.json()) as ApiZone;
 }
 
-export async function getBaptism(missionId: string): Promise<ApiBaptism | null> {
-  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`);
-  if (res.status === 404) return null;
+export async function listBaptisms(missionId: string): Promise<ApiBaptism[]> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptisms`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error ?? 'GET_BAPTISM_FAILED');
+    throw new Error(body?.error ?? 'LIST_BAPTISMS_FAILED');
   }
-  return (await res.json()) as ApiBaptism;
+  return (await res.json()) as ApiBaptism[];
 }
 
-export async function putBaptism(
+export async function createBaptism(
   missionId: string,
   input: {
     icon: 'person' | 'car' | 'house';
@@ -1013,19 +1012,20 @@ export async function putBaptism(
     axes: ApiBaptismAxis[];
   }
 ): Promise<ApiBaptism> {
-  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, {
-    method: 'PUT',
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptisms`, {
+    method: 'POST',
     body: JSON.stringify(input),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error ?? 'PUT_BAPTISM_FAILED');
+    throw new Error(body?.error ?? 'CREATE_BAPTISM_FAILED');
   }
   return (await res.json()) as ApiBaptism;
 }
 
 export async function patchBaptism(
   missionId: string,
+  baptismId: string,
   input: {
     displayMode?: 'colors' | 'tion' | 'both';
     pointName?: string | null;
@@ -1035,7 +1035,7 @@ export async function patchBaptism(
     remove?: boolean;
   }
 ): Promise<ApiBaptism> {
-  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptisms/${encodeURIComponent(baptismId)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
@@ -1046,8 +1046,10 @@ export async function patchBaptism(
   return (await res.json()) as ApiBaptism;
 }
 
-export async function deleteBaptism(missionId: string): Promise<void> {
-  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptism`, { method: 'DELETE' });
+export async function deleteBaptism(missionId: string, baptismId: string): Promise<void> {
+  const res = await apiFetch(`/missions/${encodeURIComponent(missionId)}/baptisms/${encodeURIComponent(baptismId)}`, {
+    method: 'DELETE',
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? 'DELETE_BAPTISM_FAILED');

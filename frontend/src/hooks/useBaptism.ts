@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getBaptism,
-  putBaptism,
+  listBaptisms,
+  createBaptism,
   patchBaptism,
   deleteBaptism,
   type ApiBaptism,
@@ -17,7 +17,7 @@ export type BaptismDraftState = {
 };
 
 export type UseBaptismResult = {
-  baptism: ApiBaptism | null;
+  baptisms: ApiBaptism[];
   draft: BaptismDraftState | null;
   computing: boolean;
   computeError: string | null;
@@ -29,17 +29,28 @@ export type UseBaptismResult = {
   setDraftDisplayMode: (mode: 'colors' | 'tion' | 'both') => void;
   cancelDraft: () => void;
   confirmDraft: () => Promise<boolean>;
-  renameAxis: (axisId: string, name: string | null) => Promise<boolean>;
-  recolorAxis: (axisId: string, color: string) => Promise<boolean>;
-  removeAxis: (axisId: string) => Promise<boolean>;
-  setDisplayMode: (mode: 'colors' | 'tion' | 'both') => Promise<boolean>;
-  setPointName: (name: string | null) => Promise<boolean>;
-  removeBaptism: () => Promise<boolean>;
+  renameAxis: (baptismId: string, axisId: string, name: string | null) => Promise<boolean>;
+  recolorAxis: (baptismId: string, axisId: string, color: string) => Promise<boolean>;
+  removeAxis: (baptismId: string, axisId: string) => Promise<boolean>;
+  setDisplayMode: (baptismId: string, mode: 'colors' | 'tion' | 'both') => Promise<boolean>;
+  setPointName: (baptismId: string, name: string | null) => Promise<boolean>;
+  removeBaptism: (baptismId: string) => Promise<boolean>;
   clearMutationError: () => void;
 };
 
+// Upsert par id : partagé entre l'ajout optimiste (confirmDraft/patch) et l'écho socket,
+// pour que le doublon possible entre les deux (le serveur émet avant de répondre au
+// POST/PATCH HTTP) se résolve en une mise à jour sur place plutôt qu'une entrée en double.
+function upsertBaptism(list: ApiBaptism[], b: ApiBaptism): ApiBaptism[] {
+  const idx = list.findIndex((x) => x.id === b.id);
+  if (idx === -1) return [...list, b];
+  const next = list.slice();
+  next[idx] = b;
+  return next;
+}
+
 export function useBaptism({ selectedMissionId }: { selectedMissionId: string | null }): UseBaptismResult {
-  const [baptism, setBaptism] = useState<ApiBaptism | null>(null);
+  const [baptisms, setBaptisms] = useState<ApiBaptism[]>([]);
   const [draft, setDraft] = useState<BaptismDraftState | null>(null);
   const [computing, setComputing] = useState(false);
   const [computeError, setComputeError] = useState<string | null>(null);
@@ -48,21 +59,21 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   missionRef.current = selectedMissionId;
   // Baptême terrain: identité du brouillon courant, lue par confirmDraft après ses
   // awaits pour détecter une annulation (cancelDraft met draft à null) survenue
-  // pendant le calcul Overpass ou le PUT, et abandonner sans ressusciter l'état.
+  // pendant le calcul Overpass ou le POST, et abandonner sans ressusciter l'état.
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
   useEffect(() => {
-    setBaptism(null);
+    setBaptisms([]);
     setDraft(null);
     setComputing(false);
     setComputeError(null);
     setMutationError(null);
     if (!selectedMissionId) return;
     let cancelled = false;
-    getBaptism(selectedMissionId)
-      .then((b) => {
-        if (!cancelled) setBaptism(b);
+    listBaptisms(selectedMissionId)
+      .then((list) => {
+        if (!cancelled) setBaptisms(list);
       })
       .catch(() => {
         /* non bloquant : la carte reste utilisable sans baptême */
@@ -76,10 +87,14 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     const socket = getSocket();
     if (!socket) return;
     const onUpdated = (payload: { missionId: string; baptism: ApiBaptism }) => {
-      if (payload?.missionId === missionRef.current) setBaptism(payload.baptism);
+      if (payload?.missionId === missionRef.current) {
+        setBaptisms((prev) => upsertBaptism(prev, payload.baptism));
+      }
     };
-    const onDeleted = (payload: { missionId: string }) => {
-      if (payload?.missionId === missionRef.current) setBaptism(null);
+    const onDeleted = (payload: { missionId: string; baptismId: string }) => {
+      if (payload?.missionId === missionRef.current) {
+        setBaptisms((prev) => prev.filter((b) => b.id !== payload.baptismId));
+      }
     };
     socket.on('baptism:updated', onUpdated);
     socket.on('baptism:deleted', onDeleted);
@@ -126,27 +141,29 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     setComputeError(null);
     try {
       const { axes } = await computeBaptismAxes(d.point, d.icon);
-      // Annulé (cancelDraft) pendant le calcul : ne pas envoyer le PUT.
+      // Annulé (cancelDraft) pendant le calcul : ne pas envoyer le POST.
       if (draftRef.current !== d) return false;
-      const saved = await putBaptism(missionId, {
+      const saved = await createBaptism(missionId, {
         icon: d.icon,
         point: d.point,
         pointName: d.pointName,
         displayMode: d.displayMode,
         axes,
       });
-      // Annulé pendant le PUT, ou mission changée entretemps : ne pas ressusciter l'état.
-      // Le document vient d'être créé/mis à jour côté serveur ; on le supprime au mieux
-      // pour ne pas laisser un orphelin que l'écho socket ferait resurgir.
+      // Annulé pendant le POST, ou mission changée entretemps : ne pas ressusciter l'état.
+      // Le document vient d'être créé côté serveur ; on le supprime au mieux pour ne pas
+      // laisser un orphelin que l'écho socket ferait resurgir. Cible désormais le doc créé
+      // par son propre id (saved.id) — plus l'ancien DELETE mission-wide qui pouvait
+      // effacer le baptême d'un coéquipier posé entretemps.
       if (draftRef.current !== d || missionRef.current !== missionId) {
         try {
-          await deleteBaptism(missionId);
+          await deleteBaptism(missionId, saved.id);
         } catch {
           /* best effort */
         }
         return false;
       }
-      setBaptism(saved);
+      setBaptisms((prev) => upsertBaptism(prev, saved));
       setDraft(null);
       return true;
     } catch (e: any) {
@@ -159,35 +176,53 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     }
   }, [draft]);
 
-  const patch = useCallback(async (input: Parameters<typeof patchBaptism>[1]): Promise<boolean> => {
-    const missionId = missionRef.current;
-    if (!missionId) return false;
-    try {
-      const updated = await patchBaptism(missionId, input);
-      if (missionRef.current === missionId) {
-        setBaptism(updated);
-        setMutationError(null);
+  const patch = useCallback(
+    async (baptismId: string, input: Parameters<typeof patchBaptism>[2]): Promise<boolean> => {
+      const missionId = missionRef.current;
+      if (!missionId) return false;
+      try {
+        const updated = await patchBaptism(missionId, baptismId, input);
+        if (missionRef.current === missionId) {
+          setBaptisms((prev) => upsertBaptism(prev, updated));
+          setMutationError(null);
+        }
+        return true;
+      } catch (e: any) {
+        if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
+        return false;
       }
-      return true;
-    } catch (e: any) {
-      if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
-      return false;
-    }
-  }, []);
+    },
+    []
+  );
 
-  const renameAxis = useCallback((axisId: string, name: string | null) => patch({ axisId, name }), [patch]);
-  const recolorAxis = useCallback((axisId: string, color: string) => patch({ axisId, color }), [patch]);
-  const removeAxis = useCallback((axisId: string) => patch({ axisId, remove: true }), [patch]);
-  const setDisplayMode = useCallback((mode: 'colors' | 'tion' | 'both') => patch({ displayMode: mode }), [patch]);
-  const setPointName = useCallback((name: string | null) => patch({ pointName: name }), [patch]);
+  const renameAxis = useCallback(
+    (baptismId: string, axisId: string, name: string | null) => patch(baptismId, { axisId, name }),
+    [patch]
+  );
+  const recolorAxis = useCallback(
+    (baptismId: string, axisId: string, color: string) => patch(baptismId, { axisId, color }),
+    [patch]
+  );
+  const removeAxis = useCallback(
+    (baptismId: string, axisId: string) => patch(baptismId, { axisId, remove: true }),
+    [patch]
+  );
+  const setDisplayMode = useCallback(
+    (baptismId: string, mode: 'colors' | 'tion' | 'both') => patch(baptismId, { displayMode: mode }),
+    [patch]
+  );
+  const setPointName = useCallback(
+    (baptismId: string, name: string | null) => patch(baptismId, { pointName: name }),
+    [patch]
+  );
 
-  const removeBaptism = useCallback(async (): Promise<boolean> => {
+  const removeBaptism = useCallback(async (baptismId: string): Promise<boolean> => {
     const missionId = missionRef.current;
     if (!missionId) return false;
     try {
-      await deleteBaptism(missionId);
+      await deleteBaptism(missionId, baptismId);
       if (missionRef.current === missionId) {
-        setBaptism(null);
+        setBaptisms((prev) => prev.filter((b) => b.id !== baptismId));
         setMutationError(null);
       }
       return true;
@@ -202,7 +237,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   }, []);
 
   return {
-    baptism,
+    baptisms,
     draft,
     computing,
     computeError,

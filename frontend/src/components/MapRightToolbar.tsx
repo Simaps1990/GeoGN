@@ -34,6 +34,7 @@ type MapRightToolbarProps = {
   zoneMenuOpen: boolean;
 
   onStartBaptism: () => void;
+  baptismCount: number;
 
   setDraftColor: (v: string) => void;
   setDraftIcon: (v: string) => void;
@@ -98,6 +99,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   setZoneMenuOpen,
   zoneMenuOpen,
   onStartBaptism,
+  baptismCount,
   setDraftColor,
   setDraftIcon,
   setDraftComment,
@@ -297,11 +299,18 @@ export const MapRightToolbar = memo(function MapRightToolbar({
             }
             onStartBaptism();
           }}
-          className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+          className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
             activeTool === 'baptism' ? 'ring-1 ring-inset ring-blue-500/25' : ''
           }`}
         >
           <Signpost className={activeTool === 'baptism' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
+          {baptismCount >= 2 ? (
+            <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+              {baptismCount}
+            </span>
+          ) : baptismCount >= 1 ? (
+            <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+          ) : null}
         </button>
       )}
 

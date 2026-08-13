@@ -110,7 +110,7 @@ function emitUpdated(app: FastifyInstance, missionId: string, dto: ReturnType<ty
   });
 }
 
-type PutBody = {
+type CreateBody = {
   icon: BaptismIcon;
   point: { lng: number; lat: number };
   pointName?: string | null;
@@ -127,9 +127,21 @@ type PatchBody = {
   remove?: boolean;
 };
 
+const MAX_BAPTISMS_PER_MISSION = 10;
+
 export async function baptismsRoutes(app: FastifyInstance) {
+  // Migration one-shot : les bases existantes portent encore l'ancien index unique sur
+  // missionId (une seule génération de schéma plus tôt), qui ferait échouer le 2e insert
+  // d'une mission avec E11000 une fois le modèle passé en multi. Best effort, non
+  // bloquant : pas de crash si l'index est déjà absent (nouvelle base) ou si la
+  // resynchro échoue.
+  void BaptismModel.collection
+    .dropIndex('missionId_1')
+    .catch(() => {})
+    .then(() => BaptismModel.syncIndexes().catch(() => {}));
+
   app.get<{ Params: { missionId: string } }>(
-    '/missions/:missionId/baptism',
+    '/missions/:missionId/baptisms',
     async (req: FastifyRequest<{ Params: { missionId: string } }>, reply: FastifyReply) => {
       try {
         requireAuth(req);
@@ -140,15 +152,14 @@ export async function baptismsRoutes(app: FastifyInstance) {
       if (!mongoose.Types.ObjectId.isValid(missionId)) return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
       const mem = await getMembership(req.userId, missionId);
       if (!mem) return reply.code(403).send({ error: 'FORBIDDEN' });
-      const b = await BaptismModel.findOne({ missionId }).lean();
-      if (!b) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return reply.send(toDto(b as BaptismDoc));
+      const list = await BaptismModel.find({ missionId }).lean();
+      return reply.send(list.map((b) => toDto(b as BaptismDoc)));
     }
   );
 
-  app.put<{ Params: { missionId: string }; Body: PutBody }>(
-    '/missions/:missionId/baptism',
-    async (req: FastifyRequest<{ Params: { missionId: string }; Body: PutBody }>, reply: FastifyReply) => {
+  app.post<{ Params: { missionId: string }; Body: CreateBody }>(
+    '/missions/:missionId/baptisms',
+    async (req: FastifyRequest<{ Params: { missionId: string }; Body: CreateBody }>, reply: FastifyReply) => {
       try {
         requireAuth(req);
       } catch (e: any) {
@@ -159,7 +170,7 @@ export async function baptismsRoutes(app: FastifyInstance) {
       const mem = await getMembership(req.userId, missionId);
       if (!mem || (mem as any).role === 'viewer') return reply.code(403).send({ error: 'FORBIDDEN' });
 
-      const body = req.body as PutBody;
+      const body = req.body as CreateBody;
       if (!validateIcon(body?.icon)) return reply.code(400).send({ error: 'INVALID_ICON' });
       if (!validateLngLatPoint(body?.point)) return reply.code(400).send({ error: 'INVALID_POINT' });
       const pointNameResult = validatePointName(body?.pointName);
@@ -168,53 +179,54 @@ export async function baptismsRoutes(app: FastifyInstance) {
       const axesErr = validateAxes(body?.axes);
       if (axesErr) return reply.code(400).send(axesErr);
 
-      const now = new Date();
-      const b = await BaptismModel.findOneAndUpdate(
-        { missionId: new mongoose.Types.ObjectId(missionId) },
-        {
-          $set: {
-            icon: body.icon,
-            point: { lng: body.point.lng, lat: body.point.lat },
-            pointName: pointNameResult.value,
-            displayMode: body.displayMode,
-            axes: body.axes.map((a) => ({
-              axisId: a.axisId,
-              color: a.color,
-              name: typeof a.name === 'string' ? a.name.trim().toUpperCase() : null,
-              suggestions: (a.suggestions ?? []).map((s) => s.trim().toUpperCase()),
-              geometry: a.geometry,
-              bearing: a.bearing,
-            })),
-            updatedAt: now,
-          },
-          $setOnInsert: {
-            createdBy: new mongoose.Types.ObjectId(req.userId),
-            createdAt: now,
-          },
-        },
-        { upsert: true, new: true }
-      ).lean();
+      const existingCount = await BaptismModel.countDocuments({ missionId });
+      if (existingCount >= MAX_BAPTISMS_PER_MISSION) return reply.code(400).send({ error: 'MAX_BAPTISMS' });
 
-      const dto = toDto(b as BaptismDoc);
+      const now = new Date();
+      const b = await BaptismModel.create({
+        missionId: new mongoose.Types.ObjectId(missionId),
+        icon: body.icon,
+        point: { lng: body.point.lng, lat: body.point.lat },
+        pointName: pointNameResult.value,
+        displayMode: body.displayMode,
+        axes: body.axes.map((a) => ({
+          axisId: a.axisId,
+          color: a.color,
+          name: typeof a.name === 'string' ? a.name.trim().toUpperCase() : null,
+          suggestions: (a.suggestions ?? []).map((s) => s.trim().toUpperCase()),
+          geometry: a.geometry,
+          bearing: a.bearing,
+        })),
+        createdBy: new mongoose.Types.ObjectId(req.userId),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const dto = toDto(b.toObject() as BaptismDoc);
       emitUpdated(app, missionId, dto);
-      return reply.code(200).send(dto);
+      return reply.code(201).send(dto);
     }
   );
 
-  app.patch<{ Params: { missionId: string }; Body: PatchBody }>(
-    '/missions/:missionId/baptism',
-    async (req: FastifyRequest<{ Params: { missionId: string }; Body: PatchBody }>, reply: FastifyReply) => {
+  app.patch<{ Params: { missionId: string; baptismId: string }; Body: PatchBody }>(
+    '/missions/:missionId/baptisms/:baptismId',
+    async (
+      req: FastifyRequest<{ Params: { missionId: string; baptismId: string }; Body: PatchBody }>,
+      reply: FastifyReply
+    ) => {
       try {
         requireAuth(req);
       } catch (e: any) {
         return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
       }
-      const { missionId } = req.params;
-      if (!mongoose.Types.ObjectId.isValid(missionId)) return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
+      const { missionId, baptismId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(baptismId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
       const mem = await getMembership(req.userId, missionId);
       if (!mem || (mem as any).role === 'viewer') return reply.code(403).send({ error: 'FORBIDDEN' });
 
-      const b = await BaptismModel.findOne({ missionId });
+      const b = await BaptismModel.findOne({ _id: baptismId, missionId });
       if (!b) return reply.code(404).send({ error: 'NOT_FOUND' });
 
       const body = req.body as PatchBody;
@@ -255,21 +267,23 @@ export async function baptismsRoutes(app: FastifyInstance) {
     }
   );
 
-  app.delete<{ Params: { missionId: string } }>(
-    '/missions/:missionId/baptism',
-    async (req: FastifyRequest<{ Params: { missionId: string } }>, reply: FastifyReply) => {
+  app.delete<{ Params: { missionId: string; baptismId: string } }>(
+    '/missions/:missionId/baptisms/:baptismId',
+    async (req: FastifyRequest<{ Params: { missionId: string; baptismId: string } }>, reply: FastifyReply) => {
       try {
         requireAuth(req);
       } catch (e: any) {
         return reply.code(e.statusCode ?? 401).send({ error: 'UNAUTHORIZED' });
       }
-      const { missionId } = req.params;
-      if (!mongoose.Types.ObjectId.isValid(missionId)) return reply.code(400).send({ error: 'INVALID_MISSION_ID' });
+      const { missionId, baptismId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(missionId) || !mongoose.Types.ObjectId.isValid(baptismId)) {
+        return reply.code(400).send({ error: 'INVALID_ID' });
+      }
       const mem = await getMembership(req.userId, missionId);
       if (!mem || (mem as any).role === 'viewer') return reply.code(403).send({ error: 'FORBIDDEN' });
-      const result = await BaptismModel.deleteOne({ missionId });
+      const result = await BaptismModel.deleteOne({ _id: baptismId, missionId });
       if (result.deletedCount === 0) return reply.code(404).send({ error: 'NOT_FOUND' });
-      app.io?.to(`mission:${missionId}`).emit('baptism:deleted', { missionId });
+      app.io?.to(`mission:${missionId}`).emit('baptism:deleted', { missionId, baptismId });
       return reply.send({ ok: true });
     }
   );

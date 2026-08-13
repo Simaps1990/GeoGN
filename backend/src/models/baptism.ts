@@ -52,7 +52,7 @@ const BaptismAxisSchema = new Schema<BaptismAxis>(
 
 const BaptismSchema = new Schema<BaptismDoc>(
   {
-    missionId: { type: Schema.Types.ObjectId, required: true, unique: true, index: true },
+    missionId: { type: Schema.Types.ObjectId, required: true, index: true },
     icon: { type: String, required: true, enum: ['person', 'car', 'house'] },
     point: {
       type: { lng: Number, lat: Number },
