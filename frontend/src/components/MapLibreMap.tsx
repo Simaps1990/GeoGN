@@ -3441,6 +3441,16 @@ export default function MapLibreMap() {
       } as any,
     });
 
+    // La carte est interactive dès que le DOCUMENT de style est posé : ne jamais
+    // conditionner mapReady à l'event 'load' (qui attend tuiles ET glyphes réseau) —
+    // un serveur de tuiles/glyphes lent gèlerait sinon clics, marqueurs et overlays
+    // de toute l'application. Idempotent : premier déclencheur gagnant.
+    const markReady = () => {
+      if (mapReadyRef.current) return;
+      mapReadyRef.current = true;
+      setMapReady(true);
+    };
+
     const onLoad = () => {
       ensureOverlays(map);
       applyGridLabelStyle(map);
@@ -3448,7 +3458,7 @@ export default function MapLibreMap() {
       resyncDraftOverlays(map);
       resyncBaptismOverlays(map);
       syncHeatmapVisibility(map);
-      setMapReady(true);
+      markReady();
     };
 
     const onStyleData = () => {
@@ -3457,7 +3467,7 @@ export default function MapLibreMap() {
       // ici — sur un réseau qui suspend les requêtes sans jamais les faire
       // échouer, ni 'load' ni isStyleLoaded() ne deviennent jamais vrais).
       ensureBaptismOverlaysNow(map);
-      if (!mapReadyRef.current) return;
+      markReady();
       // Après un changement de style (setStyle), toutes les couches custom sont perdues.
       // On recrée donc les overlays (zones, POI, estimation, etc.), on remet l'ordre,
       // puis on réapplique la visibilité de la heatmap.
