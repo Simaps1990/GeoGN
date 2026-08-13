@@ -210,6 +210,10 @@ function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
 }
 
 const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
+// Longueur de la flèche TION (inchangée) et écart entre sa pointe et le label du nom,
+// tous deux en mètres le long de l'axe -> le label suit le zoom comme la flèche.
+const TION_ARROW_LEN_METERS = 120;
+const TION_LABEL_GAP_METERS = 50;
 
 // `name`, quand fourni, s'affiche en pastille blanche sous l'emoji (position absolute :
 // ne participe pas à la boîte de l'élément, pour ne pas décaler l'ancrage du Marker).
@@ -2612,7 +2616,9 @@ export default function MapLibreMap() {
         id: 'baptism-tion-head',
         type: 'symbol',
         source: 'baptism-tion',
-        filter: ['==', ['geometry-type'], 'Point'],
+        // La pointe et le label sont deux Points distincts du même axe (cf. resyncBaptismOverlays) :
+        // `has rotation` cible uniquement la pointe, pas le label posé plus loin sur l'axe.
+        filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'rotation']],
         layout: {
           'text-field': '>',
           'text-size': 24,
@@ -2630,13 +2636,12 @@ export default function MapLibreMap() {
         id: 'baptism-tion-label',
         type: 'symbol',
         source: 'baptism-tion',
-        filter: ['==', ['geometry-type'], 'Point'],
+        filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'label']],
         layout: {
           'text-field': ['get', 'label'],
           'text-size': 13,
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
-          'text-offset': [0, 1.2],
-          'text-anchor': 'top',
+          'text-anchor': 'center',
           'text-allow-overlap': true,
           'text-ignore-placement': true,
         },
@@ -3055,7 +3060,8 @@ export default function MapLibreMap() {
       if (showTion) {
         const origin: [number, number] = [b.point.lng, b.point.lat];
         for (const a of b.axes) {
-          const tip = destinationPoint(origin, a.bearing, 120);
+          const tip = destinationPoint(origin, a.bearing, TION_ARROW_LEN_METERS);
+          const labelPoint = destinationPoint(origin, a.bearing, TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS);
           tionFeatures.push({
             type: 'Feature',
             properties: { baptismId: b.id, axisId: a.axisId },
@@ -3063,13 +3069,16 @@ export default function MapLibreMap() {
           });
           tionFeatures.push({
             type: 'Feature',
-            properties: {
-              baptismId: b.id,
-              axisId: a.axisId,
-              rotation: (a.bearing - 90 + 360) % 360,
-              label: a.name ? `TION ${a.name}` : 'TION ?',
-            },
+            properties: { baptismId: b.id, axisId: a.axisId, rotation: (a.bearing - 90 + 360) % 360 },
             geometry: { type: 'Point', coordinates: tip },
+          });
+          // Label déporté après la pointe (et non dessus) : Point séparé, plus loin sur le
+          // même axe. `has label`/`has rotation` sur les couches respectives évitent que
+          // baptism-tion-head ne dessine aussi une pointe '>' à l'emplacement du label.
+          tionFeatures.push({
+            type: 'Feature',
+            properties: { baptismId: b.id, axisId: a.axisId, label: a.name ? `TION ${a.name}` : 'TION ?' },
+            geometry: { type: 'Point', coordinates: labelPoint },
           });
         }
       }
@@ -5286,25 +5295,30 @@ export default function MapLibreMap() {
                     ← Retour
                   </button>
                 </div>
-                <div className="mb-2 flex flex-col gap-1.5">
-                  {(
-                    [
-                      ['colors', 'Colorer les axes'],
-                      ['tion', 'Nommer les axes (TION)'],
-                      ['both', 'Les deux'],
-                    ] as const
-                  ).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      disabled={baptismApi.computing}
-                      className="rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200 disabled:opacity-50"
-                      onClick={() => baptismApi.setDraftDisplayMode(mode)}
-                    >
-                      {baptismApi.computing ? 'Calcul…' : label}
-                    </button>
-                  ))}
-                </div>
+                {baptismApi.computing ? (
+                  <div className="mb-2 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm text-gray-500">
+                    Calcul…
+                  </div>
+                ) : (
+                  <div className="mb-2 flex gap-1.5">
+                    {(
+                      [
+                        ['colors', 'Couleurs'],
+                        ['tion', 'TION'],
+                        ['both', 'Les deux'],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className="flex-1 rounded-lg bg-gray-100 px-2 py-2 text-xs hover:bg-gray-200"
+                        onClick={() => baptismApi.setDraftDisplayMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button
                   type="button"
                   className="w-full rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
