@@ -11,3 +11,4 @@ export { PersonCaseModel } from './personCase.js';
 export { PositionCurrentModel } from './positionCurrent.js';
 export { VehicleTrackModel } from './vehicleTrack.js';
 export { HuntIsochroneModel } from './huntIsochrone.js';
+export { OverpassCacheModel } from './overpassCache.js';

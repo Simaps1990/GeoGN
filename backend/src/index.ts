@@ -14,6 +14,7 @@ import { poisRoutes } from './routes/pois.js';
 import { personCasesRoutes } from './routes/personCases.js';
 import { zonesRoutes } from './routes/zones.js';
 import { baptismsRoutes } from './routes/baptisms.js';
+import { overpassRoutes } from './routes/overpass.js';
 import { vehicleTracksRoutes } from './routes/vehicleTracks.js';
 import oidcPlugin from './routes/oidc.js';
 import { setupSocket } from './socket.js';
@@ -71,6 +72,7 @@ await poisRoutes(app);
 await personCasesRoutes(app);
 await zonesRoutes(app);
 await baptismsRoutes(app);
+await overpassRoutes(app);
 await vehicleTracksRoutes(app);
 
 app.get('/health', async () => ({ ok: true }));

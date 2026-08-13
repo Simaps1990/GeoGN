@@ -1055,3 +1055,27 @@ export async function deleteBaptism(missionId: string, baptismId: string): Promi
     throw new Error(body?.error ?? 'DELETE_BAPTISM_FAILED');
   }
 }
+
+// Overpass en proxy backend (cache Mongo partagé) : le terrain ne tape plus les
+// miroirs publics directement, voir backend/src/routes/overpass.ts.
+export async function fetchOverpassRoads(lat: number, lng: number, radius: number): Promise<any[]> {
+  const qs = new URLSearchParams({ lat: String(lat), lng: String(lng), radius: String(radius) });
+  const res = await apiFetch(`/overpass/roads?${qs.toString()}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'OVERPASS_UNAVAILABLE');
+  }
+  const body = await res.json();
+  return body.elements;
+}
+
+export async function fetchOverpassPois(lat: number, lng: number): Promise<any[]> {
+  const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  const res = await apiFetch(`/overpass/pois?${qs.toString()}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'OVERPASS_UNAVAILABLE');
+  }
+  const body = await res.json();
+  return body.elements;
+}

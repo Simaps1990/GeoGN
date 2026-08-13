@@ -1,4 +1,5 @@
-import { buildPoiQuery, parseOverpassPois, rankAxisSuggestions, fallbackAxisName } from './baptismNaming';
+import { parseOverpassPois, rankAxisSuggestions, fallbackAxisName } from './baptismNaming';
+import { fetchOverpassRoads, fetchOverpassPois } from './api';
 
 export type BaptismIcon = 'person' | 'car' | 'house';
 
@@ -367,66 +368,19 @@ export function computeAxesFromWays(
   return { axes, walked: capped.map((x) => x.wa) };
 }
 
-// Miroirs MONDIAUX uniquement. Ne jamais mettre un miroir régional ici :
-// overpass.osm.ch (couverture Suisse) répondait « proprement » 0 élément pour
-// toute la France, transformé en faux « Aucune route trouvée » côté client.
-const OVERPASS_MIRRORS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-];
-// Mémoire du dernier miroir qui a répondu : essayé en premier au coup suivant,
-// pour éviter de repayer la cascade complète (jusqu'à ~75 s) à chaque calcul.
-let lastGoodMirror: string | null = null;
-
 // Un miroir Overpass surchargé répond parfois HTTP 200 avec un corps d'erreur
 // (`remark` de timeout/runtime-error) ou sans tableau `elements` exploitable.
 // Sans cette validation, l'appelant lisait ça comme "zéro route" au lieu d'un
 // échec de miroir, d'où de faux NO_ROAD_NEARBY en zone pourtant couverte.
+// Le fetch Overpass direct côté client a été retiré : le terrain passe désormais
+// par le proxy backend (cache Mongo partagé, voir backend/src/routes/overpass.ts,
+// qui porte sa propre copie de cette garde). Cette fonction n'est plus appelée en
+// runtime ici, mais reste exportée pour ses tests (baptismAxes.test.ts).
 export function parseOverpassElements(json: any): OverpassWay[] {
   if (!json || typeof json !== 'object') throw new Error('OVERPASS_BAD_RESPONSE');
   if (typeof json.remark === 'string' && json.remark.length > 0) throw new Error('OVERPASS_BAD_RESPONSE');
   if (!Array.isArray(json.elements)) throw new Error('OVERPASS_BAD_RESPONSE');
   return json.elements;
-}
-
-export async function fetchOverpass(
-  query: string,
-  opts: { treatEmptyAsSuspicious?: boolean } = {}
-): Promise<OverpassWay[]> {
-  const order = lastGoodMirror
-    ? [lastGoodMirror, ...OVERPASS_MIRRORS.filter((m) => m !== lastGoodMirror)]
-    : [...OVERPASS_MIRRORS];
-  let emptyResult: OverpassWay[] | null = null;
-  for (let i = 0; i < order.length; i += 1) {
-    const url = order[i];
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-        // Aligné sur le [timeout:25] serveur : à 15 s on coupait des réponses
-        // légitimes de miroirs lents, d'où de longues cascades pour rien.
-        signal: AbortSignal.timeout(25000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const elements = parseOverpassElements(await res.json());
-      // Garde anti-faux-vide : un miroir dégradé (ou régional) peut répondre
-      // « proprement » 0 élément là où un autre a des données. Pour les requêtes
-      // où le vide est improbable (les routes), on ne croit un vide que s'il
-      // vient du dernier miroir de la cascade.
-      if (elements.length === 0 && opts.treatEmptyAsSuspicious && i < order.length - 1) {
-        emptyResult = elements;
-        continue;
-      }
-      lastGoodMirror = url;
-      return elements;
-    } catch {
-      // corps invalide, HTTP en erreur ou timeout : essayer le miroir suivant
-    }
-  }
-  if (emptyResult) return emptyResult;
-  throw new Error('OVERPASS_UNAVAILABLE');
 }
 
 export async function computeBaptismAxes(
@@ -435,12 +389,9 @@ export async function computeBaptismAxes(
 ): Promise<{ axes: BaptismAxisResult[]; walked: WalkedAxis[] }> {
   // Les POI de nommage ne dépendent pas du rayon : requête lancée en parallèle
   // de la première requête routes (latence divisée par ~2), réutilisée ensuite.
-  const poisPromise = fetchOverpass(buildPoiQuery(point.lat, point.lng)).catch(
-    () => [] as OverpassWay[]
-  );
+  const poisPromise = fetchOverpassPois(point.lat, point.lng).catch(() => [] as OverpassWay[]);
   for (const radius of [250, 500]) {
-    const q = `[out:json][timeout:25];way(around:${radius},${point.lat},${point.lng})[highway];out geom;`;
-    const elements = await fetchOverpass(q, { treatEmptyAsSuspicious: true });
+    const elements = await fetchOverpassRoads(point.lat, point.lng, radius);
     const result = computeAxesFromWays(elements, [point.lng, point.lat], icon);
     if (result.axes.length === 0) continue;
 
