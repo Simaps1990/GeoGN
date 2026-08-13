@@ -59,11 +59,28 @@ test('parseOverpassPois classe par tags et lit le center des ways', () => {
   };
   const c = parseOverpassPois(json);
   assert.equal(c.length, 4);
-  assert.deepEqual(c.find((x) => x.name === 'Auchan')?.tier, 1);
-  assert.deepEqual(c.find((x) => x.name === 'Total')?.tier, 1);
-  assert.deepEqual(c.find((x) => x.name === 'Mairie')?.tier, 2);
+  assert.deepEqual(c.find((x) => x.name === 'AUCHAN')?.tier, 1);
+  assert.deepEqual(c.find((x) => x.name === 'TOTAL')?.tier, 1);
+  assert.deepEqual(c.find((x) => x.name === 'MAIRIE')?.tier, 2);
   assert.deepEqual(c.find((x) => x.name === 'Verneuil')?.tier, 3);
-  assert.deepEqual(c.find((x) => x.name === 'Mairie')?.point, [2.003, 48.003]);
+  assert.deepEqual(c.find((x) => x.name === 'MAIRIE')?.point, [2.003, 48.003]);
+});
+
+test('un POI se réduit à un seul mot : générique pour le public, enseigne pour les commerces', () => {
+  const c = parseOverpassPois({
+    elements: [
+      { type: 'way', id: 1, center: { lat: 47.8, lon: -4.34 }, tags: { name: 'École primaire publique Auguste Dupouy', amenity: 'school' } },
+      { type: 'node', id: 2, lat: 47.8, lon: -4.34, tags: { name: 'Église Saint-Nonna', amenity: 'place_of_worship' } },
+      { type: 'node', id: 3, lat: 47.8, lon: -4.34, tags: { name: 'Carrefour Market', shop: 'supermarket' } },
+      { type: 'node', id: 4, lat: 47.8, lon: -4.34, tags: { name: 'Le Fournil de Pierre', shop: 'bakery' } },
+      { type: 'node', id: 5, lat: 47.8, lon: -4.34, tags: { name: "L'Épicerie du Port", shop: 'convenience' } },
+      { type: 'node', id: 6, lat: 47.8, lon: -4.34, tags: { name: 'Kérity', place: 'village' } },
+    ],
+  });
+  assert.deepEqual(
+    c.map((x) => x.name),
+    ['ÉCOLE', 'ÉGLISE', 'CARREFOUR', 'FOURNIL', 'ÉPICERIE', 'Kérity']
+  );
 });
 
 test('fallbackAxisName : ref, puis name (débarrassé du type de voie), puis cardinal', () => {

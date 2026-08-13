@@ -2,9 +2,17 @@ import { bearingDeg, distMeters } from './baptismAxes';
 
 export type NamedCandidate = { name: string; point: [number, number]; tier: 1 | 2 | 3 };
 
-const PUBLIC_AMENITIES = new Set([
-  'townhall', 'place_of_worship', 'school', 'hospital', 'pharmacy', 'fire_station', 'police',
-]);
+// Annonce radio : un seul mot. Les équipements publics prennent leur générique
+// (« École primaire publique Auguste Dupouy » → ÉCOLE), déduit du tag OSM.
+const AMENITY_WORDS: Record<string, string> = {
+  townhall: 'MAIRIE',
+  place_of_worship: 'ÉGLISE',
+  school: 'ÉCOLE',
+  hospital: 'HÔPITAL',
+  pharmacy: 'PHARMACIE',
+  fire_station: 'POMPIERS',
+  police: 'POLICE',
+};
 const PLACE_KINDS = new Set(['city', 'town', 'village', 'hamlet', 'suburb', 'locality']);
 
 export function angleDiffDeg(a: number, b: number): number {
@@ -40,10 +48,11 @@ export function parseOverpassPois(json: any): NamedCandidate[] {
     if (typeof lat !== 'number' || typeof lon !== 'number') continue;
     let tier: 1 | 2 | 3 | null = null;
     if (tags.shop || tags.amenity === 'fuel') tier = 1;
-    else if (PUBLIC_AMENITIES.has(tags.amenity)) tier = 2;
+    else if (AMENITY_WORDS[tags.amenity]) tier = 2;
     else if (PLACE_KINDS.has(tags.place)) tier = 3;
     if (tier === null) continue;
-    out.push({ name, point: [lon, lat], tier });
+    const label = tier === 2 ? AMENITY_WORDS[tags.amenity] : tier === 1 ? firstSignificantWord(name) : name;
+    out.push({ name: label, point: [lon, lat], tier });
   }
   return out;
 }
@@ -91,6 +100,14 @@ const ROAD_WORDS = new Set([
   'ESPLANADE', 'ROND-POINT', 'HENT',
 ]);
 const LINK_WORDS = new Set(['DE', 'DU', 'DES', 'LA', 'LE', 'LES', 'À', 'AU', 'AUX']);
+
+// Premier mot utile d'une enseigne : « Carrefour Market » → CARREFOUR,
+// « Le Fournil de Pierre » → FOURNIL.
+export function firstSignificantWord(name: string): string {
+  const up = name.toUpperCase().trim();
+  const tokens = up.split(/\s+/).map((t) => t.replace(/^(L['’]|D['’])/, ''));
+  return tokens.find((t) => t.length > 0 && !LINK_WORDS.has(t)) ?? up;
+}
 
 export function stripRoadWords(name: string): string {
   const up = name.toUpperCase().trim();

@@ -401,12 +401,17 @@ export async function computeBaptismAxes(
     const candidates = parseOverpassPois({ elements: await poisPromise });
     const origin: [number, number] = [point.lng, point.lat];
     const forbidden = forbiddenOriginNames(result.originTags);
+    // Deux axes ne reçoivent jamais le même nom auto : avec les génériques
+    // (ÉCOLE, MAIRIE…), un même POI peut tomber dans le cône de deux axes.
+    const used = new Set<string>();
     const named = result.axes.map((a, i) => {
       const suggestions = rankAxisSuggestions(a.bearing, origin, candidates, undefined, forbidden);
       const fallback = fallbackAxisName(result.walked[i]?.firstWayTags ?? {}, a.bearing, forbidden);
       const all = [...suggestions];
       if (!all.includes(fallback)) all.push(fallback);
-      return { ...a, suggestions: all.slice(0, 5), name: all[0] ?? null };
+      const name = all.find((n) => !used.has(n)) ?? all[0] ?? null;
+      if (name) used.add(name);
+      return { ...a, suggestions: all.slice(0, 5), name };
     });
     return { axes: named, walked: result.walked };
   }
