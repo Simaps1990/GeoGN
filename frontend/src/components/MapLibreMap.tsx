@@ -95,17 +95,11 @@ import {
 import { useConfirmDialog } from './ConfirmDialog';
 import { cleanDiseases, cleanInjuries } from '../lib/estimationWalking';
 
-// TEMP-DEBUG-NETWORK-SUSPEND (vague 7 repro): 192.0.2.0/24 = TEST-NET-1 (RFC 5737),
-// réservé/jamais routé -> le SYN TCP part et ne reçoit jamais de réponse (ni erreur ni
-// timeout rapide), contrairement à un host mort en DNS (échoue vite). Simule un réseau
-// qui suspend les requêtes tuile ET glyphe sans jamais les faire échouer. Revert avant commit.
-const TEMP_DEBUG_SUSPEND_HOST = 'http://192.0.2.1';
-
 function getRasterStyle(tiles: string[], attribution: string) {
   const style: StyleSpecification = {
     version: 8,
     // Required for text labels (symbol layers with text-field)
-    glyphs: `${TEMP_DEBUG_SUSPEND_HOST}/font/{fontstack}/{range}.pbf`,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
     sources: {
       raster: {
         type: 'raster',
@@ -221,7 +215,7 @@ const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗'
 const TION_ARROW_LEN_METERS = 120;
 const TION_LABEL_GAP_METERS = 50;
 // Backoff borné pour (re)créer les couches baptême quand le style MapLibre n'est
-// vraiment pas encore prêt (cf. ensureBaptismOverlaysNow ci-dessous) : 10 x 250ms = 2,5s max.
+// vraiment pas encore prêt (cf. ensureBaptismOverlaysNow) : 10 x 250ms = 2,5s max.
 const BAPTISM_OVERLAY_RETRY_MS = 250;
 const BAPTISM_OVERLAY_RETRY_MAX_ATTEMPTS = 10;
 
@@ -1875,9 +1869,9 @@ export default function MapLibreMap() {
         id: 'plan',
         style: getRasterStyle(
           [
-            `${TEMP_DEBUG_SUSPEND_HOST}/a/{z}/{x}/{y}.png`,
-            `${TEMP_DEBUG_SUSPEND_HOST}/b/{z}/{x}/{y}.png`,
-            `${TEMP_DEBUG_SUSPEND_HOST}/c/{z}/{x}/{y}.png`,
+            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
           'OpenStreetMap contributors'
         ),
@@ -3144,17 +3138,14 @@ export default function MapLibreMap() {
   }
 
   // `ensureOverlays`/`resyncBaptismOverlays` n'ont besoin que du DOCUMENT de style
-  // (Style#_loaded — posé dès que le JSON inline + sprite éventuel sont traités),
-  // jamais des tuiles/glyphes réseau : c'est `map.isStyleLoaded()`/`map.loaded()`
-  // qui, eux, attendent en plus que TOUTES les sources (dont le fond de carte
-  // raster) aient fini leurs requêtes tuile — sur un réseau qui suspend ces
-  // requêtes sans jamais les faire échouer, ces deux-là ne deviennent donc
-  // jamais vrais. On n'attend plus dessus : on tente directement, et seule la
-  // vraie exception MapLibre ("Style is not done loading", si appelé avant que
-  // le document de style lui-même soit prêt) déclenche un réessai à backoff
-  // court et borné. Idempotent (cf. commentaires de chaque fonction) donc sans
-  // risque d'être rappelée par plusieurs déclencheurs (montage, 'styledata',
-  // arrivée des baptêmes) qui peuvent tous gagner la course selon le réseau.
+  // (posé dès que le JSON inline est traité), jamais des tuiles/glyphes réseau :
+  // `map.isStyleLoaded()`/`map.loaded()`, eux, attendent en plus que TOUTES les
+  // sources (dont le fond raster) aient fini leurs requêtes tuile — sur un réseau
+  // qui suspend ces requêtes sans jamais les faire échouer, ils ne deviennent
+  // jamais vrais. On n'attend donc plus dessus : on tente directement, et seule la
+  // vraie exception MapLibre ("Style is not done loading") déclenche un réessai à
+  // backoff court et borné. Idempotent, donc sans risque d'être rappelée par
+  // plusieurs déclencheurs (montage, 'styledata', arrivée des baptêmes).
   function ensureBaptismOverlaysNow(map: MapLibreMapInstance, attempt = 0): void {
     try {
       ensureOverlays(map);
@@ -3165,8 +3156,7 @@ export default function MapLibreMap() {
         return;
       }
       setTimeout(() => {
-        // La carte a pu être démontée pendant l'attente (cleanup de l'effet de
-        // montage remet mapInstanceRef.current à null) : pas de réessai sur une
+        // La carte a pu être démontée pendant l'attente : pas de réessai sur une
         // carte détruite.
         if (mapInstanceRef.current !== map) return;
         ensureBaptismOverlaysNow(map, attempt + 1);
@@ -3175,11 +3165,9 @@ export default function MapLibreMap() {
   }
 
   // Resynchro des sources baptism dès que les données changent (mêmes deps que
-  // le pendant zones: [zones, mapReady]). Belt-and-braces: si les baptêmes arrivent
-  // avant que le style soit utilisable (sources absentes), `ensureBaptismOverlaysNow`
-  // réessaie tout seul — donc pas besoin d'attendre `mapReady` ici non plus. Le cas
-  // "sources recréées par un rebuild de style" reste couvert séparément par les
-  // appels directs dans onLoad/onStyleData.
+  // le pendant zones: [zones, mapReady]). Belt-and-braces : si les baptêmes
+  // arrivent avant que le style soit utilisable, `ensureBaptismOverlaysNow`
+  // réessaie tout seul — pas besoin d'attendre `mapReady` ici.
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -3433,10 +3421,10 @@ export default function MapLibreMap() {
     };
 
     const onStyleData = () => {
-      // Baptême terrain : indépendant du chargement des tuiles/glyphes réseau du fond
-      // de carte, cf. ensureBaptismOverlaysNow (plus de garde isStyleLoaded() ici — sur
-      // un réseau qui suspend les requêtes sans jamais les faire échouer, ni 'load' ni
-      // isStyleLoaded() ne deviennent jamais vrais).
+      // Baptême terrain : indépendant du chargement des tuiles/glyphes réseau du
+      // fond de carte, cf. ensureBaptismOverlaysNow (pas de garde isStyleLoaded()
+      // ici — sur un réseau qui suspend les requêtes sans jamais les faire
+      // échouer, ni 'load' ni isStyleLoaded() ne deviennent jamais vrais).
       ensureBaptismOverlaysNow(map);
       if (!mapReadyRef.current) return;
       // Après un changement de style (setStyle), toutes les couches custom sont perdues.
@@ -3454,9 +3442,9 @@ export default function MapLibreMap() {
     map.on('load', onLoad);
     map.on('styledata', onStyleData);
     mapInstanceRef.current = map;
-    // Premier essai immédiat: le style passé ici est toujours un objet JS inline
+    // Premier essai immédiat : le style passé ici est toujours un objet JS inline
     // (getRasterStyle), jamais chargé par URL réseau — pas besoin d'attendre le
-    // moindre event pour tenter de créer les couches baptême (cf. ensureBaptismOverlaysNow).
+    // moindre event pour tenter de créer les couches baptême.
     ensureBaptismOverlaysNow(map);
 
     // Échelle réelle (mètres / km) placée au-dessus du footer
