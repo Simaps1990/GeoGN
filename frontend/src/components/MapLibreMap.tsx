@@ -5177,8 +5177,8 @@ export default function MapLibreMap() {
       ) : null}
 
       {baptismApi.draft?.point && (
-        <div className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
-          <div className="rounded-xl bg-white p-3 shadow-xl">
+        <div className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+          <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
             {baptismApi.computeError ? (
               <div>
                 <p className="mb-2 text-sm text-red-600">
@@ -5342,8 +5342,8 @@ export default function MapLibreMap() {
         // écho socket) : le panneau se ferme silencieusement plutôt que de planter.
         if (!b || !axis) return null;
         return (
-          <div key={`${b.id}:${axis.axisId}`} className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
-            <div className="rounded-xl bg-white p-3 shadow-xl">
+          <div key={`${b.id}:${axis.axisId}`} className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+            <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-semibold">Axe {axis.name ? `TION ${axis.name}` : ''}</span>
                 <button type="button" onClick={() => setBaptismPanel(null)} className="text-gray-500">✕</button>
@@ -5417,8 +5417,8 @@ export default function MapLibreMap() {
         // silencieuse plutôt qu'un panneau accroché à un id qui n'existe plus.
         if (!b) return null;
         return (
-          <div key={b.id} className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
-            <div className="rounded-xl bg-white p-3 shadow-xl">
+          <div key={b.id} className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+            <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-semibold">Baptême terrain</span>
                 <button type="button" onClick={() => setBaptismPanel(null)} className="text-gray-500">✕</button>

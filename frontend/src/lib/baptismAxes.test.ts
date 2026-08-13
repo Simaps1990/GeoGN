@@ -7,6 +7,7 @@ import {
   bearingDeg,
   destinationPoint,
   computeAxesFromWays,
+  parseOverpassElements,
   type OverpassWay,
 } from './baptismAxes.js';
 
@@ -155,6 +156,15 @@ test('filtrage par icône sur un croisement route/sentier', () => {
 
 test('aucune route : résultat vide', () => {
   assert.equal(computeAxesFromWays([], [2, 48], 'car').axes.length, 0);
+});
+
+test('parseOverpassElements rejette un miroir en erreur (remark, elements absent, réponse non-objet)', () => {
+  assert.throws(() => parseOverpassElements({ remark: 'runtime error: Query timed out in "query" at line 1' }), /OVERPASS_BAD_RESPONSE/);
+  assert.throws(() => parseOverpassElements({}), /OVERPASS_BAD_RESPONSE/);
+  assert.throws(() => parseOverpassElements(null), /OVERPASS_BAD_RESPONSE/);
+  assert.deepEqual(parseOverpassElements({ elements: [] }), []);
+  const w = way(1, [1, 2], [[2, 48], [2.001, 48]]);
+  assert.deepEqual(parseOverpassElements({ elements: [w] }), [w]);
 });
 
 test('way dense (tracé GPS) : la géométrie renvoyée est décimée à 500 sommets max, et la liste d’axes plafonnée à 20', () => {

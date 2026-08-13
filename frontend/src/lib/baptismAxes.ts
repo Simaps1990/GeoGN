@@ -344,7 +344,18 @@ const OVERPASS_MIRRORS = [
   'https://overpass.osm.ch/api/interpreter',
 ];
 
-export async function fetchOverpass(query: string): Promise<any> {
+// Un miroir Overpass surchargé répond parfois HTTP 200 avec un corps d'erreur
+// (`remark` de timeout/runtime-error) ou sans tableau `elements` exploitable.
+// Sans cette validation, l'appelant lisait ça comme "zéro route" au lieu d'un
+// échec de miroir, d'où de faux NO_ROAD_NEARBY en zone pourtant couverte.
+export function parseOverpassElements(json: any): OverpassWay[] {
+  if (!json || typeof json !== 'object') throw new Error('OVERPASS_BAD_RESPONSE');
+  if (typeof json.remark === 'string' && json.remark.length > 0) throw new Error('OVERPASS_BAD_RESPONSE');
+  if (!Array.isArray(json.elements)) throw new Error('OVERPASS_BAD_RESPONSE');
+  return json.elements;
+}
+
+export async function fetchOverpass(query: string): Promise<OverpassWay[]> {
   for (const url of OVERPASS_MIRRORS) {
     try {
       const res = await fetch(url, {
@@ -354,9 +365,9 @@ export async function fetchOverpass(query: string): Promise<any> {
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      return parseOverpassElements(await res.json());
     } catch {
-      // essayer le miroir suivant
+      // corps invalide ou HTTP en erreur : essayer le miroir suivant
     }
   }
   throw new Error('OVERPASS_UNAVAILABLE');
@@ -368,14 +379,14 @@ export async function computeBaptismAxes(
 ): Promise<{ axes: BaptismAxisResult[]; walked: WalkedAxis[] }> {
   for (const radius of [250, 500]) {
     const q = `[out:json][timeout:25];way(around:${radius},${point.lat},${point.lng})[highway];out geom;`;
-    const json = await fetchOverpass(q);
-    const result = computeAxesFromWays((json?.elements ?? []) as OverpassWay[], [point.lng, point.lat], icon);
+    const elements = await fetchOverpass(q);
+    const result = computeAxesFromWays(elements, [point.lng, point.lat], icon);
     if (result.axes.length === 0) continue;
 
     let candidates: ReturnType<typeof parseOverpassPois> = [];
     try {
-      const poisJson = await fetchOverpass(buildPoiQuery(point.lat, point.lng));
-      candidates = parseOverpassPois(poisJson);
+      const poisElements = await fetchOverpass(buildPoiQuery(point.lat, point.lng));
+      candidates = parseOverpassPois({ elements: poisElements });
     } catch {
       // non bloquant : on retombe sur le repli (ref/nom de route, cardinal)
     }
