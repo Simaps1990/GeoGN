@@ -220,7 +220,12 @@ export function slicePathMeters(coords: [number, number][], meters: number): [nu
 
 // Cap local du segment où tombe `meters` le long du chemin ; plafonné au cap du
 // dernier segment si `meters` dépasse la longueur totale.
+// Un chemin à 0 ou 1 point n'a pas de segment dont dériver un cap (le pipeline normal
+// filtre déjà `coords.length >= 2`, mais cette fonction est exportée et peut recevoir
+// une géométrie d'axe chargée depuis le backend sans repasser par ce filtre) : 0° par
+// convention plutôt qu'un throw sur `coords[-1]`/`coords[-2]` undefined.
 export function bearingAtMeters(coords: [number, number][], meters: number): number {
+  if (coords.length < 2) return 0;
   let acc = 0;
   for (let i = 0; i < coords.length - 1; i++) {
     const d = distMeters(coords[i], coords[i + 1]);

@@ -201,6 +201,15 @@ test('bearingAtMeters renvoie le cap local du segment, plafonné au dernier segm
   assert.equal(bearingAtMeters(path, 10000), b150);
 });
 
+test('bearingAtMeters ne lève pas sur un chemin dégénéré (0 ou 1 point) : 0° par convention', () => {
+  // Pipeline normal: computeAxesFromWays filtre déjà coords.length >= 2, mais la
+  // fonction est exportée et reçoit aussi des géométries chargées depuis le backend
+  // (baptismApi.baptisms) sans repasser par ce filtre — un axe corrompu ne doit pas
+  // planter tout le resync de la mission (cf. resyncBaptismOverlays côté MapLibreMap).
+  assert.equal(bearingAtMeters([], 120), 0);
+  assert.equal(bearingAtMeters([[2, 48]], 120), 0);
+});
+
 test('way dense (tracé GPS) : la géométrie renvoyée est décimée à 500 sommets max, et la liste d’axes plafonnée à 20', () => {
   const nodes: number[] = [];
   const pts: [number, number][] = [];

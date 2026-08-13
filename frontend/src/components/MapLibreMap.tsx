@@ -471,6 +471,17 @@ export default function MapLibreMap() {
   const { mode, selectedZoneIds, highlightedZoneIds, toggle, toggleSelection, resetBadge } = useGridView();
   const { assignmentsByZoneId, refetch: refetchAssignments } = useZoneAssignments(selectedMissionId);
   const baptismApi = useBaptism({ selectedMissionId });
+  // Lu par resyncBaptismOverlays au lieu de baptismApi.baptisms directement : sur un
+  // chargement à froid, le premier 'load' de la carte (qui crée les sources et appelle
+  // resyncBaptismOverlays) est enregistré une seule fois au montage (useEffect deps []),
+  // donc figé sur la closure de CE rendu — si baptismApi.baptisms y était lu directement,
+  // cet appel verrait toujours "vide" (le fetch n'a pas fini au montage) et écraserait les
+  // sources avec un FeatureCollection vide, sans qu'aucun autre trigger ne les re-remplisse
+  // ensuite si mapReady était déjà true (ex: remount de la carte après un setStyle). Un ref
+  // muté à chaque rendu contourne le problème: même une closure figée au montage lit la
+  // valeur à jour au moment de l'appel.
+  const baptismsRef = useRef(baptismApi.baptisms);
+  baptismsRef.current = baptismApi.baptisms;
   // Baptême terrain multi: un seul état pour les deux panneaux (principal / éditeur
   // d'axe), exclusifs par construction — plus de risque des deux ouverts à la fois.
   // Porte le baptismId (et l'axisId pour l'éditeur d'axe) pour cibler LE bon baptême
@@ -3043,63 +3054,78 @@ export default function MapLibreMap() {
 
     const axesFeatures: GeoJSON.Feature[] = [];
     const tionFeatures: GeoJSON.Feature[] = [];
-    for (const b of baptismApi.baptisms) {
+    for (const b of baptismsRef.current) {
       const showChevrons = b.displayMode === 'colors' || b.displayMode === 'both';
       const showTion = b.displayMode === 'tion' || b.displayMode === 'both';
 
       if (showChevrons) {
         for (const a of b.axes) {
-          axesFeatures.push({
-            type: 'Feature',
-            properties: { baptismId: b.id, axisId: a.axisId, color: a.color },
-            geometry: a.geometry,
-          });
+          // Un axe à la géométrie corrompue (coordonnées manquantes/vides, ex. donnée
+          // ancienne ou écrite hors de ce pipeline) ne doit pas faire échouer tout le
+          // FeatureCollection: on l'ignore, avec un avertissement, plutôt que de laisser
+          // l'exception remonter et annuler les deux setData() de fin de fonction (ce qui
+          // aurait bloqué l'affichage de TOUS les baptêmes de la mission, pas seulement
+          // celui-ci).
+          try {
+            axesFeatures.push({
+              type: 'Feature',
+              properties: { baptismId: b.id, axisId: a.axisId, color: a.color },
+              geometry: a.geometry,
+            });
+          } catch (err) {
+            console.warn('[baptême] axe ignoré (chevrons, géométrie invalide)', b.id, a.axisId, err);
+          }
         }
       }
 
       if (showTion) {
         for (const a of b.axes) {
-          // La flèche suit la route réelle (les rues courbes ne sont pas des droites) :
-          // on tronque la géométrie de l'axe le long d'elle-même au lieu de tracer un
-          // rayon synthétique origine->destinationPoint.
-          const coords = a.geometry.coordinates;
-          const arrowPath = slicePathMeters(coords, TION_ARROW_LEN_METERS);
-          const tip = arrowPath[arrowPath.length - 1];
-          const tipBearing = bearingAtMeters(coords, TION_ARROW_LEN_METERS);
+          try {
+            // La flèche suit la route réelle (les rues courbes ne sont pas des droites) :
+            // on tronque la géométrie de l'axe le long d'elle-même au lieu de tracer un
+            // rayon synthétique origine->destinationPoint.
+            const coords = a.geometry.coordinates;
+            const arrowPath = slicePathMeters(coords, TION_ARROW_LEN_METERS);
+            const tip = arrowPath[arrowPath.length - 1];
+            const tipBearing = bearingAtMeters(coords, TION_ARROW_LEN_METERS);
+            if (!tip) throw new Error(`axe sans géométrie exploitable (${coords.length} point(s))`);
 
-          // Label après la pointe, toujours sur la route quand il y en a assez (le clamp
-          // de slicePathMeters retombe naturellement sur le bout réel de l'axe tant que
-          // celui-ci dépasse la pointe). Seul cas dégénéré : l'axe est trop court même
-          // pour la pointe (120 m) — pointe et label coïncident alors tous les deux sur
-          // le bout de l'axe. On prolonge alors tout droit depuis la pointe (cap du
-          // dernier segment) sur l'écart habituel, pour que le label ne retombe jamais
-          // sur/avant elle.
-          const labelDist = TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS;
-          const labelPath = slicePathMeters(coords, labelDist);
-          const naiveLabelPoint = labelPath[labelPath.length - 1];
-          const labelPoint =
-            distMeters(naiveLabelPoint, tip) > 0.5
-              ? naiveLabelPoint
-              : destinationPoint(tip, tipBearing, TION_LABEL_GAP_METERS);
+            // Label après la pointe, toujours sur la route quand il y en a assez (le clamp
+            // de slicePathMeters retombe naturellement sur le bout réel de l'axe tant que
+            // celui-ci dépasse la pointe). Seul cas dégénéré : l'axe est trop court même
+            // pour la pointe (120 m) — pointe et label coïncident alors tous les deux sur
+            // le bout de l'axe. On prolonge alors tout droit depuis la pointe (cap du
+            // dernier segment) sur l'écart habituel, pour que le label ne retombe jamais
+            // sur/avant elle.
+            const labelDist = TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS;
+            const labelPath = slicePathMeters(coords, labelDist);
+            const naiveLabelPoint = labelPath[labelPath.length - 1];
+            const labelPoint =
+              distMeters(naiveLabelPoint, tip) > 0.5
+                ? naiveLabelPoint
+                : destinationPoint(tip, tipBearing, TION_LABEL_GAP_METERS);
 
-          tionFeatures.push({
-            type: 'Feature',
-            properties: { baptismId: b.id, axisId: a.axisId },
-            geometry: { type: 'LineString', coordinates: arrowPath },
-          });
-          tionFeatures.push({
-            type: 'Feature',
-            properties: { baptismId: b.id, axisId: a.axisId, rotation: (tipBearing - 90 + 360) % 360 },
-            geometry: { type: 'Point', coordinates: tip },
-          });
-          // Label déporté après la pointe (et non dessus) : Point séparé, plus loin sur le
-          // même axe. `has label`/`has rotation` sur les couches respectives évitent que
-          // baptism-tion-head ne dessine aussi une pointe '>' à l'emplacement du label.
-          tionFeatures.push({
-            type: 'Feature',
-            properties: { baptismId: b.id, axisId: a.axisId, label: a.name ? `TION ${a.name}` : 'TION ?' },
-            geometry: { type: 'Point', coordinates: labelPoint },
-          });
+            tionFeatures.push({
+              type: 'Feature',
+              properties: { baptismId: b.id, axisId: a.axisId },
+              geometry: { type: 'LineString', coordinates: arrowPath },
+            });
+            tionFeatures.push({
+              type: 'Feature',
+              properties: { baptismId: b.id, axisId: a.axisId, rotation: (tipBearing - 90 + 360) % 360 },
+              geometry: { type: 'Point', coordinates: tip },
+            });
+            // Label déporté après la pointe (et non dessus) : Point séparé, plus loin sur le
+            // même axe. `has label`/`has rotation` sur les couches respectives évitent que
+            // baptism-tion-head ne dessine aussi une pointe '>' à l'emplacement du label.
+            tionFeatures.push({
+              type: 'Feature',
+              properties: { baptismId: b.id, axisId: a.axisId, label: a.name ? `TION ${a.name}` : 'TION ?' },
+              geometry: { type: 'Point', coordinates: labelPoint },
+            });
+          } catch (err) {
+            console.warn('[baptême] axe ignoré (TION, géométrie invalide)', b.id, a.axisId, err);
+          }
         }
       }
     }
