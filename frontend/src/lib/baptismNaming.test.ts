@@ -147,3 +147,20 @@ test('la voie d’origine ne baptise jamais un axe (exclusion nom + ref)', async
   ];
   assert.deepEqual(rankAxisSuggestions(90, origin, candidates, undefined, forbidden), ['AUCHAN']);
 });
+
+test('repli : la rue perpendiculaire du bout nomme l’axe quand la sienne est interdite', () => {
+  const forbidden = new Set(['PACHE']);
+  // Rue de l'axe interdite → la perpendiculaire (différente) prend le relais.
+  assert.equal(
+    fallbackAxisName({ name: 'Rue Pache' }, 45, forbidden, [{ name: 'Rue Pache' }, { name: 'Rue de la Gare' }]),
+    'GARE'
+  );
+  assert.equal(fallbackAxisName({ name: 'Rue Pache' }, 45, forbidden, [{ ref: 'D53' }]), 'D53');
+  // Aucune perpendiculaire exploitable → cardinal.
+  assert.equal(fallbackAxisName({ name: 'Rue Pache' }, 45, forbidden, []), 'NORD-EST');
+  // Rue de l'axe autorisée → elle garde la priorité sur la perpendiculaire.
+  assert.equal(
+    fallbackAxisName({ name: 'Boulevard Voltaire' }, 45, forbidden, [{ name: 'Rue de la Gare' }]),
+    'VOLTAIRE'
+  );
+});

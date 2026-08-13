@@ -227,3 +227,34 @@ test('way dense (tracé GPS) : la géométrie renvoyée est décimée à 500 som
   assert.ok(axes.some((a) => a.geometry.coordinates.length === 500));
   assert.ok(axes.length <= 20);
 });
+
+test('trimPathStartMeters écarte le départ sans toucher la fin', async () => {
+  const { trimPathStartMeters } = await import('./baptismAxes.js');
+  const line: [number, number][] = [[1.999, 48], [2, 48], [2.001, 48]];
+  const total = distMeters(line[0], line[1]) + distMeters(line[1], line[2]);
+  const trimmed = trimPathStartMeters(line, 15);
+  assert.ok(Math.abs(distMeters(line[0], trimmed[0]) - 15) < 0.5);
+  assert.deepEqual(trimmed[trimmed.length - 1], [2.001, 48]);
+  let t = 0;
+  for (let i = 0; i < trimmed.length - 1; i++) t += distMeters(trimmed[i], trimmed[i + 1]);
+  assert.ok(Math.abs(total - t - 15) < 0.5);
+
+  // Axe court : l'écart est plafonné au tiers de la longueur.
+  const short: [number, number][] = [[2, 48], [2.0004, 48]]; // ~30 m
+  const st = trimPathStartMeters(short, 15);
+  const shortLen = distMeters(short[0], short[1]);
+  assert.ok(Math.abs(distMeters(short[0], st[0]) - shortLen / 3) < 0.5);
+});
+
+test('l’axe qui finit à une intersection connaît les rues perpendiculaires', () => {
+  const NAMED_CROSS: OverpassWay[] = [
+    way(1, [1, 100, 2], [[1.999, 48], [2, 48], [2.001, 48]], { highway: 'residential', name: 'Rue Est-Ouest' }),
+    way(2, [3, 100, 4], [[2, 47.999], [2, 48], [2, 48.001]], { highway: 'residential', name: 'Rue Nord-Sud' }),
+  ];
+  const { walked, originTags } = computeAxesFromWays(NAMED_CROSS, [2.0005, 48.00003], 'car');
+  assert.equal(originTags.name, 'Rue Est-Ouest');
+  const atIntersection = walked.find((w) => w.endType === 'intersection');
+  const atDeadend = walked.find((w) => w.endType === 'deadend');
+  assert.deepEqual(atIntersection?.endCrossTags?.map((t) => t.name), ['Rue Nord-Sud']);
+  assert.equal(atDeadend?.endCrossTags, undefined);
+});

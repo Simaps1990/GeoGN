@@ -45,7 +45,7 @@ import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { isTestTrack, useVehicleTrack } from '../hooks/useVehicleTrack';
 import { useMapDraft } from '../hooks/useMapDraft';
 import { useBaptism } from '../hooks/useBaptism';
-import { AXIS_PALETTE, destinationPoint, bearingAtMeters, type BaptismIcon } from '../lib/baptismAxes';
+import { AXIS_PALETTE, destinationPoint, bearingAtMeters, trimPathStartMeters, TION_START_GAP_METERS, type BaptismIcon } from '../lib/baptismAxes';
 import {
   formatElapsedSince,
   formatHoursToHM,
@@ -212,7 +212,7 @@ function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
 const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
 // Longueur de la flèche TION (inchangée) et écart entre sa pointe et le label du nom,
 // tous deux en mètres le long de l'axe -> le label suit le zoom comme la flèche.
-const TION_LABEL_GAP_METERS = 50;
+const TION_LABEL_GAP_METERS = 25;
 // Backoff borné pour (re)créer les couches baptême quand le style MapLibre n'est
 // vraiment pas encore prêt (cf. ensureBaptismOverlaysNow) : 10 x 250ms = 2,5s max.
 const BAPTISM_OVERLAY_RETRY_MS = 250;
@@ -3202,7 +3202,9 @@ export default function MapLibreMap() {
             // portée que les chevrons : jusqu'à la prochaine intersection), pointe au
             // bout, cap du dernier segment.
             const coords = a.geometry.coordinates;
-            const arrowPath = coords;
+            // Départ écarté du point : deux axes opposés ne forment plus un trait
+            // continu à travers l'icône (la pointe et le label restent au bout).
+            const arrowPath = trimPathStartMeters(coords, TION_START_GAP_METERS);
             const tip = arrowPath[arrowPath.length - 1];
             const tipBearing = bearingAtMeters(coords, Number.MAX_SAFE_INTEGER);
             if (!tip) throw new Error(`axe sans géométrie exploitable (${coords.length} point(s))`);

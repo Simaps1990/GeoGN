@@ -1,4 +1,4 @@
-import { parseOverpassPois, rankAxisSuggestions, fallbackAxisName, forbiddenOriginNames } from './baptismNaming';
+import { parseOverpassPois, rankAxisSuggestions, fallbackAxisName, forbiddenOriginNames, stripRoadWords } from './baptismNaming';
 import { fetchOverpassRoads, fetchOverpassPois } from './api';
 
 export type BaptismIcon = 'person' | 'car' | 'house';
@@ -25,6 +25,9 @@ export type WalkedAxis = {
   lengthMeters: number;
   endType: 'intersection' | 'deadend' | 'cap';
   firstWayTags: Record<string, string>;
+  // Tags des AUTRES voies à l'intersection terminale : la « rue perpendiculaire »
+  // qui peut nommer l'axe quand sa propre rue est celle d'origine (interdite).
+  endCrossTags?: Record<string, string>[];
 };
 
 export const AXIS_PALETTE = [
@@ -138,6 +141,17 @@ function snapToRoads(g: Graph, p: [number, number]): Snap | null {
   return best;
 }
 
+// Tags nommés (name ou ref) des autres voies passant par un nœud.
+function crossTagsAt(g: Graph, nodeId: number, currentWayId: number): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  for (const occ of g.occurrences.get(nodeId) ?? []) {
+    if (occ.wayId === currentWayId) continue;
+    const tags = g.ways.get(occ.wayId)?.tags;
+    if (tags && (tags.name || tags.ref)) out.push(tags);
+  }
+  return out;
+}
+
 type WalkStart = { wayId: number; fromIdx: number; dir: 1 | -1; startPoint: [number, number] };
 
 function walkOne(g: Graph, start: WalkStart): WalkedAxis {
@@ -162,7 +176,12 @@ function walkOne(g: Graph, start: WalkStart): WalkedAxis {
 
     const nodeId = w.nodes[nextIdx];
     const deg = g.degree.get(nodeId) ?? 0;
-    if (deg >= 3) return { coords, lengthMeters: length, endType: 'intersection', firstWayTags };
+    if (deg >= 3) {
+      return {
+        coords, lengthMeters: length, endType: 'intersection', firstWayTags,
+        endCrossTags: crossTagsAt(g, nodeId, wayId),
+      };
+    }
 
     const atWayEnd = nextIdx === 0 || nextIdx === w.nodes.length - 1;
     if (atWayEnd) {
@@ -239,6 +258,33 @@ export function bearingAtMeters(coords: [number, number][], meters: number): num
 function pointAlong(coords: [number, number][], meters: number): [number, number] {
   const sliced = slicePathMeters(coords, meters);
   return sliced[sliced.length - 1];
+}
+
+// Écarte le départ de la flèche TION du point lui-même : deux axes opposés qui
+// partent du même pixel se lisent comme UN trait continu traversant l'icône.
+// On mange `meters` en tête de chemin — au plus un tiers de sa longueur, pour
+// ne pas vider les axes courts.
+export const TION_START_GAP_METERS = 15;
+export function trimPathStartMeters(coords: [number, number][], meters: number): [number, number][] {
+  if (coords.length < 2) return coords;
+  let total = 0;
+  for (let i = 0; i < coords.length - 1; i++) total += distMeters(coords[i], coords[i + 1]);
+  const gap = Math.min(meters, total / 3);
+  if (gap <= 0) return coords;
+  let acc = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = distMeters(coords[i], coords[i + 1]);
+    if (acc + d > gap && d > 0) {
+      const t = (gap - acc) / d;
+      const start: [number, number] = [
+        coords[i][0] + (coords[i + 1][0] - coords[i][0]) * t,
+        coords[i][1] + (coords[i + 1][1] - coords[i][1]) * t,
+      ];
+      return [start, ...coords.slice(i + 1)];
+    }
+    acc += d;
+  }
+  return coords;
 }
 
 function isRingWay(w: OverpassWay): boolean {
@@ -405,12 +451,27 @@ export async function computeBaptismAxes(
     // (ÉCOLE, MAIRIE…), un même POI peut tomber dans le cône de deux axes.
     const used = new Set<string>();
     const named = result.axes.map((a, i) => {
+      const wa = result.walked[i];
       const suggestions = rankAxisSuggestions(a.bearing, origin, candidates, undefined, forbidden);
-      const fallback = fallbackAxisName(result.walked[i]?.firstWayTags ?? {}, a.bearing, forbidden);
+      const fallback = fallbackAxisName(wa?.firstWayTags ?? {}, a.bearing, forbidden, wa?.endCrossTags);
       const all = [...suggestions];
       if (!all.includes(fallback)) all.push(fallback);
-      const name = all.find((n) => !used.has(n)) ?? all[0] ?? null;
-      if (name) used.add(name);
+      // Les rues perpendiculaires atteintes au bout de l'axe comme alternatives
+      // dans le sélecteur de renommage.
+      for (const t of wa?.endCrossTags ?? []) {
+        const n = t.ref ? t.ref.toUpperCase().slice(0, 40) : stripRoadWords(t.name).slice(0, 40);
+        if (!forbidden.has(n) && !all.includes(n)) all.push(n);
+      }
+      let name = all.find((n) => !used.has(n)) ?? null;
+      if (!name) {
+        // Tous les candidats sont déjà pris par un autre axe (ex. les deux bouts
+        // de la même rue, POI vides) : on recalcule le repli en interdisant AUSSI
+        // les noms utilisés — la rue perpendiculaire du bout prend le relais,
+        // sinon le cardinal. Jamais deux fois le même nom par duplication sèche.
+        name = fallbackAxisName(wa?.firstWayTags ?? {}, a.bearing, new Set([...forbidden, ...used]), wa?.endCrossTags);
+        if (!all.includes(name)) all.push(name);
+      }
+      used.add(name);
       return { ...a, suggestions: all.slice(0, 5), name };
     });
     return { axes: named, walked: result.walked };

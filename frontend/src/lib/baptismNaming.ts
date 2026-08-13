@@ -124,15 +124,25 @@ export function stripRoadWords(name: string): string {
 export function fallbackAxisName(
   firstWayTags: Record<string, string>,
   bearing: number,
-  forbidden?: Set<string>
+  forbidden?: Set<string>,
+  crossTags?: Record<string, string>[]
 ): string {
-  if (firstWayTags.ref) {
-    const ref = firstWayTags.ref.toUpperCase().slice(0, 40);
-    if (!forbidden?.has(ref)) return ref;
-  }
-  if (firstWayTags.name) {
-    const name = stripRoadWords(firstWayTags.name).slice(0, 40);
-    if (!forbidden?.has(name)) return name;
+  const ownRef = firstWayTags.ref ? firstWayTags.ref.toUpperCase().slice(0, 40) : null;
+  const ownName = firstWayTags.name ? stripRoadWords(firstWayTags.name).slice(0, 40) : null;
+  if (ownRef && !forbidden?.has(ownRef)) return ownRef;
+  if (ownName && !forbidden?.has(ownName)) return ownName;
+  // Rue de l'axe interdite (celle d'origine) ou anonyme : la rue PERPENDICULAIRE
+  // atteinte au bout nomme la direction (« TION GARE » = vers la rue de la Gare),
+  // avant de se rabattre sur le simple cardinal.
+  for (const t of crossTags ?? []) {
+    if (t.ref) {
+      const ref = t.ref.toUpperCase().slice(0, 40);
+      if (ref !== ownRef && !forbidden?.has(ref)) return ref;
+    }
+    if (t.name) {
+      const name = stripRoadWords(t.name).slice(0, 40);
+      if (name !== ownName && !forbidden?.has(name)) return name;
+    }
   }
   return cardinalName(bearing);
 }
