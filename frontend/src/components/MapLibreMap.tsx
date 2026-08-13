@@ -2676,7 +2676,7 @@ export default function MapLibreMap() {
         source: 'baptism-axes',
         layout: {
           'symbol-placement': 'line',
-          'symbol-spacing': 19,
+          'symbol-spacing': 9,
           'text-field': '>',
           'text-size': 16,
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
@@ -2701,7 +2701,7 @@ export default function MapLibreMap() {
         source: 'baptism-axes',
         layout: {
           'symbol-placement': 'line',
-          'symbol-spacing': 19,
+          'symbol-spacing': 9,
           'text-field': '>',
           'text-size': 16,
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
@@ -2765,7 +2765,10 @@ export default function MapLibreMap() {
         layout: {
           'text-field': ['get', 'label'],
           'text-size': 13,
-          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          // Vrai gras : demotiles ne sert que des piles précomposées — « Noto Sans Bold »
+          // n'existe que SEULE (toute pile combinée introuvable donne un 404 de glyphes
+          // qui fait échouer la tuile entière de la source, lignes TION comprises).
+          'text-font': ['Noto Sans Bold'],
           'text-anchor': 'center',
           'text-allow-overlap': true,
           'text-ignore-placement': true,
