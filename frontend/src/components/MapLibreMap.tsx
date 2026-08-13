@@ -211,10 +211,24 @@ function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
 
 const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
 
-function makeBaptismEl(icon: BaptismIcon, dashed: boolean): HTMLDivElement {
+// `name`, quand fourni, s'affiche en pastille blanche sous l'emoji (position absolute :
+// ne participe pas à la boîte de l'élément, pour ne pas décaler l'ancrage du Marker).
+// Pas de `position` inline sur `el` : maplibre lui ajoute la classe `maplibregl-marker`
+// (position:absolute + transform via sa feuille de style) pour l'ancrer au point
+// géographique — un `position` inline la shadowerait et casserait le placement du
+// marqueur (repéré en vérification manuelle). `position:absolute` suffit aussi comme
+// bloc conteneur pour la pastille en position:absolute ci-dessous.
+function makeBaptismEl(emoji: string, dashed: boolean, name?: string | null): HTMLDivElement {
   const el = document.createElement('div');
-  el.textContent = BAPTISM_EMOJI[icon];
+  el.textContent = emoji;
   el.style.cssText = `font-size:20px;line-height:1;background:#fff;border-radius:9999px;padding:6px;border:2px ${dashed ? 'dashed #6b7280' : 'solid #111827'};box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer;`;
+  if (name) {
+    const pill = document.createElement('div');
+    pill.textContent = name;
+    pill.style.cssText =
+      'position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#fff;border-radius:9999px;padding:2px 8px;font-size:10px;font-weight:700;line-height:1.4;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,.25);';
+    el.appendChild(pill);
+  }
   return el;
 }
 
@@ -438,8 +452,11 @@ export default function MapLibreMap() {
   const { assignmentsByZoneId, refetch: refetchAssignments } = useZoneAssignments(selectedMissionId);
   const baptismApi = useBaptism({ selectedMissionId });
   const [editingAxisId, setEditingAxisId] = useState<string | null>(null);
-  const [baptismMenuOpen, setBaptismMenuOpen] = useState(false);
   const [baptismPanelOpen, setBaptismPanelOpen] = useState(false);
+  // Étape courante de l'assistant de placement (1 Type / 2 Nom / 3 Affichage) ;
+  // remise à 1 quand le brouillon redevient null (annulation ou succès), cf. l'effet
+  // juste après onStartBaptism.
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   // Déclaré ici (et non avec les autres états de toast plus bas) parce que useVehicleTrack
   // en a besoin et que ses valeurs de retour sont lues plus haut dans le rendu.
   const [activityToast, setActivityToast] = useState<string | null>(null);
@@ -1921,7 +1938,7 @@ export default function MapLibreMap() {
   }, [activeTool, baptismApi, cancelDraft]);
 
   const onStartBaptism = useCallback(
-    async (icon: BaptismIcon) => {
+    async () => {
       if (baptismApi.baptism) {
         const ok = await confirmDialog({
           title: 'Remplacer le baptême actuel ?',
@@ -1934,15 +1951,40 @@ export default function MapLibreMap() {
       }
       cancelDraft();
       // Les panneaux (top-16 avant, bottom-24 depuis la feuille du bas) collisionneraient
-      // avec la barre de confirmation du brouillon s'ils restaient ouverts pendant le
-      // repositionnement d'un baptême existant.
+      // avec l'assistant de placement s'ils restaient ouverts pendant le repositionnement
+      // d'un baptême existant.
       setEditingAxisId(null);
       setBaptismPanelOpen(false);
-      baptismApi.startPlacing(icon);
+      baptismApi.startPlacing();
       setActiveTool('baptism');
     },
     [baptismApi, cancelDraft, confirmDialog, setActiveTool]
   );
+
+  // Baptême terrain: l'assistant repart à l'étape 1 dès que le brouillon redevient null
+  // (Annuler, ou succès du PUT dans confirmDraft) — couvre tous les chemins de sortie
+  // sans dupliquer la remise à zéro à chaque bouton Annuler.
+  useEffect(() => {
+    if (!baptismApi.draft) setWizardStep(1);
+  }, [baptismApi.draft]);
+
+  // Baptême terrain: les boutons de l'étape 3 ne font que choisir le mode d'affichage
+  // (setDraftDisplayMode) ; le calcul+enregistrement démarre ici, une fois ce choix
+  // reflété dans `draft`. Appeler confirmDraft() dans le même clic que
+  // setDraftDisplayMode casserait son garde-fou d'annulation (comparaison de référence
+  // sur `draft` après le premier await) : le setState programmé par setDraftDisplayMode
+  // atterrirait pendant l'await et ferait passer `draftRef.current` à un nouvel objet,
+  // que confirmDraft lirait comme "annulé entretemps" et abandonnerait en silence.
+  // Un Réessayer manuel après échec rappelle confirmDraft() directement (mode déjà
+  // dans `draft`, inchangé depuis), donc pas besoin que cet effet le fasse aussi.
+  useEffect(() => {
+    if (baptismApi.draft?.displayMode) {
+      void baptismApi.confirmDraft().then((ok) => {
+        if (ok) setActiveTool('none');
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baptismApi.draft?.displayMode]);
 
   // Dernier style réellement appliqué à la carte (à la création ou via setStyle),
   // pour éviter un setStyle redondant au premier rendu.
@@ -3037,7 +3079,7 @@ export default function MapLibreMap() {
     baptismMarkerRef.current = null;
     const b = baptismApi.baptism;
     if (b) {
-      const el = makeBaptismEl(b.icon, false);
+      const el = makeBaptismEl(BAPTISM_EMOJI[b.icon], false, b.pointName);
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
         baptismApi.clearMutationError();
@@ -3054,16 +3096,20 @@ export default function MapLibreMap() {
     };
   }, [baptismApi.baptism, mapReady]);
 
-  // Marqueur de brouillon (icône pointillée, déplaçable) pendant le placement.
+  // Marqueur de brouillon (icône pointillée, déplaçable) pendant le placement. Avant le
+  // choix du type à l'étape 1 du wizard (icon encore null), marqueur neutre 📍. Dépend
+  // de point/icon seulement (pas de tout `draft`) pour ne pas recréer le marqueur — et
+  // le faire clignoter — à chaque frappe dans le champ nom de l'étape 2.
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !mapReady) return;
     baptismDraftMarkerRef.current?.remove();
     baptismDraftMarkerRef.current = null;
-    const d = baptismApi.draft;
-    if (d?.point) {
-      const marker = new maplibregl.Marker({ element: makeBaptismEl(d.icon, true), draggable: true })
-        .setLngLat([d.point.lng, d.point.lat])
+    const point = baptismApi.draft?.point;
+    const icon = baptismApi.draft?.icon ?? null;
+    if (point) {
+      const marker = new maplibregl.Marker({ element: makeBaptismEl(icon ? BAPTISM_EMOJI[icon] : '📍', true), draggable: true })
+        .setLngLat([point.lng, point.lat])
         .addTo(map);
       marker.on('dragend', () => {
         const p = marker.getLngLat();
@@ -3075,7 +3121,7 @@ export default function MapLibreMap() {
       baptismDraftMarkerRef.current?.remove();
       baptismDraftMarkerRef.current = null;
     };
-  }, [baptismApi.draft, mapReady]);
+  }, [baptismApi.draft?.point, baptismApi.draft?.icon, mapReady]);
 
   // Routage du clic carte pour l'outil baptême: place uniquement le point de
   // brouillon (pas de POI/zone/popup). Le handler de useMapDraft ne fait déjà rien
@@ -4752,8 +4798,6 @@ export default function MapLibreMap() {
         cancelDraft={cancelAnyDraft}
         setZoneMenuOpen={setZoneMenuOpen}
         zoneMenuOpen={zoneMenuOpen}
-        baptismMenuOpen={baptismMenuOpen}
-        setBaptismMenuOpen={setBaptismMenuOpen}
         onStartBaptism={onStartBaptism}
         setDraftColor={setDraftColor}
         setDraftIcon={setDraftIcon}
@@ -5072,65 +5116,154 @@ export default function MapLibreMap() {
       ) : null}
 
       {baptismApi.draft?.point && (
-        <div className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-xl bg-white p-3 shadow-xl">
-          {baptismApi.computeError ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-red-600">
-                {baptismApi.computeError === 'NO_ROAD_NEARBY'
-                  ? 'Aucune route trouvée à proximité (500 m).'
-                  : baptismApi.computeError === 'OVERPASS_UNAVAILABLE'
-                    ? 'Overpass indisponible. Vérifie ta connexion.'
-                    : `Échec de l'enregistrement (${baptismApi.computeError}).`}
-              </span>
-              <button
-                type="button"
-                className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
-                onClick={() => {
-                  baptismApi.cancelDraft();
-                  setActiveTool('none');
-                }}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white"
-                onClick={() => {
-                  void baptismApi.confirmDraft().then((ok) => {
-                    if (ok) setActiveTool('none');
-                  });
-                }}
-              >
-                Réessayer
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700">Placer le point puis valider</span>
-              <button
-                type="button"
-                className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
-                onClick={() => {
-                  baptismApi.cancelDraft();
-                  setActiveTool('none');
-                }}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                disabled={baptismApi.computing}
-                className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
-                onClick={() => {
-                  void baptismApi.confirmDraft().then((ok) => {
-                    if (ok) setActiveTool('none');
-                  });
-                }}
-              >
-                {baptismApi.computing ? 'Calcul…' : 'Valider'}
-              </button>
-            </div>
-          )}
+        <div className="absolute inset-x-0 bottom-24 z-20 mx-auto w-full max-w-xl px-3">
+          <div className="rounded-xl bg-white p-3 shadow-xl">
+            {baptismApi.computeError ? (
+              <div>
+                <p className="mb-2 text-sm text-red-600">
+                  {baptismApi.computeError === 'NO_ROAD_NEARBY'
+                    ? 'Aucune route trouvée à proximité (500 m).'
+                    : baptismApi.computeError === 'OVERPASS_UNAVAILABLE'
+                      ? 'Overpass indisponible. Vérifie ta connexion.'
+                      : `Échec de l'enregistrement (${baptismApi.computeError}).`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                    onClick={() => {
+                      baptismApi.cancelDraft();
+                      setActiveTool('none');
+                    }}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white"
+                    onClick={() => {
+                      void baptismApi.confirmDraft().then((ok) => {
+                        if (ok) setActiveTool('none');
+                      });
+                    }}
+                  >
+                    Réessayer
+                  </button>
+                </div>
+              </div>
+            ) : wizardStep === 1 ? (
+              <div>
+                <p className="mb-2 text-sm font-semibold">Baptême terrain — Type</p>
+                <div className="mb-2 flex gap-2">
+                  {(
+                    [
+                      ['person', 'Personne'],
+                      ['car', 'Voiture'],
+                      ['house', 'Domicile'],
+                    ] as const
+                  ).map(([icon, label]) => (
+                    <button
+                      key={icon}
+                      type="button"
+                      className="flex flex-1 flex-col items-center gap-1 rounded-lg bg-gray-100 py-3 text-sm hover:bg-gray-200"
+                      onClick={() => {
+                        baptismApi.setDraftIcon(icon);
+                        setWizardStep(2);
+                      }}
+                    >
+                      <span className="text-2xl">{BAPTISM_EMOJI[icon]}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="w-full rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                  onClick={() => {
+                    baptismApi.cancelDraft();
+                    setActiveTool('none');
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            ) : wizardStep === 2 ? (
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Baptême terrain — Nom</span>
+                  <button type="button" className="text-xs text-gray-500" onClick={() => setWizardStep(1)}>
+                    ← Retour
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  defaultValue={baptismApi.draft?.pointName ?? ''}
+                  placeholder="Nom affiché sur la carte (optionnel)"
+                  maxLength={40}
+                  autoFocus
+                  className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
+                  onChange={(e) => baptismApi.setDraftPointName(e.target.value)}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                    onClick={() => {
+                      baptismApi.cancelDraft();
+                      setActiveTool('none');
+                    }}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white"
+                    onClick={() => setWizardStep(3)}
+                  >
+                    Suivant
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Baptême terrain — Affichage</span>
+                  <button type="button" className="text-xs text-gray-500" onClick={() => setWizardStep(2)}>
+                    ← Retour
+                  </button>
+                </div>
+                <div className="mb-2 flex flex-col gap-1.5">
+                  {(
+                    [
+                      ['colors', 'Colorer les axes'],
+                      ['tion', 'Nommer les axes (TION)'],
+                      ['both', 'Les deux'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={baptismApi.computing}
+                      className="rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200 disabled:opacity-50"
+                      onClick={() => baptismApi.setDraftDisplayMode(mode)}
+                    >
+                      {baptismApi.computing ? 'Calcul…' : label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="w-full rounded-lg bg-gray-200 px-3 py-1.5 text-sm"
+                  onClick={() => {
+                    baptismApi.cancelDraft();
+                    setActiveTool('none');
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -5223,6 +5356,17 @@ export default function MapLibreMap() {
             )}
             {canEditMap && (
               <>
+                <input
+                  type="text"
+                  defaultValue={baptismApi.baptism.pointName ?? ''}
+                  placeholder="Nom du point (optionnel)"
+                  maxLength={40}
+                  className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    void baptismApi.setPointName(v ? v : null);
+                  }}
+                />
                 <div className="mb-2 flex flex-wrap gap-1">
                   {(['colors', 'tion', 'both'] as const).map((m) => (
                     <button

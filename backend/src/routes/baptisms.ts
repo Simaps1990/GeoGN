@@ -22,6 +22,17 @@ export function validateIcon(i: unknown): i is BaptismIcon {
   return i === 'person' || i === 'car' || i === 'house';
 }
 
+// Nom affiché en pastille sous l'icône sur la carte. null/undefined -> pas de nom ;
+// une chaîne au-delà de 40 caractères (après trim) est rejetée ; une chaîne vide
+// (après trim) est normalisée à null plutôt que stockée comme chaîne vide.
+export function validatePointName(n: unknown): { value: string | null } | { error: string } {
+  if (n === null || n === undefined) return { value: null };
+  if (typeof n !== 'string') return { error: 'INVALID_POINT_NAME' };
+  const trimmed = n.trim();
+  if (trimmed.length > 40) return { error: 'INVALID_POINT_NAME' };
+  return { value: trimmed ? trimmed.toUpperCase() : null };
+}
+
 export function validateAxis(a: unknown): string | null {
   if (!a || typeof a !== 'object') return 'INVALID_AXIS';
   const axis = a as Record<string, unknown>;
@@ -76,6 +87,7 @@ function toDto(b: BaptismDoc) {
     missionId: b.missionId.toString(),
     icon: b.icon,
     point: { lng: b.point.lng, lat: b.point.lat },
+    pointName: b.pointName ?? null,
     displayMode: b.displayMode,
     axes: b.axes.map((a) => ({
       axisId: a.axisId,
@@ -101,12 +113,14 @@ function emitUpdated(app: FastifyInstance, missionId: string, dto: ReturnType<ty
 type PutBody = {
   icon: BaptismIcon;
   point: { lng: number; lat: number };
+  pointName?: string | null;
   displayMode: BaptismDisplayMode;
   axes: BaptismDoc['axes'];
 };
 
 type PatchBody = {
   displayMode?: BaptismDisplayMode;
+  pointName?: string | null;
   axisId?: string;
   name?: string | null;
   color?: string;
@@ -148,6 +162,8 @@ export async function baptismsRoutes(app: FastifyInstance) {
       const body = req.body as PutBody;
       if (!validateIcon(body?.icon)) return reply.code(400).send({ error: 'INVALID_ICON' });
       if (!validateLngLatPoint(body?.point)) return reply.code(400).send({ error: 'INVALID_POINT' });
+      const pointNameResult = validatePointName(body?.pointName);
+      if ('error' in pointNameResult) return reply.code(400).send(pointNameResult);
       if (!validateDisplayMode(body?.displayMode)) return reply.code(400).send({ error: 'INVALID_DISPLAY_MODE' });
       const axesErr = validateAxes(body?.axes);
       if (axesErr) return reply.code(400).send(axesErr);
@@ -159,6 +175,7 @@ export async function baptismsRoutes(app: FastifyInstance) {
           $set: {
             icon: body.icon,
             point: { lng: body.point.lng, lat: body.point.lat },
+            pointName: pointNameResult.value,
             displayMode: body.displayMode,
             axes: body.axes.map((a) => ({
               axisId: a.axisId,
@@ -204,6 +221,11 @@ export async function baptismsRoutes(app: FastifyInstance) {
       if (body.displayMode !== undefined) {
         if (!validateDisplayMode(body.displayMode)) return reply.code(400).send({ error: 'INVALID_DISPLAY_MODE' });
         b.displayMode = body.displayMode;
+      }
+      if (body.pointName !== undefined) {
+        const pointNameResult = validatePointName(body.pointName);
+        if ('error' in pointNameResult) return reply.code(400).send(pointNameResult);
+        b.pointName = pointNameResult.value;
       }
       if (body.axisId !== undefined) {
         const axis = b.axes.find((a) => a.axisId === body.axisId);

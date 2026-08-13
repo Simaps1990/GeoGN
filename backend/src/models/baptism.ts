@@ -22,6 +22,7 @@ export interface BaptismDoc {
   missionId: mongoose.Types.ObjectId;
   icon: BaptismIcon;
   point: { lng: number; lat: number };
+  pointName: string | null;
   displayMode: BaptismDisplayMode;
   axes: BaptismAxis[];
   createdBy: mongoose.Types.ObjectId;
@@ -57,6 +58,7 @@ const BaptismSchema = new Schema<BaptismDoc>(
       type: { lng: Number, lat: Number },
       required: true,
     },
+    pointName: { type: String, required: false, default: null },
     displayMode: { type: String, required: true, enum: ['colors', 'tion', 'both'], default: 'colors' },
     axes: { type: [BaptismAxisSchema], default: [] },
     createdBy: { type: Schema.Types.ObjectId, required: true },

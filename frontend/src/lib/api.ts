@@ -98,6 +98,7 @@ export type ApiBaptism = {
   missionId: string;
   icon: 'person' | 'car' | 'house';
   point: { lng: number; lat: number };
+  pointName: string | null;
   displayMode: 'colors' | 'tion' | 'both';
   axes: ApiBaptismAxis[];
   createdBy: string;
@@ -1007,6 +1008,7 @@ export async function putBaptism(
   input: {
     icon: 'person' | 'car' | 'house';
     point: { lng: number; lat: number };
+    pointName?: string | null;
     displayMode: 'colors' | 'tion' | 'both';
     axes: ApiBaptismAxis[];
   }
@@ -1026,6 +1028,7 @@ export async function patchBaptism(
   missionId: string,
   input: {
     displayMode?: 'colors' | 'tion' | 'both';
+    pointName?: string | null;
     axisId?: string;
     name?: string | null;
     color?: string;

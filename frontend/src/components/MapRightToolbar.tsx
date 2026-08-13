@@ -1,14 +1,12 @@
 import { memo, type Dispatch, type SetStateAction } from 'react';
 import type { Map as MapLibreMapInstance } from 'maplibre-gl';
 import {
-  Car,
   Cctv,
   CircleDot,
   CircleDotDashed,
   Compass,
   Crosshair,
   Grid3x3,
-  Home,
   Layers,
   MapPin,
   Navigation2,
@@ -19,7 +17,6 @@ import {
   Spline,
   Tag,
   Timer,
-  User,
 } from 'lucide-react';
 import type { ApiPersonCase } from '../lib/api';
 
@@ -36,9 +33,7 @@ type MapRightToolbarProps = {
   setZoneMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   zoneMenuOpen: boolean;
 
-  baptismMenuOpen: boolean;
-  setBaptismMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
-  onStartBaptism: (icon: 'person' | 'car' | 'house') => void;
+  onStartBaptism: () => void;
 
   setDraftColor: (v: string) => void;
   setDraftIcon: (v: string) => void;
@@ -102,8 +97,6 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   cancelDraft,
   setZoneMenuOpen,
   zoneMenuOpen,
-  baptismMenuOpen,
-  setBaptismMenuOpen,
   onStartBaptism,
   setDraftColor,
   setDraftIcon,
@@ -294,62 +287,22 @@ export const MapRightToolbar = memo(function MapRightToolbar({
       ) : null}
 
       {canEditMap && (
-        <div className="relative">
-          <button
-            type="button"
-            title="Baptême terrain"
-            onClick={() => {
-              if (activeTool === 'baptism') {
-                cancelDraft();
-                setBaptismMenuOpen(false);
-                return;
-              }
-              setBaptismMenuOpen((v) => !v);
-            }}
-            className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-              baptismMenuOpen || activeTool === 'baptism' ? 'ring-1 ring-inset ring-blue-500/25' : ''
-            }`}
-          >
-            <Signpost className={baptismMenuOpen || activeTool === 'baptism' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
-          </button>
-          {baptismMenuOpen && (
-            <div className="absolute right-full top-0 mr-2 flex flex-col gap-2 rounded-2xl bg-white/90 p-1.5 shadow backdrop-blur">
-              <button
-                type="button"
-                title="Personne"
-                onClick={() => {
-                  onStartBaptism('person');
-                  setBaptismMenuOpen(false);
-                }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
-              >
-                <User className="text-gray-600" size={20} />
-              </button>
-              <button
-                type="button"
-                title="Voiture"
-                onClick={() => {
-                  onStartBaptism('car');
-                  setBaptismMenuOpen(false);
-                }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
-              >
-                <Car className="text-gray-600" size={20} />
-              </button>
-              <button
-                type="button"
-                title="Domicile"
-                onClick={() => {
-                  onStartBaptism('house');
-                  setBaptismMenuOpen(false);
-                }}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm hover:bg-gray-50 ring-1 ring-inset ring-black/10"
-              >
-                <Home className="text-gray-600" size={20} />
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          title="Baptême terrain"
+          onClick={() => {
+            if (activeTool === 'baptism') {
+              cancelDraft();
+              return;
+            }
+            onStartBaptism();
+          }}
+          className={`h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+            activeTool === 'baptism' ? 'ring-1 ring-inset ring-blue-500/25' : ''
+          }`}
+        >
+          <Signpost className={activeTool === 'baptism' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
+        </button>
       )}
 
       <div className="relative">

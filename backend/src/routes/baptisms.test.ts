@@ -6,6 +6,7 @@ import {
   validateIcon,
   validateAxis,
   validateAxes,
+  validatePointName,
 } from './baptisms.js';
 
 const goodAxis = {
@@ -54,6 +55,18 @@ test('validateAxis vérifie chaque champ', () => {
     'INVALID_AXIS_GEOMETRY'
   );
   assert.equal(validateAxis({ ...goodAxis, suggestions: ['A', 'B', 'C', 'D', 'E', 'F'] }), 'INVALID_AXIS_SUGGESTIONS');
+});
+
+test('validatePointName accepte null/vide et rejette >40 caractères après trim', () => {
+  assert.deepEqual(validatePointName(null), { value: null });
+  assert.deepEqual(validatePointName(undefined), { value: null });
+  assert.deepEqual(validatePointName(''), { value: null });
+  assert.deepEqual(validatePointName('   '), { value: null });
+  assert.deepEqual(validatePointName('auchan'), { value: 'AUCHAN' });
+  assert.deepEqual(validatePointName('  auchan  '), { value: 'AUCHAN' });
+  assert.deepEqual(validatePointName('X'.repeat(40)), { value: 'X'.repeat(40) });
+  assert.deepEqual(validatePointName('X'.repeat(41)), { error: 'INVALID_POINT_NAME' });
+  assert.deepEqual(validatePointName(42), { error: 'INVALID_POINT_NAME' });
 });
 
 test('validateAxes exige 1 à 20 axes avec des axisId uniques', () => {

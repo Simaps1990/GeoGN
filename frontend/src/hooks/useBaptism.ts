@@ -9,7 +9,12 @@ import {
 import { computeBaptismAxes, type BaptismIcon } from '../lib/baptismAxes';
 import { getSocket } from '../lib/socket';
 
-export type BaptismDraftState = { icon: BaptismIcon; point: { lng: number; lat: number } | null };
+export type BaptismDraftState = {
+  point: { lng: number; lat: number } | null;
+  icon: BaptismIcon | null;
+  pointName: string | null;
+  displayMode: 'colors' | 'tion' | 'both' | null;
+};
 
 export type UseBaptismResult = {
   baptism: ApiBaptism | null;
@@ -17,14 +22,18 @@ export type UseBaptismResult = {
   computing: boolean;
   computeError: string | null;
   mutationError: string | null;
-  startPlacing: (icon: BaptismIcon) => void;
+  startPlacing: () => void;
   placeAt: (lng: number, lat: number) => void;
+  setDraftIcon: (icon: BaptismIcon) => void;
+  setDraftPointName: (name: string | null) => void;
+  setDraftDisplayMode: (mode: 'colors' | 'tion' | 'both') => void;
   cancelDraft: () => void;
   confirmDraft: () => Promise<boolean>;
   renameAxis: (axisId: string, name: string | null) => Promise<boolean>;
   recolorAxis: (axisId: string, color: string) => Promise<boolean>;
   removeAxis: (axisId: string) => Promise<boolean>;
   setDisplayMode: (mode: 'colors' | 'tion' | 'both') => Promise<boolean>;
+  setPointName: (name: string | null) => Promise<boolean>;
   removeBaptism: () => Promise<boolean>;
   clearMutationError: () => void;
 };
@@ -80,13 +89,28 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     };
   }, []);
 
-  const startPlacing = useCallback((icon: BaptismIcon) => {
-    setDraft({ icon, point: null });
+  // Arme l'outil avec un brouillon vide : le point, l'icône, le nom et le mode
+  // d'affichage sont choisis pas à pas dans l'assistant (placeAt / setDraftIcon /
+  // setDraftPointName / setDraftDisplayMode), plus de choix d'icône préalable.
+  const startPlacing = useCallback(() => {
+    setDraft({ point: null, icon: null, pointName: null, displayMode: null });
     setComputeError(null);
   }, []);
 
   const placeAt = useCallback((lng: number, lat: number) => {
     setDraft((d) => (d ? { ...d, point: { lng, lat } } : d));
+  }, []);
+
+  const setDraftIcon = useCallback((icon: BaptismIcon) => {
+    setDraft((d) => (d ? { ...d, icon } : d));
+  }, []);
+
+  const setDraftPointName = useCallback((name: string | null) => {
+    setDraft((d) => (d ? { ...d, pointName: name } : d));
+  }, []);
+
+  const setDraftDisplayMode = useCallback((mode: 'colors' | 'tion' | 'both') => {
+    setDraft((d) => (d ? { ...d, displayMode: mode } : d));
   }, []);
 
   const cancelDraft = useCallback(() => {
@@ -97,7 +121,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const confirmDraft = useCallback(async (): Promise<boolean> => {
     const missionId = missionRef.current;
     const d = draft;
-    if (!missionId || !d?.point) return false;
+    if (!missionId || !d?.point || !d.icon || !d.displayMode) return false;
     setComputing(true);
     setComputeError(null);
     try {
@@ -107,7 +131,8 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
       const saved = await putBaptism(missionId, {
         icon: d.icon,
         point: d.point,
-        displayMode: baptism?.displayMode ?? 'colors',
+        pointName: d.pointName,
+        displayMode: d.displayMode,
         axes,
       });
       // Annulé pendant le PUT, ou mission changée entretemps : ne pas ressusciter l'état.
@@ -132,7 +157,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     } finally {
       setComputing(false);
     }
-  }, [draft, baptism?.displayMode]);
+  }, [draft]);
 
   const patch = useCallback(async (input: Parameters<typeof patchBaptism>[1]): Promise<boolean> => {
     const missionId = missionRef.current;
@@ -154,6 +179,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const recolorAxis = useCallback((axisId: string, color: string) => patch({ axisId, color }), [patch]);
   const removeAxis = useCallback((axisId: string) => patch({ axisId, remove: true }), [patch]);
   const setDisplayMode = useCallback((mode: 'colors' | 'tion' | 'both') => patch({ displayMode: mode }), [patch]);
+  const setPointName = useCallback((name: string | null) => patch({ pointName: name }), [patch]);
 
   const removeBaptism = useCallback(async (): Promise<boolean> => {
     const missionId = missionRef.current;
@@ -183,12 +209,16 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     mutationError,
     startPlacing,
     placeAt,
+    setDraftIcon,
+    setDraftPointName,
+    setDraftDisplayMode,
     cancelDraft,
     confirmDraft,
     renameAxis,
     recolorAxis,
     removeAxis,
     setDisplayMode,
+    setPointName,
     removeBaptism,
     clearMutationError,
   };
