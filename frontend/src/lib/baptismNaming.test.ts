@@ -66,9 +66,9 @@ test('parseOverpassPois classe par tags et lit le center des ways', () => {
   assert.deepEqual(c.find((x) => x.name === 'Mairie')?.point, [2.003, 48.003]);
 });
 
-test('fallbackAxisName : ref, puis name, puis cardinal', () => {
+test('fallbackAxisName : ref, puis name (débarrassé du type de voie), puis cardinal', () => {
   assert.equal(fallbackAxisName({ ref: 'D45', name: 'Rue des Lilas' }, 45), 'D45');
-  assert.equal(fallbackAxisName({ name: 'Rue des Lilas' }, 45), 'RUE DES LILAS');
+  assert.equal(fallbackAxisName({ name: 'Rue des Lilas' }, 45), 'LILAS');
   assert.equal(fallbackAxisName({}, 45), 'NORD-EST');
 });
 
@@ -82,6 +82,30 @@ test('les noms trop longs sont tronqués à 40 caractères (limite backend)', ()
   ]);
   assert.equal(
     fallbackAxisName({ name: 'Avenue du General Leclerc de Hauteclocque' }, 45),
-    'AVENUE DU GENERAL LECLERC DE HAUTECLOCQU'
+    'GENERAL LECLERC DE HAUTECLOCQUE'
   );
+  // Un nom propre sans type de voie reste tronqué à 40 (limite backend).
+  assert.equal(
+    fallbackAxisName({ name: 'Lotissement Extraordinairement Long De Chez Long' }, 45),
+    'LOTISSEMENT EXTRAORDINAIREMENT LONG DE C'
+  );
+});
+
+test('stripRoadWords retire le type de voie et ses articles', async () => {
+  const { stripRoadWords } = await import('./baptismNaming.js');
+  assert.equal(stripRoadWords('Avenue du Trône'), 'TRÔNE');
+  assert.equal(stripRoadWords('RUE DE LA ROQUETTE'), 'ROQUETTE');
+  assert.equal(stripRoadWords('Boulevard Voltaire'), 'VOLTAIRE');
+  assert.equal(stripRoadWords('Place de la Nation'), 'NATION');
+  assert.equal(stripRoadWords("Avenue de l'Opéra"), 'OPÉRA');
+  assert.equal(stripRoadWords('Avenue de la Grande Armée'), 'GRANDE ARMÉE');
+  assert.equal(stripRoadWords('Hent Prad'), 'PRAD');
+  assert.equal(stripRoadWords('Grande Armée'), 'GRANDE ARMÉE');
+  assert.equal(stripRoadWords('Rue'), 'RUE');
+});
+
+test('fallbackAxisName applique stripRoadWords au nom de voie mais pas au ref', async () => {
+  const { fallbackAxisName } = await import('./baptismNaming.js');
+  assert.equal(fallbackAxisName({ name: 'Avenue du Trône' }, 0), 'TRÔNE');
+  assert.equal(fallbackAxisName({ ref: 'D45', name: 'Rue des Lilas' }, 0), 'D45');
 });

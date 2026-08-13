@@ -38,7 +38,11 @@ await app.register(cors, {
 });
 
 await app.register(rateLimit, {
-  max: 100,
+  // La carte tire ~15 requêtes légitimes à chaque montage : 100/min se déclenche
+  // dès quelques rechargements d'un même utilisateur (ou d'une équipe derrière un
+  // même NAT) et masque silencieusement les outils côté client. Les routes d'auth
+  // gardent leur limite stricte dédiée (AUTH_RATE_LIMIT).
+  max: 400,
   timeWindow: '1 minute',
 });
 

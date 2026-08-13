@@ -70,8 +70,30 @@ export function rankAxisSuggestions(
   return names;
 }
 
+// Annonce radio : « TION TRÔNE », pas « TION AVENUE DU TRÔNE » — on retire le type
+// de voie de tête et ses articles. Si le nom se réduit à rien (voie sans nom propre),
+// on garde l'original plutôt qu'un vide.
+const ROAD_WORDS = new Set([
+  'RUE', 'AVENUE', 'BOULEVARD', 'COURS', 'PLACE', 'CHEMIN', 'ROUTE', 'IMPASSE',
+  'ALLEE', 'ALLÉE', 'PASSAGE', 'QUAI', 'SQUARE', 'VOIE', 'SENTIER', 'PROMENADE',
+  'ESPLANADE', 'ROND-POINT', 'HENT',
+]);
+const LINK_WORDS = new Set(['DE', 'DU', 'DES', 'LA', 'LE', 'LES', 'À', 'AU', 'AUX']);
+
+export function stripRoadWords(name: string): string {
+  const up = name.toUpperCase().trim();
+  const tokens = up.split(/\s+/);
+  let i = 0;
+  if (i < tokens.length && ROAD_WORDS.has(tokens[i])) {
+    i += 1;
+    while (i < tokens.length && LINK_WORDS.has(tokens[i])) i += 1;
+  }
+  const rest = tokens.slice(i).join(' ').replace(/^(L'|D')/, '');
+  return rest.length > 0 ? rest : up;
+}
+
 export function fallbackAxisName(firstWayTags: Record<string, string>, bearing: number): string {
   if (firstWayTags.ref) return firstWayTags.ref.toUpperCase().slice(0, 40);
-  if (firstWayTags.name) return firstWayTags.name.toUpperCase().slice(0, 40);
+  if (firstWayTags.name) return stripRoadWords(firstWayTags.name).slice(0, 40);
   return cardinalName(bearing);
 }
