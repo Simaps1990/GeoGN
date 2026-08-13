@@ -3040,6 +3040,7 @@ export default function MapLibreMap() {
       const el = makeBaptismEl(b.icon, false);
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        baptismApi.clearMutationError();
         setBaptismPanelOpen(true);
         setEditingAxisId(null);
       });
@@ -3108,16 +3109,22 @@ export default function MapLibreMap() {
       if (activeToolRef.current === 'baptism') return;
 
       // Baptême terrain: un tap sur un chevron/flèche/label TION ouvre l'éditeur d'axe.
-      // Vérifié avant le mode grille car l'édition d'axe doit marcher hors mode grille.
-      const baptismHits = map.queryRenderedFeatures(e.point, {
-        layers: ['baptism-chevrons', 'baptism-tion-label', 'baptism-tion-arrow'].filter((l) => !!map.getLayer(l)),
-      });
-      if (baptismHits.length > 0) {
-        const axisId = baptismHits[0].properties?.axisId as string | undefined;
-        if (axisId) {
-          setEditingAxisId(axisId);
-          setBaptismPanelOpen(false);
-          return;
+      // Uniquement hors mode grille : en mode sélection/mise en évidence, un chevron qui
+      // chevauche une cellule ne doit pas avaler le tap destiné à toggleSelection.
+      if (mode === 'off') {
+        const baptismHits = map.queryRenderedFeatures(e.point, {
+          layers: ['baptism-chevrons', 'baptism-tion-label', 'baptism-tion-arrow', 'baptism-tion-head'].filter(
+            (l) => !!map.getLayer(l)
+          ),
+        });
+        if (baptismHits.length > 0) {
+          const axisId = baptismHits[0].properties?.axisId as string | undefined;
+          if (axisId) {
+            baptismApi.clearMutationError();
+            setEditingAxisId(axisId);
+            setBaptismPanelOpen(false);
+            return;
+          }
         }
       }
 
@@ -4265,7 +4272,7 @@ export default function MapLibreMap() {
 
       el.onclick = () => {
         const tool = activeToolRef.current;
-        if (tool === 'zone_circle' || tool === 'zone_polygon') return;
+        if (tool === 'zone_circle' || tool === 'zone_polygon' || tool === 'baptism') return;
         setSelectedPoi(p);
       };
     };
@@ -5085,7 +5092,15 @@ export default function MapLibreMap() {
               >
                 Annuler
               </button>
-              <button type="button" className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white" onClick={() => void baptismApi.confirmDraft()}>
+              <button
+                type="button"
+                className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white"
+                onClick={() => {
+                  void baptismApi.confirmDraft().then((ok) => {
+                    if (ok) setActiveTool('none');
+                  });
+                }}
+              >
                 Réessayer
               </button>
             </div>
@@ -5136,53 +5151,57 @@ export default function MapLibreMap() {
                     : baptismApi.mutationError}
                 </p>
               )}
-              <input
-                type="text"
-                defaultValue={axis.name ?? ''}
-                placeholder="Nom (ex. AUCHAN)"
-                maxLength={40}
-                className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
-                onBlur={(e) => {
-                  const v = e.target.value.trim();
-                  void baptismApi.renameAxis(axis.axisId, v ? v : null);
-                }}
-              />
-              {axis.suggestions.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1">
-                  {axis.suggestions.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`rounded-full px-2 py-1 text-xs ${axis.name === s ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
-                      onClick={() => void baptismApi.renameAxis(axis.axisId, s)}
-                    >
-                      TION {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="mb-2 flex flex-wrap gap-1">
-                {AXIS_PALETTE.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    className="h-6 w-6 rounded-full border-2"
-                    style={{ backgroundColor: c, borderColor: c === axis.color ? '#111827' : 'transparent' }}
-                    onClick={() => void baptismApi.recolorAxis(axis.axisId, c)}
+              {canEditMap && (
+                <>
+                  <input
+                    type="text"
+                    defaultValue={axis.name ?? ''}
+                    placeholder="Nom (ex. AUCHAN)"
+                    maxLength={40}
+                    className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm uppercase"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      void baptismApi.renameAxis(axis.axisId, v ? v : null);
+                    }}
                   />
-                ))}
-              </div>
-              <button
-                type="button"
-                className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
-                onClick={() => {
-                  void baptismApi.removeAxis(axis.axisId).then((ok) => {
-                    if (ok) setEditingAxisId(null);
-                  });
-                }}
-              >
-                Supprimer cet axe
-              </button>
+                  {axis.suggestions.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1">
+                      {axis.suggestions.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          className={`rounded-full px-2 py-1 text-xs ${axis.name === s ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                          onClick={() => void baptismApi.renameAxis(axis.axisId, s)}
+                        >
+                          TION {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {AXIS_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        className="h-6 w-6 rounded-full border-2"
+                        style={{ backgroundColor: c, borderColor: c === axis.color ? '#111827' : 'transparent' }}
+                        onClick={() => void baptismApi.recolorAxis(axis.axisId, c)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
+                    onClick={() => {
+                      void baptismApi.removeAxis(axis.axisId).then((ok) => {
+                        if (ok) setEditingAxisId(null);
+                      });
+                    }}
+                  >
+                    Supprimer cet axe
+                  </button>
+                </>
+              )}
             </div>
           </div>
         );
@@ -5202,28 +5221,33 @@ export default function MapLibreMap() {
                   : baptismApi.mutationError}
               </p>
             )}
-            <div className="mb-2 flex flex-wrap gap-1">
-              {(['colors', 'tion', 'both'] as const).map((m) => (
+            {canEditMap && (
+              <>
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {(['colors', 'tion', 'both'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${baptismApi.baptism!.displayMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
+                      onClick={() => void baptismApi.setDisplayMode(m)}
+                    >
+                      {m === 'colors' ? 'Couleurs' : m === 'tion' ? 'TION' : 'Les deux'}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={m}
                   type="button"
-                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${baptismApi.baptism!.displayMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}
-                  onClick={() => void baptismApi.setDisplayMode(m)}
+                  className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
+                  onClick={() => {
+                    void baptismApi.removeBaptism().then((ok) => {
+                      if (ok) setBaptismPanelOpen(false);
+                    });
+                  }}
                 >
-                  {m === 'colors' ? 'Couleurs' : m === 'tion' ? 'TION' : 'Les deux'}
+                  Supprimer le baptême
                 </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
-              onClick={() => {
-                void baptismApi.removeBaptism();
-                setBaptismPanelOpen(false);
-              }}
-            >
-              Supprimer le baptême
-            </button>
+              </>
+            )}
           </div>
         </div>
       )}

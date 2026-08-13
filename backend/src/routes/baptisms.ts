@@ -75,7 +75,7 @@ function toDto(b: BaptismDoc) {
     id: b._id.toString(),
     missionId: b.missionId.toString(),
     icon: b.icon,
-    point: b.point,
+    point: { lng: b.point.lng, lat: b.point.lat },
     displayMode: b.displayMode,
     axes: b.axes.map((a) => ({
       axisId: a.axisId,

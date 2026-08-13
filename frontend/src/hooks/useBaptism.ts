@@ -25,7 +25,8 @@ export type UseBaptismResult = {
   recolorAxis: (axisId: string, color: string) => Promise<boolean>;
   removeAxis: (axisId: string) => Promise<boolean>;
   setDisplayMode: (mode: 'colors' | 'tion' | 'both') => Promise<boolean>;
-  removeBaptism: () => Promise<void>;
+  removeBaptism: () => Promise<boolean>;
+  clearMutationError: () => void;
 };
 
 export function useBaptism({ selectedMissionId }: { selectedMissionId: string | null }): UseBaptismResult {
@@ -45,6 +46,7 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   useEffect(() => {
     setBaptism(null);
     setDraft(null);
+    setComputing(false);
     setComputeError(null);
     setMutationError(null);
     if (!selectedMissionId) return;
@@ -109,12 +111,21 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
         axes,
       });
       // Annulé pendant le PUT, ou mission changée entretemps : ne pas ressusciter l'état.
-      if (draftRef.current !== d || missionRef.current !== missionId) return false;
+      // Le document vient d'être créé/mis à jour côté serveur ; on le supprime au mieux
+      // pour ne pas laisser un orphelin que l'écho socket ferait resurgir.
+      if (draftRef.current !== d || missionRef.current !== missionId) {
+        try {
+          await deleteBaptism(missionId);
+        } catch {
+          /* best effort */
+        }
+        return false;
+      }
       setBaptism(saved);
       setDraft(null);
       return true;
     } catch (e: any) {
-      if (missionRef.current === missionId) {
+      if (draftRef.current === d && missionRef.current === missionId) {
         setComputeError(e?.message || 'OVERPASS_UNAVAILABLE');
       }
       return false;
@@ -144,18 +155,24 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
   const removeAxis = useCallback((axisId: string) => patch({ axisId, remove: true }), [patch]);
   const setDisplayMode = useCallback((mode: 'colors' | 'tion' | 'both') => patch({ displayMode: mode }), [patch]);
 
-  const removeBaptism = useCallback(async () => {
+  const removeBaptism = useCallback(async (): Promise<boolean> => {
     const missionId = missionRef.current;
-    if (!missionId) return;
+    if (!missionId) return false;
     try {
       await deleteBaptism(missionId);
       if (missionRef.current === missionId) {
         setBaptism(null);
         setMutationError(null);
       }
+      return true;
     } catch (e: any) {
       if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
+      return false;
     }
+  }, []);
+
+  const clearMutationError = useCallback(() => {
+    setMutationError(null);
   }, []);
 
   return {
@@ -173,5 +190,6 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     removeAxis,
     setDisplayMode,
     removeBaptism,
+    clearMutationError,
   };
 }
