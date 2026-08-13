@@ -1987,6 +1987,47 @@ export default function MapLibreMap() {
     setActiveTool('baptism');
   }, [baptismApi, cancelDraft, setActiveTool]);
 
+  // Baptême terrain: même système de message que la création de zone — la barre du
+  // haut (MissionMapPage) écoute cet état pour afficher « touche la carte » tant que
+  // le point n'est pas posé, et renvoie geogn:baptism:draftCancel sur Annuler.
+  useEffect(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('geogn:baptism:draftState', {
+          detail: {
+            armed: activeTool === 'baptism',
+            placed: !!baptismApi.draft?.point,
+          },
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [activeTool, baptismApi.draft]);
+
+  useEffect(() => {
+    const onCancel = () => {
+      baptismApi.cancelDraft();
+      setActiveTool('none');
+    };
+    window.addEventListener('geogn:baptism:draftCancel', onCancel as any);
+    return () => {
+      window.removeEventListener('geogn:baptism:draftCancel', onCancel as any);
+    };
+  }, [baptismApi.cancelDraft, setActiveTool]);
+
+  // Curseur en croix sur desktop quand l'outil baptême est armé : retour visuel
+  // immédiat que « le prochain clic pose le point ».
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    try {
+      map.getCanvas().style.cursor = activeTool === 'baptism' ? 'crosshair' : '';
+    } catch {
+      // ignore
+    }
+  }, [activeTool]);
+
   // Baptême terrain: l'assistant repart à l'étape 1 dès que le brouillon redevient null
   // (Annuler, ou succès du PUT dans confirmDraft) — couvre tous les chemins de sortie
   // sans dupliquer la remise à zéro à chaque bouton Annuler.

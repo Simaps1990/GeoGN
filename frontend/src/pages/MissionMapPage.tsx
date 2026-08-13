@@ -26,6 +26,10 @@ export default function MissionMapPage() {
   const [zoneDraftTool, setZoneDraftTool] = useState<'none' | 'poi' | 'zone_circle' | 'zone_polygon'>('none');
   const [circleRadiusReady, setCircleRadiusReady] = useState(false);
   const [polygonPoints, setPolygonPoints] = useState(0);
+  // Baptême terrain : outil armé mais point pas encore posé -> la barre du haut
+  // affiche la consigne (même système de message que la création de zone).
+  const [baptismArmed, setBaptismArmed] = useState(false);
+  const [baptismPlaced, setBaptismPlaced] = useState(false);
 
   const trimmed = query.trim();
   const shouldSearch = useMemo(() => trimmed.length >= 3, [trimmed.length]);
@@ -82,6 +86,22 @@ export default function MissionMapPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const onBaptismDraft = (e: any) => {
+      const d = e?.detail;
+      setBaptismArmed(!!d?.armed);
+      setBaptismPlaced(!!d?.placed);
+      if (d?.armed) {
+        setOpen(false);
+        setFocused(false);
+      }
+    };
+    window.addEventListener('geogn:baptism:draftState', onBaptismDraft as any);
+    return () => {
+      window.removeEventListener('geogn:baptism:draftState', onBaptismDraft as any);
+    };
+  }, []);
+
   return (
     <div className="relative">
       <div
@@ -101,7 +121,22 @@ export default function MissionMapPage() {
         </button>
 
         <div className="relative flex-1 max-w-xl">
-          {zoneDraftActive && (zoneDraftTool === 'zone_circle' || zoneDraftTool === 'zone_polygon') ? (
+          {baptismArmed && !baptismPlaced ? (
+            <div className="flex h-12 items-center justify-center gap-2 px-2">
+              <div className="flex h-12 min-w-0 flex-1 items-center justify-center rounded-2xl border bg-white/90 px-3 text-sm font-medium text-gray-800 shadow backdrop-blur">
+                <span className="truncate">Touche la carte pour placer le point</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('geogn:baptism:draftCancel'));
+                }}
+                className="inline-flex h-12 items-center justify-center rounded-2xl bg-red-500 px-5 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
+              >
+                Annuler
+              </button>
+            </div>
+          ) : zoneDraftActive && (zoneDraftTool === 'zone_circle' || zoneDraftTool === 'zone_polygon') ? (
             <div className="flex h-12 items-center justify-center gap-2 px-2">
               <button
                 type="button"
