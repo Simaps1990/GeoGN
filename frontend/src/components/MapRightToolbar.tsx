@@ -11,14 +11,22 @@ import {
   MapPin,
   Navigation2,
   PawPrint,
+  Plus,
   Ruler,
   Settings,
   Signpost,
   Spline,
   Tag,
   Timer,
+  Trash2,
 } from 'lucide-react';
 import type { ApiPersonCase } from '../lib/api';
+import type { BaptismIcon } from '../lib/baptismAxes';
+
+// Baptême terrain: mêmes 3 emojis que MapLibreMap.tsx (BAPTISM_EMOJI n'y est pas
+// exporté) — duplication triviale plutôt qu'exporter une constante d'un fichier de
+// 5000+ lignes pour 3 lignes de littéral.
+const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
 
 type MapRightToolbarProps = {
   followMyBearing: boolean;
@@ -35,6 +43,11 @@ type MapRightToolbarProps = {
 
   onStartBaptism: () => void;
   baptismCount: number;
+  baptisms: { id: string; icon: BaptismIcon; pointName: string | null; point: { lng: number; lat: number } }[];
+  baptismListOpen: boolean;
+  setBaptismListOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
+  onCenterBaptism: (baptismId: string) => void;
+  onDeleteBaptism: (baptismId: string) => void;
 
   setDraftColor: (v: string) => void;
   setDraftIcon: (v: string) => void;
@@ -100,6 +113,11 @@ export const MapRightToolbar = memo(function MapRightToolbar({
   zoneMenuOpen,
   onStartBaptism,
   baptismCount,
+  baptisms,
+  baptismListOpen,
+  setBaptismListOpen,
+  onCenterBaptism,
+  onDeleteBaptism,
   setDraftColor,
   setDraftIcon,
   setDraftComment,
@@ -210,6 +228,7 @@ export const MapRightToolbar = memo(function MapRightToolbar({
               type="button"
               onClick={() => {
                 setActionError(null);
+                setBaptismListOpen(false);
 
                 if (canEditMap && (activeTool === 'zone_circle' || activeTool === 'zone_polygon')) {
                   cancelDraft();
@@ -289,29 +308,83 @@ export const MapRightToolbar = memo(function MapRightToolbar({
       ) : null}
 
       {canEditMap && (
-        <button
-          type="button"
-          title="Baptême terrain"
-          onClick={() => {
-            if (activeTool === 'baptism') {
-              cancelDraft();
-              return;
-            }
-            onStartBaptism();
-          }}
-          className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
-            activeTool === 'baptism' ? 'ring-1 ring-inset ring-blue-500/25' : ''
-          }`}
-        >
-          <Signpost className={activeTool === 'baptism' ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'} size={20} />
-          {baptismCount >= 2 ? (
-            <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
-              {baptismCount}
-            </span>
-          ) : baptismCount >= 1 ? (
-            <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+        <div className="relative w-12">
+          <button
+            type="button"
+            title="Baptême terrain"
+            onClick={() => {
+              setZoneMenuOpen(false);
+              if (activeTool === 'baptism') {
+                cancelDraft();
+                setBaptismListOpen(false);
+                return;
+              }
+              if (baptismCount === 0) {
+                setBaptismListOpen(false);
+                onStartBaptism();
+                return;
+              }
+              setBaptismListOpen((v) => !v);
+            }}
+            className={`relative h-12 w-12 rounded-2xl border bg-white/90 inline-flex items-center justify-center transition-colors hover:bg-white ${
+              activeTool === 'baptism' || baptismListOpen ? 'ring-1 ring-inset ring-blue-500/25' : ''
+            }`}
+          >
+            <Signpost
+              className={activeTool === 'baptism' || baptismListOpen ? 'mx-auto text-blue-600' : 'mx-auto text-gray-600'}
+              size={20}
+            />
+            {baptismCount >= 2 ? (
+              <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+                {baptismCount}
+              </span>
+            ) : baptismCount >= 1 ? (
+              <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white" />
+            ) : null}
+          </button>
+
+          {baptismListOpen ? (
+            <div className="absolute right-0 top-14 z-10 max-h-[60vh] w-44 overflow-y-auto rounded-2xl bg-white p-1.5 shadow ring-1 ring-inset ring-black/10">
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  title="Nouveau baptême"
+                  onClick={() => {
+                    setBaptismListOpen(false);
+                    onStartBaptism();
+                  }}
+                  className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-gray-50"
+                >
+                  <Plus className="text-blue-600" size={16} />
+                  <span className="text-gray-700">Nouveau baptême</span>
+                </button>
+                {baptisms.slice(0, 10).map((b) => (
+                  <div key={b.id} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBaptismListOpen(false);
+                        onCenterBaptism(b.id);
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-gray-50"
+                    >
+                      <span className="leading-none">{BAPTISM_EMOJI[b.icon]}</span>
+                      <span className="truncate text-gray-700">{(b.pointName || 'Sans nom').slice(0, 14)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Supprimer"
+                      onClick={() => onDeleteBaptism(b.id)}
+                      className="shrink-0 rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : null}
-        </button>
+        </div>
       )}
 
       <div className="relative">

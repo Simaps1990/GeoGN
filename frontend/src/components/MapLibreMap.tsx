@@ -383,6 +383,9 @@ export default function MapLibreMap() {
 
   const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  // Baptême terrain: liste des baptêmes de la mission, flyout sous le bouton Signpost
+  // (même croisement de fermeture que zoneMenuOpen, cf. MapRightToolbar).
+  const [baptismListOpen, setBaptismListOpen] = useState(false);
 
   useEffect(() => {
     if (!selectedPoi) return;
@@ -1993,6 +1996,35 @@ export default function MapLibreMap() {
     baptismApi.startPlacing();
     setActiveTool('baptism');
   }, [baptismApi, cancelDraft, setActiveTool]);
+
+  // Baptême terrain: centrer la carte sur un baptême choisi dans la liste de la
+  // toolbar et ouvrir son panneau — même destination (panneau 'main') que le tap sur
+  // son marqueur, plus le survol de la carte que le marqueur seul ne fait pas.
+  const onCenterBaptism = useCallback(
+    (baptismId: string) => {
+      const b = baptismApi.baptisms.find((x) => x.id === baptismId);
+      const map = mapInstanceRef.current;
+      if (b && map) {
+        map.flyTo({ center: [b.point.lng, b.point.lat], zoom: 16 });
+      }
+      baptismApi.clearMutationError();
+      setBaptismPanel({ kind: 'main', baptismId });
+    },
+    [baptismApi]
+  );
+
+  // Baptême terrain: suppression depuis la liste de la toolbar. La ligne disparaît
+  // via l'état (removeBaptism filtre baptisms en cas de succès) ; en cas d'échec, pas
+  // d'affichage d'erreur dans la liste elle-même — on ouvre le panneau du baptême
+  // pour que mutationError y soit visible, comme partout ailleurs dans ce fichier.
+  const onDeleteBaptism = useCallback(
+    (baptismId: string) => {
+      void baptismApi.removeBaptism(baptismId).then((ok) => {
+        if (!ok) setBaptismPanel({ kind: 'main', baptismId });
+      });
+    },
+    [baptismApi]
+  );
 
   // Baptême terrain: même système de message que la création de zone — la barre du
   // haut (MissionMapPage) écoute cet état pour afficher « touche la carte » tant que
@@ -5023,6 +5055,11 @@ export default function MapLibreMap() {
         zoneMenuOpen={zoneMenuOpen}
         onStartBaptism={onStartBaptism}
         baptismCount={baptismApi.baptisms.length}
+        baptisms={baptismApi.baptisms.map((b) => ({ id: b.id, icon: b.icon, pointName: b.pointName, point: b.point }))}
+        baptismListOpen={baptismListOpen}
+        setBaptismListOpen={setBaptismListOpen}
+        onCenterBaptism={onCenterBaptism}
+        onDeleteBaptism={onDeleteBaptism}
         setDraftColor={setDraftColor}
         setDraftIcon={setDraftIcon}
         setDraftComment={setDraftComment}
