@@ -5377,7 +5377,7 @@ export default function MapLibreMap() {
       ) : null}
 
       {baptismApi.draft?.point && (
-        <div className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+        <div className="fixed bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] left-1/2 z-[1000] w-full max-w-md -translate-x-1/2 px-3 sm:max-w-lg md:max-w-xl">
           <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
             {baptismApi.computeError ? (
               <div>
@@ -5542,7 +5542,7 @@ export default function MapLibreMap() {
         // écho socket) : le panneau se ferme silencieusement plutôt que de planter.
         if (!b || !axis) return null;
         return (
-          <div key={`${b.id}:${axis.axisId}`} className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+          <div key={`${b.id}:${axis.axisId}`} className="fixed bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] left-1/2 z-[1000] w-full max-w-md -translate-x-1/2 px-3 sm:max-w-lg md:max-w-xl">
             <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-semibold">Axe {axis.name ? `TION ${axis.name}` : ''}</span>
@@ -5617,7 +5617,7 @@ export default function MapLibreMap() {
         // silencieuse plutôt qu'un panneau accroché à un id qui n'existe plus.
         if (!b) return null;
         return (
-          <div key={b.id} className="absolute inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] z-20 mx-auto w-full max-w-xl px-3">
+          <div key={b.id} className="fixed bottom-[calc(max(env(safe-area-inset-bottom),16px)+76px)] left-1/2 z-[1000] w-full max-w-md -translate-x-1/2 px-3 sm:max-w-lg md:max-w-xl">
             <div className="mx-3 rounded-2xl bg-white p-3 shadow-xl">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-semibold">Baptême terrain</span>
