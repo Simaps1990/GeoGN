@@ -1170,11 +1170,18 @@ export default function MapLibreMap() {
 
     let cancelled = false;
     (async () => {
-      try {
-        const m = await getMission(selectedMissionId);
-        if (!cancelled) setMission(m);
-      } catch {
-        if (!cancelled) setMission(null);
+      // Un 429 (rate-limit) ou une erreur réseau transitoire ne doit JAMAIS
+      // dégrader l'UI en « viewer » : perdre `mission` ferait perdre le rôle,
+      // donc masquerait POI/Zones/Baptême. On réessaie avec backoff et on
+      // conserve la dernière mission connue en cas d'échec passager.
+      for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
+        try {
+          const m = await getMission(selectedMissionId);
+          if (!cancelled) setMission(m);
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+        }
       }
     })();
     return () => {
@@ -2170,6 +2177,7 @@ export default function MapLibreMap() {
     // (même portée le long de l'axe) ; la pointe et l'étiquette restent au sommet.
     safeMoveToTop('baptism-tion-casing');
     safeMoveToTop('baptism-tion-arrow');
+    safeMoveToTop('baptism-chevrons-shadow');
     safeMoveToTop('baptism-chevrons');
     safeMoveToTop('baptism-tion-head');
     safeMoveToTop('baptism-tion-label');
@@ -2626,6 +2634,34 @@ export default function MapLibreMap() {
       map.addSource('baptism-tion', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
 
+    // Chevrons : petits, rapprochés, épaissis par un halo de LEUR propre couleur
+    // (pas de contour), avec une ombre portée simulée par une couche jumelle
+    // décalée en dessous (MapLibre n'a pas d'ombre native sur les symboles).
+    if (!map.getLayer('baptism-chevrons-shadow')) {
+      map.addLayer({
+        id: 'baptism-chevrons-shadow',
+        type: 'symbol',
+        source: 'baptism-axes',
+        layout: {
+          'symbol-placement': 'line',
+          'symbol-spacing': 19,
+          'text-field': '>',
+          'text-size': 16,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-keep-upright': false,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-rotation-alignment': 'map',
+        },
+        paint: {
+          'text-color': 'rgba(17, 24, 39, 0.45)',
+          'text-halo-color': 'rgba(17, 24, 39, 0.45)',
+          'text-halo-width': 1,
+          'text-translate': [1.2, 1.6],
+          'text-translate-anchor': 'viewport',
+        },
+      });
+    }
     if (!map.getLayer('baptism-chevrons')) {
       map.addLayer({
         id: 'baptism-chevrons',
@@ -2633,9 +2669,9 @@ export default function MapLibreMap() {
         source: 'baptism-axes',
         layout: {
           'symbol-placement': 'line',
-          'symbol-spacing': 26,
+          'symbol-spacing': 19,
           'text-field': '>',
-          'text-size': 22,
+          'text-size': 16,
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
           'text-keep-upright': false,
           'text-allow-overlap': true,
@@ -2644,8 +2680,8 @@ export default function MapLibreMap() {
         },
         paint: {
           'text-color': ['get', 'color'],
-          'text-halo-color': '#1f2937',
-          'text-halo-width': 1.5,
+          'text-halo-color': ['get', 'color'],
+          'text-halo-width': 1,
         },
       });
     }
