@@ -45,7 +45,7 @@ import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { isTestTrack, useVehicleTrack } from '../hooks/useVehicleTrack';
 import { useMapDraft } from '../hooks/useMapDraft';
 import { useBaptism } from '../hooks/useBaptism';
-import { AXIS_PALETTE, destinationPoint, distMeters, slicePathMeters, bearingAtMeters, type BaptismIcon } from '../lib/baptismAxes';
+import { AXIS_PALETTE, destinationPoint, bearingAtMeters, type BaptismIcon } from '../lib/baptismAxes';
 import {
   formatElapsedSince,
   formatHoursToHM,
@@ -212,7 +212,6 @@ function buildPoisFeatureCollection(pois: ApiPoi[]): GeoJSON.FeatureCollection {
 const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗', house: '🏠' };
 // Longueur de la flèche TION (inchangée) et écart entre sa pointe et le label du nom,
 // tous deux en mètres le long de l'axe -> le label suit le zoom comme la flèche.
-const TION_ARROW_LEN_METERS = 120;
 const TION_LABEL_GAP_METERS = 50;
 // Backoff borné pour (re)créer les couches baptême quand le style MapLibre n'est
 // vraiment pas encore prêt (cf. ensureBaptismOverlaysNow) : 10 x 250ms = 2,5s max.
@@ -2126,9 +2125,11 @@ export default function MapLibreMap() {
     safeMoveToTop('cameras-labels');
 
     // Baptême terrain: chevrons/flèches/labels TION au-dessus des autres overlays
-    safeMoveToTop('baptism-chevrons');
+    // Mode « les deux » : les chevrons colorés passent PAR-DESSUS les traits TION
+    // (même portée le long de l'axe) ; la pointe et l'étiquette restent au sommet.
     safeMoveToTop('baptism-tion-casing');
     safeMoveToTop('baptism-tion-arrow');
+    safeMoveToTop('baptism-chevrons');
     safeMoveToTop('baptism-tion-head');
     safeMoveToTop('baptism-tion-label');
 
@@ -3085,29 +3086,18 @@ export default function MapLibreMap() {
       if (showTion) {
         for (const a of b.axes) {
           try {
-            // La flèche suit la route réelle (les rues courbes ne sont pas des droites) :
-            // on tronque la géométrie de l'axe le long d'elle-même au lieu de tracer un
-            // rayon synthétique origine->destinationPoint.
+            // La flèche suit la route réelle sur TOUTE la longueur de l'axe (même
+            // portée que les chevrons : jusqu'à la prochaine intersection), pointe au
+            // bout, cap du dernier segment.
             const coords = a.geometry.coordinates;
-            const arrowPath = slicePathMeters(coords, TION_ARROW_LEN_METERS);
+            const arrowPath = coords;
             const tip = arrowPath[arrowPath.length - 1];
-            const tipBearing = bearingAtMeters(coords, TION_ARROW_LEN_METERS);
+            const tipBearing = bearingAtMeters(coords, Number.MAX_SAFE_INTEGER);
             if (!tip) throw new Error(`axe sans géométrie exploitable (${coords.length} point(s))`);
 
-            // Label après la pointe, toujours sur la route quand il y en a assez (le clamp
-            // de slicePathMeters retombe naturellement sur le bout réel de l'axe tant que
-            // celui-ci dépasse la pointe). Seul cas dégénéré : l'axe est trop court même
-            // pour la pointe (120 m) — pointe et label coïncident alors tous les deux sur
-            // le bout de l'axe. On prolonge alors tout droit depuis la pointe (cap du
-            // dernier segment) sur l'écart habituel, pour que le label ne retombe jamais
-            // sur/avant elle.
-            const labelDist = TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS;
-            const labelPath = slicePathMeters(coords, labelDist);
-            const naiveLabelPoint = labelPath[labelPath.length - 1];
-            const labelPoint =
-              distMeters(naiveLabelPoint, tip) > 0.5
-                ? naiveLabelPoint
-                : destinationPoint(tip, tipBearing, TION_LABEL_GAP_METERS);
+            // Label déporté APRÈS la pointe (donc après l'intersection), dans le
+            // prolongement du dernier segment, avec l'écart habituel.
+            const labelPoint = destinationPoint(tip, tipBearing, TION_LABEL_GAP_METERS);
 
             tionFeatures.push({
               type: 'Feature',
