@@ -2518,7 +2518,7 @@ export default function MapLibreMap() {
         source: 'baptism-axes',
         layout: {
           'symbol-placement': 'line',
-          'symbol-spacing': 45,
+          'symbol-spacing': 26,
           'text-field': '>',
           'text-size': 22,
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
