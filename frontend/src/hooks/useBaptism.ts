@@ -21,10 +21,10 @@ export type UseBaptismResult = {
   placeAt: (lng: number, lat: number) => void;
   cancelDraft: () => void;
   confirmDraft: () => Promise<boolean>;
-  renameAxis: (axisId: string, name: string | null) => Promise<void>;
-  recolorAxis: (axisId: string, color: string) => Promise<void>;
-  removeAxis: (axisId: string) => Promise<void>;
-  setDisplayMode: (mode: 'colors' | 'tion' | 'both') => Promise<void>;
+  renameAxis: (axisId: string, name: string | null) => Promise<boolean>;
+  recolorAxis: (axisId: string, color: string) => Promise<boolean>;
+  removeAxis: (axisId: string) => Promise<boolean>;
+  setDisplayMode: (mode: 'colors' | 'tion' | 'both') => Promise<boolean>;
   removeBaptism: () => Promise<void>;
 };
 
@@ -123,17 +123,19 @@ export function useBaptism({ selectedMissionId }: { selectedMissionId: string | 
     }
   }, [draft, baptism?.displayMode]);
 
-  const patch = useCallback(async (input: Parameters<typeof patchBaptism>[1]) => {
+  const patch = useCallback(async (input: Parameters<typeof patchBaptism>[1]): Promise<boolean> => {
     const missionId = missionRef.current;
-    if (!missionId) return;
+    if (!missionId) return false;
     try {
       const updated = await patchBaptism(missionId, input);
       if (missionRef.current === missionId) {
         setBaptism(updated);
         setMutationError(null);
       }
+      return true;
     } catch (e: any) {
       if (missionRef.current === missionId) setMutationError(e?.message ?? 'Erreur');
+      return false;
     }
   }, []);
 

@@ -1933,6 +1933,11 @@ export default function MapLibreMap() {
         if (!ok) return;
       }
       cancelDraft();
+      // Les panneaux (top-16 avant, bottom-24 depuis la feuille du bas) collisionneraient
+      // avec la barre de confirmation du brouillon s'ils restaient ouverts pendant le
+      // repositionnement d'un baptême existant.
+      setEditingAxisId(null);
+      setBaptismPanelOpen(false);
       baptismApi.startPlacing(icon);
       setActiveTool('baptism');
     },
@@ -5171,8 +5176,9 @@ export default function MapLibreMap() {
                 type="button"
                 className="w-full rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600"
                 onClick={() => {
-                  void baptismApi.removeAxis(axis.axisId);
-                  setEditingAxisId(null);
+                  void baptismApi.removeAxis(axis.axisId).then((ok) => {
+                    if (ok) setEditingAxisId(null);
+                  });
                 }}
               >
                 Supprimer cet axe
