@@ -130,15 +130,13 @@ type PatchBody = {
 const MAX_BAPTISMS_PER_MISSION = 10;
 
 export async function baptismsRoutes(app: FastifyInstance) {
-  // Migration one-shot : les bases existantes portent encore l'ancien index unique sur
-  // missionId (une seule génération de schéma plus tôt), qui ferait échouer le 2e insert
-  // d'une mission avec E11000 une fois le modèle passé en multi. Best effort, non
-  // bloquant : pas de crash si l'index est déjà absent (nouvelle base) ou si la
-  // resynchro échoue.
-  void BaptismModel.collection
-    .dropIndex('missionId_1')
-    .catch(() => {})
-    .then(() => BaptismModel.syncIndexes().catch(() => {}));
+  // Migration : les bases existantes portent encore l'ancien index unique sur missionId
+  // (une génération de schéma plus tôt), qui ferait échouer le 2e insert d'une mission
+  // avec E11000 une fois le modèle passé en multi. Mongoose 8 diffe le flag unique et
+  // reconverge de lui-même via syncIndexes — pas besoin de dropIndex à chaque boot (ça
+  // redroppait/reconstruisait l'unique index de la collection à chaque redémarrage).
+  // Best effort, non bloquant : pas de crash si la resynchro échoue.
+  void BaptismModel.syncIndexes().catch(() => {});
 
   app.get<{ Params: { missionId: string } }>(
     '/missions/:missionId/baptisms',

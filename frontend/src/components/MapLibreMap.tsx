@@ -222,7 +222,17 @@ const BAPTISM_EMOJI: Record<BaptismIcon, string> = { person: '🚶', car: '🚗'
 // des marqueurs multi-baptêmes, cf. poiMarkersRef) sans recréer le noeud DOM à chaque frame.
 function applyBaptismMarkerContent(el: HTMLDivElement, emoji: string, dashed: boolean, name?: string | null): void {
   el.textContent = emoji;
-  el.style.cssText = `font-size:20px;line-height:1;background:#fff;border-radius:9999px;padding:6px;border:2px ${dashed ? 'dashed #6b7280' : 'solid #111827'};box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer;`;
+  // Propriétés individuelles (pas de cssText) : maplibre positionne le marqueur via un
+  // `transform` inline sur ce même élément, qu'un remplacement complet de cssText sur le
+  // chemin UPDATE effacerait (ne survivrait alors que grâce au setLngLat qui suit).
+  el.style.fontSize = '20px';
+  el.style.lineHeight = '1';
+  el.style.background = '#fff';
+  el.style.borderRadius = '9999px';
+  el.style.padding = '6px';
+  el.style.border = `2px ${dashed ? 'dashed #6b7280' : 'solid #111827'}`;
+  el.style.boxShadow = '0 1px 4px rgba(0,0,0,.3)';
+  el.style.cursor = 'pointer';
   if (name) {
     const pill = document.createElement('div');
     pill.textContent = name;
@@ -1976,6 +1986,10 @@ export default function MapLibreMap() {
   // Un Réessayer manuel après échec rappelle confirmDraft() directement (mode déjà
   // dans `draft`, inchangé depuis), donc pas besoin que cet effet le fasse aussi.
   useEffect(() => {
+    // Un confirmDraft est déjà en vol (double déclenchement de l'effet, ou tap rapide
+    // sur un bouton d'étape 3 avant que React ne re-render en disabled) : ne pas en
+    // lancer un second en concurrence.
+    if (baptismApi.computing) return;
     if (baptismApi.draft?.displayMode) {
       void baptismApi.confirmDraft().then((ok) => {
         if (ok) setActiveTool('none');
@@ -3119,6 +3133,9 @@ export default function MapLibreMap() {
       const baptismId = b.id;
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        // Pendant un placement en cours, un tap sur un baptême déjà enregistré ne doit pas
+        // ouvrir son panneau par-dessus l'assistant (même ancre bottom-24, cf. POI sibling).
+        if (activeToolRef.current === 'baptism') return;
         baptismApi.clearMutationError();
         setBaptismPanel({ kind: 'main', baptismId });
       });

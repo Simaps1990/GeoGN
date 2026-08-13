@@ -211,6 +211,31 @@ function pointAlong(coords: [number, number][], meters: number): [number, number
   return coords[coords.length - 1];
 }
 
+function isRingWay(w: OverpassWay): boolean {
+  const j = w.tags?.junction;
+  return j === 'roundabout' || j === 'circular';
+}
+
+// Rassemble tout l'anneau d'un rond-point par BFS sur les ways junction=roundabout/circular
+// reliées par un nœud partagé : un rond-point OSM est presque toujours scindé en plusieurs ways.
+function gatherRingWays(g: Graph, seedWayIds: Set<number>): Set<number> {
+  const ring = new Set<number>();
+  const queue = [...seedWayIds];
+  while (queue.length) {
+    const id = queue.pop()!;
+    if (ring.has(id)) continue;
+    const rw = g.ways.get(id);
+    if (!rw || !isRingWay(rw)) continue;
+    ring.add(id);
+    for (const n of rw.nodes) {
+      for (const occ of g.occurrences.get(n) ?? []) {
+        if (!ring.has(occ.wayId)) queue.push(occ.wayId);
+      }
+    }
+  }
+  return ring;
+}
+
 export function computeAxesFromWays(
   ways: OverpassWay[],
   point: [number, number],
@@ -234,7 +259,43 @@ export function computeAxesFromWays(
     }
   }
 
-  if (intersectionVertex !== null) {
+  // Rond-point : la way visée est un anneau, ou le point tombe près d'un nœud qui
+  // appartient à un anneau (entrée du rond-point). Dans les deux cas, un axe par
+  // branche accrochée à l'anneau ENTIER — pas les 2 arcs de l'anneau lui-même.
+  const ringSeeds = new Set<number>();
+  if (isRingWay(w)) ringSeeds.add(w.id);
+  for (const { idx } of vertexCandidates) {
+    const c = wayCoord(w, idx);
+    if (distMeters(snap.point, c) > VERTEX_SNAP_EPS_METERS) continue;
+    for (const occ of g.occurrences.get(w.nodes[idx]) ?? []) {
+      const ow = g.ways.get(occ.wayId);
+      if (ow && isRingWay(ow)) ringSeeds.add(ow.id);
+    }
+  }
+  const ringWayIds = ringSeeds.size > 0 ? gatherRingWays(g, ringSeeds) : null;
+
+  if (ringWayIds) {
+    const ringNodeIds = new Set<number>();
+    for (const id of ringWayIds) for (const n of g.ways.get(id)!.nodes) ringNodeIds.add(n);
+    const seen = new Set<string>();
+    for (const nodeId of ringNodeIds) {
+      const occs = g.occurrences.get(nodeId) ?? [];
+      const branchOccs = occs.filter((o) => !ringWayIds.has(o.wayId));
+      if (branchOccs.length === 0) continue;
+      const origin = wayCoord(g.ways.get(occs[0].wayId)!, occs[0].idx);
+      for (const occ of branchOccs) {
+        const ow = g.ways.get(occ.wayId)!;
+        for (const dir of [1, -1] as const) {
+          const ni = occ.idx + dir;
+          if (ni < 0 || ni >= ow.nodes.length) continue;
+          const edgeKey = `${occ.wayId}:${Math.min(occ.idx, ni)}`;
+          if (seen.has(edgeKey)) continue;
+          seen.add(edgeKey);
+          starts.push({ wayId: occ.wayId, fromIdx: occ.idx, dir, startPoint: origin });
+        }
+      }
+    }
+  } else if (intersectionVertex !== null) {
     const nodeId = w.nodes[intersectionVertex];
     const origin = wayCoord(w, intersectionVertex);
     const seen = new Set<string>();

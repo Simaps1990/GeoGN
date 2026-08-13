@@ -115,6 +115,35 @@ test('rond-point : l’axe s’arrête à l’entrée du rond-point', () => {
   assert.deepEqual(east.coords[east.coords.length - 1], [2.001, 48]);
 });
 
+test('rond-point complet : un axe par branche accrochée à l’anneau, pas 2 arcs', () => {
+  const CENTER: [number, number] = [2, 48];
+  const n1 = destinationPoint(CENTER, 0, 20);
+  const n2 = destinationPoint(CENTER, 60, 20);
+  const n3 = destinationPoint(CENTER, 120, 20);
+  const n4 = destinationPoint(CENTER, 180, 20);
+  const n5 = destinationPoint(CENTER, 240, 20);
+  const n6 = destinationPoint(CENTER, 300, 20);
+  const ringTags = { highway: 'residential', junction: 'roundabout' };
+  const HEX: OverpassWay[] = [
+    way(100, [1, 2, 3, 4], [n1, n2, n3, n4], ringTags),
+    way(101, [4, 5, 6, 1], [n4, n5, n6, n1], ringTags),
+    way(1, [1, 11], [n1, destinationPoint(n1, 0, 150)]),
+    way(2, [2, 12], [n2, destinationPoint(n2, 60, 150)]),
+    way(4, [4, 14], [n4, destinationPoint(n4, 180, 150)]),
+    way(5, [5, 15], [n5, destinationPoint(n5, 240, 150)]),
+  ];
+  const { axes, walked } = computeAxesFromWays(HEX, CENTER, 'car');
+  assert.equal(axes.length, 4, 'un axe par branche (4), pas 2 arcs de l’anneau');
+  const expectedBearings = [0, 60, 180, 240];
+  const expectedOrigins = [n1, n2, n4, n5];
+  axes.forEach((a, i) => {
+    const diff = Math.min(Math.abs(a.bearing - expectedBearings[i]), 360 - Math.abs(a.bearing - expectedBearings[i]));
+    assert.ok(diff < 15, `azimut ${a.bearing} attendu ~${expectedBearings[i]}`);
+    assert.deepEqual(a.geometry.coordinates[0], expectedOrigins[i]);
+  });
+  assert.ok(walked.every((w) => w.endType === 'deadend'));
+});
+
 test('filtrage par icône sur un croisement route/sentier', () => {
   const MIX: OverpassWay[] = [
     way(1, [1, 100, 2], [[1.999, 48], [2, 48], [2.001, 48]]),
