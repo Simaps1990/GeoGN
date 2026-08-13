@@ -45,7 +45,7 @@ import { useZoneAssignments } from '../hooks/useZoneAssignments';
 import { isTestTrack, useVehicleTrack } from '../hooks/useVehicleTrack';
 import { useMapDraft } from '../hooks/useMapDraft';
 import { useBaptism } from '../hooks/useBaptism';
-import { AXIS_PALETTE, destinationPoint, type BaptismIcon } from '../lib/baptismAxes';
+import { AXIS_PALETTE, destinationPoint, distMeters, slicePathMeters, bearingAtMeters, type BaptismIcon } from '../lib/baptismAxes';
 import {
   formatElapsedSince,
   formatHoursToHM,
@@ -3058,18 +3058,38 @@ export default function MapLibreMap() {
       }
 
       if (showTion) {
-        const origin: [number, number] = [b.point.lng, b.point.lat];
         for (const a of b.axes) {
-          const tip = destinationPoint(origin, a.bearing, TION_ARROW_LEN_METERS);
-          const labelPoint = destinationPoint(origin, a.bearing, TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS);
+          // La flèche suit la route réelle (les rues courbes ne sont pas des droites) :
+          // on tronque la géométrie de l'axe le long d'elle-même au lieu de tracer un
+          // rayon synthétique origine->destinationPoint.
+          const coords = a.geometry.coordinates;
+          const arrowPath = slicePathMeters(coords, TION_ARROW_LEN_METERS);
+          const tip = arrowPath[arrowPath.length - 1];
+          const tipBearing = bearingAtMeters(coords, TION_ARROW_LEN_METERS);
+
+          // Label après la pointe, toujours sur la route quand il y en a assez (le clamp
+          // de slicePathMeters retombe naturellement sur le bout réel de l'axe tant que
+          // celui-ci dépasse la pointe). Seul cas dégénéré : l'axe est trop court même
+          // pour la pointe (120 m) — pointe et label coïncident alors tous les deux sur
+          // le bout de l'axe. On prolonge alors tout droit depuis la pointe (cap du
+          // dernier segment) sur l'écart habituel, pour que le label ne retombe jamais
+          // sur/avant elle.
+          const labelDist = TION_ARROW_LEN_METERS + TION_LABEL_GAP_METERS;
+          const labelPath = slicePathMeters(coords, labelDist);
+          const naiveLabelPoint = labelPath[labelPath.length - 1];
+          const labelPoint =
+            distMeters(naiveLabelPoint, tip) > 0.5
+              ? naiveLabelPoint
+              : destinationPoint(tip, tipBearing, TION_LABEL_GAP_METERS);
+
           tionFeatures.push({
             type: 'Feature',
             properties: { baptismId: b.id, axisId: a.axisId },
-            geometry: { type: 'LineString', coordinates: [origin, tip] },
+            geometry: { type: 'LineString', coordinates: arrowPath },
           });
           tionFeatures.push({
             type: 'Feature',
-            properties: { baptismId: b.id, axisId: a.axisId, rotation: (a.bearing - 90 + 360) % 360 },
+            properties: { baptismId: b.id, axisId: a.axisId, rotation: (tipBearing - 90 + 360) % 360 },
             geometry: { type: 'Point', coordinates: tip },
           });
           // Label déporté après la pointe (et non dessus) : Point séparé, plus loin sur le

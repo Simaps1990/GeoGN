@@ -195,20 +195,44 @@ function decimateCoords(coords: [number, number][], max: number): [number, numbe
   return out;
 }
 
-function pointAlong(coords: [number, number][], meters: number): [number, number] {
+// Tronque une polyligne à `meters` le long d'elle-même : garde tous les sommets
+// traversés puis interpole le dernier point sur le segment où `meters` tombe.
+// Renvoie le chemin entier (inchangé) si `meters` dépasse sa longueur totale.
+export function slicePathMeters(coords: [number, number][], meters: number): [number, number][] {
+  if (coords.length === 0) return [];
+  const out: [number, number][] = [coords[0]];
   let acc = 0;
   for (let i = 0; i < coords.length - 1; i++) {
     const d = distMeters(coords[i], coords[i + 1]);
     if (acc + d >= meters && d > 0) {
       const t = (meters - acc) / d;
-      return [
+      out.push([
         coords[i][0] + (coords[i + 1][0] - coords[i][0]) * t,
         coords[i][1] + (coords[i + 1][1] - coords[i][1]) * t,
-      ];
+      ]);
+      return out;
     }
     acc += d;
+    out.push(coords[i + 1]);
   }
-  return coords[coords.length - 1];
+  return out;
+}
+
+// Cap local du segment où tombe `meters` le long du chemin ; plafonné au cap du
+// dernier segment si `meters` dépasse la longueur totale.
+export function bearingAtMeters(coords: [number, number][], meters: number): number {
+  let acc = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = distMeters(coords[i], coords[i + 1]);
+    if (acc + d >= meters && d > 0) return bearingDeg(coords[i], coords[i + 1]);
+    acc += d;
+  }
+  return bearingDeg(coords[coords.length - 2], coords[coords.length - 1]);
+}
+
+function pointAlong(coords: [number, number][], meters: number): [number, number] {
+  const sliced = slicePathMeters(coords, meters);
+  return sliced[sliced.length - 1];
 }
 
 function isRingWay(w: OverpassWay): boolean {

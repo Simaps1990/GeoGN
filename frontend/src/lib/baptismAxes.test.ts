@@ -8,6 +8,8 @@ import {
   destinationPoint,
   computeAxesFromWays,
   parseOverpassElements,
+  slicePathMeters,
+  bearingAtMeters,
   type OverpassWay,
 } from './baptismAxes.js';
 
@@ -165,6 +167,38 @@ test('parseOverpassElements rejette un miroir en erreur (remark, elements absent
   assert.deepEqual(parseOverpassElements({ elements: [] }), []);
   const w = way(1, [1, 2], [[2, 48], [2.001, 48]]);
   assert.deepEqual(parseOverpassElements({ elements: [w] }), [w]);
+});
+
+test('slicePathMeters tronque la polyligne le long de la route (avec interpolation)', () => {
+  const origin: [number, number] = [2, 48];
+  const corner = destinationPoint(origin, 90, 100); // 100 m est
+  const end = destinationPoint(corner, 0, 100); // puis 100 m nord
+  const path = [origin, corner, end];
+
+  const sliced = slicePathMeters(path, 150);
+  assert.equal(sliced.length, 3, 'garde le coin + le point interpolé');
+  assert.deepEqual(sliced[1], corner);
+  const expectedEnd = destinationPoint(corner, 0, 50);
+  assert.ok(distMeters(sliced[2], expectedEnd) < 0.5, `bout attendu ~50 m au nord du coin, eu ${JSON.stringify(sliced[2])}`);
+
+  // chemin plus court que la distance demandée : renvoie tout le chemin
+  assert.deepEqual(slicePathMeters(path, 10000), path);
+});
+
+test('bearingAtMeters renvoie le cap local du segment, plafonné au dernier segment', () => {
+  const origin: [number, number] = [2, 48];
+  const corner = destinationPoint(origin, 90, 100);
+  const end = destinationPoint(corner, 0, 100);
+  const path = [origin, corner, end];
+
+  const b50 = bearingAtMeters(path, 50);
+  assert.ok(Math.abs(b50 - 90) < 1, `cap ${b50} attendu ~90 (est)`);
+
+  const b150 = bearingAtMeters(path, 150);
+  assert.ok(Math.abs(b150 - 0) < 1 || Math.abs(b150 - 360) < 1, `cap ${b150} attendu ~0 (nord)`);
+
+  // au-delà de la longueur totale : plafonné au dernier segment
+  assert.equal(bearingAtMeters(path, 10000), b150);
 });
 
 test('way dense (tracé GPS) : la géométrie renvoyée est décimée à 500 sommets max, et la liste d’axes plafonnée à 20', () => {
